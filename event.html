@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Билеты — TRAP HOUSE</title>
+  <meta name="description" content="Покупка билетов на тусовку TRAP HOUSE. Именной QR-проход, вход за секунды." />
+  <meta name="theme-color" content="#070709" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070709'/%3E%3Ctext x='32' y='44' font-family='Arial Black,sans-serif' font-size='30' font-weight='900' fill='%23c8ff00' text-anchor='middle'%3ETH%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="logo" href="/">TRAP<span class="l2">HOUSE</span></a>
+      <nav class="top-nav" aria-label="Основная навигация">
+        <a href="/#afisha">Афиша</a>
+        <a href="/#faq">FAQ</a>
+        <a href="/#contacts">Контакты</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="event-hero section">
+    <div class="container">
+      <p style="margin-bottom: 18px;"><a class="muted" href="/#afisha" style="text-decoration: none;">← Вся афиша</a></p>
+
+      <div class="eh-grid" id="event-root" hidden>
+        <div class="eh-poster" id="eh-poster">
+          <span class="ec-word" id="eh-word"></span>
+          <div class="ec-datebox"><b id="eh-day">—</b><small id="eh-mon"></small></div>
+          <div class="ec-badges"><span class="badge badge-age" id="eh-age"></span></div>
+        </div>
+        <div>
+          <h1 class="eh-title" id="eh-title"></h1>
+          <div class="lineup" id="eh-lineup"></div>
+          <p class="muted" id="eh-descr" style="max-width: 560px;"></p>
+          <div class="eh-meta-list" id="eh-meta"></div>
+
+          <div class="waves-panel" id="ev-waves">
+            <div class="wp-head">
+              <span class="wp-event">Волны цен</span>
+              <span class="wp-going" id="ev-going"></span>
+            </div>
+            <div id="ev-wp-rows"></div>
+          </div>
+
+          <div style="margin-top: 22px;">
+            <button class="btn btn-acid btn-block" id="buy-open" type="button">Купить билет</button>
+            <p class="form-note" style="margin-top: 10px;">Оплата онлайн · именной QR каждому гостю · вход за секунды</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="event-missing" hidden>
+        <h1 class="eh-title">Тусовка не найдена</h1>
+        <p class="muted">Возможно, ссылка устарела. <a href="/#afisha" class="acid">Смотри актуальную афишу</a>.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Чекаут-шторка -->
+  <div class="sheet-backdrop" id="sheet-backdrop"></div>
+  <aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Покупка билетов">
+    <button class="sh-close" id="sheet-close" type="button" aria-label="Закрыть">×</button>
+
+    <!-- Шаг: форма -->
+    <div id="pane-form">
+      <h3 id="sh-title">Билеты</h3>
+
+      <div class="field">
+        <label>Сколько билетов</label>
+        <div class="stepper">
+          <button type="button" id="qty-minus" aria-label="Меньше">−</button>
+          <span class="st-val" id="qty-val">1</span>
+          <button type="button" id="qty-plus" aria-label="Больше">+</button>
+        </div>
+      </div>
+
+      <div id="attendees"></div>
+
+      <div class="field">
+        <label for="f-phone">Телефон для связи</label>
+        <input type="tel" id="f-phone" placeholder="+7 912 000-00-00" autocomplete="tel" />
+        <div class="err" id="err-phone">Нужен телефон в формате +7…</div>
+      </div>
+      <div class="field">
+        <label for="f-tg">Telegram (необязательно)</label>
+        <input type="text" id="f-tg" placeholder="@username — пришлём билеты туда" autocomplete="off" />
+      </div>
+
+      <!-- honeypot: люди это поле не видят -->
+      <div style="position: absolute; left: -9999px;" aria-hidden="true">
+        <input type="text" id="f-website" tabindex="-1" autocomplete="off" />
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="f-consent" />
+        <span>Согласен на обработку персональных данных — <a href="/privacy.html" target="_blank" rel="noopener">политика конфиденциальности</a></span>
+      </label>
+      <div class="err" id="err-consent" style="margin-top: -8px; margin-bottom: 10px;">Без согласия не сможем оформить билет</div>
+
+      <div class="fallback-box hidden" id="wave-note"></div>
+
+      <div class="order-total">
+        <span class="ot-label" id="ot-label">1 билет</span>
+        <span class="ot-sum" id="ot-sum">— ₽</span>
+      </div>
+      <button class="btn btn-acid btn-block" id="submit-order" type="button" style="margin-top: 14px;">Оплатить</button>
+      <p class="form-note" style="margin-top: 10px;">Нажимая «Оплатить», ты подтверждаешь возраст и правила тусовки.</p>
+    </div>
+
+    <!-- Шаг: успех -->
+    <div id="pane-success" class="hidden">
+      <h3>Билеты у тебя</h3>
+      <div class="success-note">Оплата прошла. Каждому гостю — свой именной QR: открой билет и отправь его владельцу.</div>
+      <div class="success-tickets" id="success-list"></div>
+      <p class="form-note">Совет: сохрани скриншот билета — QR сработает даже без интернета на входе.</p>
+      <button class="btn btn-ghost btn-block" id="success-close" type="button">Готово</button>
+    </div>
+
+    <!-- Шаг: фолбэк (онлайн-оформление недоступно) -->
+    <div id="pane-fallback" class="hidden">
+      <h3>Оформим вручную</h3>
+      <div class="fallback-box">
+        Онлайн-оплата сейчас недоступна, но билеты не убегут: напиши нам в Telegram —
+        заказ уже подставлен в сообщение, останется нажать «Отправить».
+        <a class="btn btn-acid btn-block" id="fallback-tg" href="#" target="_blank" rel="noopener">Написать в Telegram</a>
+      </div>
+      <button class="btn btn-ghost btn-block" id="fallback-close" type="button" style="margin-top: 12px;">Закрыть</button>
+    </div>
+  </aside>
+
+  <div class="sticky-cta" id="sticky-cta">
+    <button class="btn btn-acid" id="sticky-buy" type="button">Купить билет</button>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container f-grid">
+      <div class="f-note">TRAP HOUSE · 18+ по паспорту · <a href="/privacy.html">политика конфиденциальности</a></div>
+      <div class="dev-sign">Дизайн и разработка — <a href="https://maxim-batutin.ru" target="_blank" rel="noopener">maxim-batutin.ru</a></div>
+    </div>
+  </footer>
+
+  <script type="module" src="/assets/event-page.js"></script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Панель — ECHO</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0d0805" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d0805'/%3E%3Ctext x='32' y='45' font-family='Arial Black,sans-serif' font-size='26' font-weight='900' fill='%23ff9e1b' text-anchor='middle'%3EEX%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <header class="site-header no-print">
+    <div class="container">
+      <a class="logo" href="/">ECHO</a>
+      <span class="muted" style="font-size: 0.85rem;">панель организатора</span>
+    </div>
+  </header>
+
+  <main class="admin-wrap">
+    <div class="container">
+      <!-- PIN-гейт -->
+      <div id="gate" class="pin-panel" style="margin-top: 60px;" hidden>
+        <div class="guest-brand" style="text-align: center; margin-bottom: 16px;"><span class="l2">ECHO</span></div>
+        <input type="password" id="gate-key" placeholder="Ключ администратора" autocomplete="off" />
+        <input type="text" id="gate-name" placeholder="Твоё имя" autocomplete="off" />
+        <button class="btn btn-acid btn-block" id="gate-go" type="button">Войти</button>
+        <p class="form-note" id="gate-err" style="color: var(--danger); display: none; margin-top: 10px;">Ключ не подошёл</p>
+      </div>
+
+      <!-- Дашборд -->
+      <div id="dash" hidden>
+        <!-- Выбор ивента -->
+        <div class="admin-toolbar no-print">
+          <select class="admin-select" id="ev-select" aria-label="Выбор тусовки"></select>
+          <button class="btn btn-ghost" id="btn-offline" type="button">Скачать офлайн-список</button>
+          <button class="btn btn-ghost" id="btn-print" type="button">Версия для печати</button>
+          <span class="muted" id="offline-note" style="font-size: 0.82rem;"></span>
+        </div>
+
+        <!-- Ключевые цифры -->
+        <div class="tiles" id="tiles"></div>
+
+        <!-- Касса -->
+        <div class="admin-panel no-print" id="walkin-panel">
+          <div class="ap-kicker">Касса на входе</div>
+          <h3>Добавить гостя вручную</h3>
+          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
+            Гость платит на дверях — оформи билет здесь: квота волны спишется,
+            продажа попадёт в статистику как «касса».
+          </p>
+          <div class="walkin-form">
+            <div class="field" style="margin: 0;">
+              <input type="text" id="wi-name" placeholder="Имя и фамилия гостя" autocomplete="off" />
+              <div class="err" id="err-wi-name">Как зовут гостя?</div>
+            </div>
+            <select class="admin-select" id="wi-wave" aria-label="Волна/цена"></select>
+            <label class="check" style="margin: 0;">
+              <input type="checkbox" id="wi-checkin" checked />
+              <span>сразу впустить</span>
+            </label>
+            <button class="btn btn-acid" id="wi-add" type="button">Оформить</button>
+          </div>
+          <div class="scan-feed" id="walkin-log" style="margin-top: 12px;"></div>
+        </div>
+
+        <!-- Продажи по дням -->
+        <div class="admin-panel" id="sales-panel" hidden>
+          <div class="ap-kicker">Динамика</div>
+          <h3>Продажи по дням (последние 14)</h3>
+          <div style="overflow-x: auto;">
+            <table class="admin-table" id="sales-table"></table>
+          </div>
+        </div>
+
+        <!-- Волны -->
+        <div class="admin-panel">
+          <div class="ap-kicker">Ценообразование</div>
+          <h3>Волны</h3>
+          <div style="overflow-x: auto;">
+            <table class="admin-table" id="waves-table"></table>
+          </div>
+        </div>
+
+        <!-- Кривая входа -->
+        <div class="admin-panel" id="curve-section" hidden>
+          <div class="ap-kicker">Вход</div>
+          <h3>Кривая входа (по 10 минут)</h3>
+          <div style="overflow-x: auto;">
+            <table class="admin-table" id="curve-table"></table>
+          </div>
+        </div>
+
+        <!-- Сканы -->
+        <div class="admin-panel no-print">
+          <div class="ap-kicker">Живая лента</div>
+          <h3>Последние сканы</h3>
+          <div class="scan-feed" id="scan-feed"><p class="muted">Пока пусто</p></div>
+        </div>
+
+        <!-- Сервис -->
+        <div class="admin-panel no-print">
+          <div class="ap-kicker">Сервис</div>
+          <h3>Обслуживание</h3>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+            <button class="btn btn-acid" id="svc-seed" type="button">Инициализировать БД</button>
+            <label class="check" style="margin: 0;">
+              <input type="checkbox" id="svc-demo" checked />
+              <span>посеять демо-продажи (для показа)</span>
+            </label>
+          </div>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+            <button class="btn btn-ghost" id="svc-selftest" type="button">Боевой самотест</button>
+            <span class="muted" id="svc-note" style="font-size: 0.84rem;"></span>
+          </div>
+          <div class="scan-feed" id="selftest-list" style="margin-top: 12px;"></div>
+        </div>
+
+        <!-- Печатный список гостей -->
+        <div class="admin-panel" id="print-list" hidden>
+          <h3>Список гостей</h3>
+          <table class="admin-table" id="guests-table"></table>
+        </div>
+
+        <p class="form-note no-print" id="db-missing" style="display: none;">
+          БД пока не отвечает: подключи Neon Postgres в Vercel (Storage → Neon), сделай Redeploy
+          и нажми «Инициализировать БД» в блоке «Сервис». Подробно — BRIEF.md, раздел 7.
+        </p>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/assets/admin-page.js"></script>
+</body>
+</html>

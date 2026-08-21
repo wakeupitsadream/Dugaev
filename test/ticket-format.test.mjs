@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   plural, dateBox, fmtWhen, fmtTicketWhen, fmtTime,
   parseToken, formatTicketCode, normalizeManualId, normalizePhone, validateAttendees,
-  stripRuPhone, formatRuPhoneDigits,
+  stripRuPhone, formatRuPhoneDigits, detectContactMode,
 } from '../assets/ticket-format.js';
 
 test('plural склоняет по-русски', () => {
@@ -71,6 +71,11 @@ test('formatRuPhoneDigits: маска 912 345-67-89, частичный ввод
   assert.equal(formatRuPhoneDigits('91234'), '912 34');
   assert.equal(formatRuPhoneDigits('9123456'), '912 345-6');
   assert.equal(formatRuPhoneDigits(''), '');
+});
+
+test('detectContactMode: цифры и + — телефон, @ и буквы — ник', () => {
+  for (const v of ['9', '8912', '+7 912', '79123456789']) assert.equal(detectContactMode(v), 'phone', v);
+  for (const v of ['@nick', 'nick', 'ivan_petrov', '', '  ']) assert.equal(detectContactMode(v), 'free', v);
 });
 
 test('маска и normalizePhone согласованы', () => {

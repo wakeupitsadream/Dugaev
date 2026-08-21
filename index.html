@@ -211,7 +211,10 @@
             <div class="err" id="err-cf-city">Напиши город</div>
           </div>
           <div class="field">
-            <input type="text" id="cf-contact" placeholder="Телега или телефон" autocomplete="off" aria-label="Телега или телефон" />
+            <div class="phone-wrap">
+              <span class="phone-prefix hidden" id="cf-prefix" aria-hidden="true">+7</span>
+              <input type="text" id="cf-contact" placeholder="@телеграм или телефон" autocomplete="off" aria-label="Телеграм или телефон" />
+            </div>
             <div class="err" id="err-cf-contact">Оставь телегу или телефон — позовём первым</div>
           </div>
           <div style="position: absolute; left: -9999px;" aria-hidden="true">

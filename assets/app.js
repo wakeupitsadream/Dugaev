@@ -6,7 +6,7 @@ import { FACTS, GALLERY, SHOW_PROGRAM } from './data/events.js';
 import { loadEvents, upcoming, pastEvents, esc } from './events-load.js';
 import { waveStates, fromPrice, totalSold } from './waves.js';
 import { goingCount } from './social.js';
-import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
+import { plural, dateBox, fmtWhen, ageLabel, detectContactMode, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
 import { faceControl, shareText } from './facecontrol.js';
 
 const $ = (id) => document.getElementById(id);
@@ -280,14 +280,44 @@ function initCityForm() {
   $('cf-consent').onchange = (e) => {
     if (e.target.checked) e.target.closest('.check')?.classList.remove('is-error');
   };
+
+  // «@телеграм или телефон»: начал с цифры/+ — поле превращается в телефонное
+  // с фиксированным «+7» и маской; @ник остаётся свободным текстом
+  const contactState = { mode: 'free', digits: '' };
+  const contactInput = $('cf-contact');
+  contactInput.oninput = (e) => {
+    const raw = e.target.value;
+    if (contactState.mode === 'free' && detectContactMode(raw) === 'phone') contactState.mode = 'phone';
+    if (contactState.mode === 'phone') {
+      if (!raw.trim()) {
+        contactState.mode = 'free';
+        contactState.digits = '';
+        $('cf-prefix').classList.add('hidden');
+        e.target.removeAttribute('inputmode');
+        e.target.value = '';
+      } else {
+        contactState.digits = stripRuPhone(raw);
+        $('cf-prefix').classList.remove('hidden');
+        e.target.setAttribute('inputmode', 'numeric');
+        e.target.value = formatRuPhoneDigits(contactState.digits);
+      }
+    }
+    toggleErr('cf-contact', false);
+  };
+
   const form = $('city-form');
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     const city = $('cf-city').value.trim();
-    const contact = $('cf-contact').value.trim();
+    const contact = contactState.mode === 'phone'
+      ? (contactState.digits.length === 10 ? '+7' + contactState.digits : '')
+      : contactInput.value.trim();
     const consent = $('cf-consent').checked;
     let bad = false;
     toggleErr('cf-city', city.length < 2) && (bad = true);
+    $('err-cf-contact').textContent = contactState.mode === 'phone'
+      ? 'Укажи номер телефона'
+      : 'Оставь телегу или телефон — позовём первым';
     toggleErr('cf-contact', contact.length < 2) && (bad = true);
     toggleErr('cf-consent', !consent) && (bad = true);
     $('cf-consent').closest('.check')?.classList.toggle('is-error', !consent);

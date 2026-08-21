@@ -95,6 +95,25 @@ export function normalizeManualId(raw) {
 }
 
 // ---- Телефон (РФ) ----
+// Маска для поля с фиксированным префиксом «+7»: в инпуте живут только
+// 10 цифр номера. Привычные «8…» и вставленный «+7…» приводятся сами.
+export function stripRuPhone(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d[0] === '8') d = d.slice(1);
+  else if (d[0] === '7' && d.length > 10) d = d.slice(1);
+  return d.slice(0, 10);
+}
+
+// «9123456789» → «912 345-67-89» (частичный ввод форматируется по мере набора)
+export function formatRuPhoneDigits(digits) {
+  const s = String(digits || '').replace(/\D/g, '').slice(0, 10);
+  let out = s.slice(0, 3);
+  if (s.length > 3) out += ' ' + s.slice(3, 6);
+  if (s.length > 6) out += '-' + s.slice(6, 8);
+  if (s.length > 8) out += '-' + s.slice(8, 10);
+  return out;
+}
+
 export function normalizePhone(raw) {
   if (typeof raw !== 'string') return null;
   const digits = raw.replace(/\D/g, '');

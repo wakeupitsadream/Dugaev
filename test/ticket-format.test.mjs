@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   plural, dateBox, fmtWhen, fmtTicketWhen, fmtTime,
   parseToken, formatTicketCode, normalizeManualId, normalizePhone, validateAttendees,
+  stripRuPhone, formatRuPhoneDigits,
 } from '../assets/ticket-format.js';
 
 test('plural склоняет по-русски', () => {
@@ -52,6 +53,28 @@ test('normalizePhone нормализует форматы РФ', () => {
   assert.equal(normalizePhone('9123456789'), '+79123456789');
   assert.equal(normalizePhone('12345'), null);
   assert.equal(normalizePhone(''), null);
+});
+
+test('stripRuPhone: только 10 цифр после фиксированного +7', () => {
+  assert.equal(stripRuPhone('9123456789'), '9123456789');
+  assert.equal(stripRuPhone('912 345-67-89'), '9123456789');
+  assert.equal(stripRuPhone('89123456789'), '9123456789');   // привычная 8 срезается сразу
+  assert.equal(stripRuPhone('8912'), '912');
+  assert.equal(stripRuPhone('+7 912 345 67 89'), '9123456789'); // вставка полного номера
+  assert.equal(stripRuPhone('791234567891234'), '9123456789'); // лишнее отрезается
+  assert.equal(stripRuPhone(''), '');
+});
+
+test('formatRuPhoneDigits: маска 912 345-67-89, частичный ввод не ломается', () => {
+  assert.equal(formatRuPhoneDigits('9123456789'), '912 345-67-89');
+  assert.equal(formatRuPhoneDigits('912'), '912');
+  assert.equal(formatRuPhoneDigits('91234'), '912 34');
+  assert.equal(formatRuPhoneDigits('9123456'), '912 345-6');
+  assert.equal(formatRuPhoneDigits(''), '');
+});
+
+test('маска и normalizePhone согласованы', () => {
+  assert.equal(normalizePhone('+7' + stripRuPhone('89123456789')), '+79123456789');
 });
 
 test('validateAttendees: имена и запрет minor на 18+', () => {

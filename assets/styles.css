@@ -532,7 +532,31 @@ body::after {
 }
 .stepper button:disabled { opacity: 0.35; }
 .stepper .st-val { font-family: var(--font-display); font-weight: 700; font-size: 1.3rem; min-width: 40px; text-align: center; }
-.check { display: flex; gap: 10px; align-items: flex-start; font-size: 0.84rem; color: var(--muted); margin: 16px 0; cursor: pointer; }
+.check {
+  display: flex; gap: 10px; align-items: flex-start; font-size: 0.84rem; color: var(--muted);
+  margin: 16px 0; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--radius-s); padding: 10px;
+  margin-inline: -10px; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.check.is-error { border-color: var(--danger); background: var(--danger-bg); }
+.check.is-error span { color: var(--text); }
+
+/* поле телефона с фиксированным префиксом +7 */
+.phone-wrap {
+  display: flex; align-items: center;
+  background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--radius-s);
+  transition: border-color 0.15s ease;
+}
+.phone-wrap:focus-within { border-color: var(--acid); }
+.field.is-error .phone-wrap { border-color: var(--danger); }
+.phone-prefix {
+  font-family: var(--font-display); font-weight: 700; font-size: 1rem; color: var(--text);
+  padding: 13px 0 13px 14px; user-select: none;
+}
+.phone-wrap input {
+  flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
+  color: var(--text); font-family: inherit; font-size: 1rem; padding: 13px 14px 13px 8px;
+}
 .check input { width: 18px; height: 18px; accent-color: var(--acid); margin-top: 1px; flex: 0 0 auto; }
 .check a { color: var(--acid); }
 .minor-toggle { display: flex; gap: 10px; align-items: center; font-size: 0.84rem; color: var(--muted); cursor: pointer; margin-top: 6px; }
@@ -635,10 +659,29 @@ body::after {
    Админка
    ============================================================ */
 .admin-wrap { padding: calc(var(--header-h) + 20px) 0 60px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 26px; }
-.tile { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
-.tile .t-num { font-family: var(--font-display); font-weight: 900; font-size: 1.7rem; color: var(--acid); font-variant-numeric: tabular-nums; }
+.admin-toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+.admin-panel {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px; margin-bottom: 18px;
+}
+.admin-panel h3 { margin: 2px 0 6px; text-transform: uppercase; font-size: 1rem; }
+.ap-kicker {
+  font-family: var(--font-display); font-weight: 400; font-size: 0.62rem;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--acid);
+}
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.tile { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.tile .t-num { font-family: var(--font-display); font-weight: 900; font-size: 1.65rem; color: var(--acid); font-variant-numeric: tabular-nums; line-height: 1.15; }
 .tile .t-label { color: var(--muted); font-size: 0.8rem; }
+.tile .t-sub { color: var(--dim); font-size: 0.72rem; margin-top: 4px; }
+.walkin-form { display: grid; grid-template-columns: 1fr; gap: 10px; max-width: 520px; }
+.walkin-form input[type='text'] {
+  width: 100%; background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--radius-s);
+  color: var(--text); font-family: inherit; font-size: 1rem; padding: 12px 14px; outline: none;
+}
+.walkin-form input[type='text']:focus { border-color: var(--acid); }
+.bar-cell { min-width: 120px; }
+.bar-cell i { display: block; height: 9px; border-radius: 5px; background: var(--acid); }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .admin-table th { text-align: left; color: var(--dim); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .admin-table td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }

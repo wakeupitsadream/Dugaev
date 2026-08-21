@@ -30,7 +30,7 @@ export default async function handler(req, res) {
       return ok(res, { events: (rows.rows || rows) });
     }
 
-    const [summary, byWave, curve, scans] = await Promise.all([
+    const [summary, byWave, curve, scans, byDay, byProvider] = await Promise.all([
       sql.query(
         `SELECT count(t.id) FILTER (WHERE t.status <> 'refunded')::int AS sold,
                 count(t.id) FILTER (WHERE t.checked_in_at IS NOT NULL)::int AS checked_in,
@@ -59,6 +59,20 @@ export default async function handler(req, res) {
          ORDER BY s.at DESC LIMIT 25`,
         [eventId]
       ),
+      sql.query(
+        `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d,
+                sum(qty)::int AS n, sum(amount_rub)::int AS rub
+         FROM orders
+         WHERE event_id = $1 AND status = 'paid' AND created_at > now() - interval '14 days'
+         GROUP BY 1 ORDER BY 1`,
+        [eventId]
+      ),
+      sql.query(
+        `SELECT provider, count(*)::int AS orders, sum(qty)::int AS n, sum(amount_rub)::int AS rub
+         FROM orders WHERE event_id = $1 AND status = 'paid'
+         GROUP BY provider`,
+        [eventId]
+      ),
     ]);
 
     const out = {
@@ -68,6 +82,10 @@ export default async function handler(req, res) {
       checkin_curve: (curve.rows || curve).map((c) => ({
         t: new Date(c.t).toISOString(),
         n: Number(c.n),
+      })),
+      sales_by_day: (byDay.rows || byDay).map((r) => ({ d: r.d, n: Number(r.n), rub: Number(r.rub) })),
+      by_provider: (byProvider.rows || byProvider).map((r) => ({
+        provider: r.provider, orders: Number(r.orders), n: Number(r.n), rub: Number(r.rub),
       })),
       last_scans: (scans.rows || scans).map((s) => ({
         result: s.result,

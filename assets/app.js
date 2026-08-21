@@ -277,6 +277,9 @@ function initCityForm() {
     };
   });
 
+  $('cf-consent').onchange = (e) => {
+    if (e.target.checked) e.target.closest('.check')?.classList.remove('is-error');
+  };
   const form = $('city-form');
   form.onsubmit = async (ev) => {
     ev.preventDefault();
@@ -287,6 +290,7 @@ function initCityForm() {
     toggleErr('cf-city', city.length < 2) && (bad = true);
     toggleErr('cf-contact', contact.length < 2) && (bad = true);
     toggleErr('cf-consent', !consent) && (bad = true);
+    $('cf-consent').closest('.check')?.classList.toggle('is-error', !consent);
     if (bad || done.has(city)) {
       if (done.has(city)) $('cf-note').textContent = `${city} — мы уже здесь! Следи за афишей выше.`;
       return;

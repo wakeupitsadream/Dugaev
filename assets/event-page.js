@@ -4,7 +4,7 @@ import { SITE } from './data/config.js';
 import { loadEvents, esc } from './events-load.js';
 import { waveStates, activeWave, totalSold } from './waves.js';
 import { goingCount } from './social.js';
-import { plural, dateBox, fmtWhen, ageLabel, normalizePhone } from './ticket-format.js';
+import { plural, dateBox, fmtWhen, ageLabel, normalizePhone, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
 import { handlePayment } from './payment.js';
 
 const $ = (id) => document.getElementById(id);
@@ -161,9 +161,18 @@ function resetAfterSuccess() {
 function bindForm() {
   $('qty-minus').onclick = () => setQty(store.qty - 1);
   $('qty-plus').onclick = () => setQty(store.qty + 1);
-  $('f-phone').oninput = (e) => { store.phone = e.target.value; clearErr('phone'); };
+  // фиксированный «+7»: в поле живут только 10 цифр, форматируются на лету
+  $('f-phone').oninput = (e) => {
+    store.phone = stripRuPhone(e.target.value);
+    e.target.value = formatRuPhoneDigits(store.phone);
+    clearErr('phone');
+  };
   $('f-tg').oninput = (e) => { store.tg = e.target.value; };
-  $('f-consent').onchange = (e) => { store.consent = e.target.checked; clearErr('consent'); };
+  $('f-consent').onchange = (e) => {
+    store.consent = e.target.checked;
+    clearErr('consent');
+    e.target.closest('.check')?.classList.remove('is-error');
+  };
   $('submit-order').onclick = submitOrder;
 }
 
@@ -241,15 +250,18 @@ function validate() {
       firstBad = firstBad || $(`att-${i}`);
     }
   });
-  if (!normalizePhone(store.phone)) {
+  if (!normalizePhone('+7' + store.phone)) {
     showFieldErr($('f-phone'), $('err-phone'));
     firstBad = firstBad || $('f-phone');
   }
+  const consentBox = $('f-consent').closest('.check');
   if (!store.consent) {
     $('err-consent').style.display = 'block';
+    consentBox?.classList.add('is-error');
     firstBad = firstBad || $('f-consent');
   } else {
     $('err-consent').style.display = 'none';
+    consentBox?.classList.remove('is-error');
   }
   if (firstBad) firstBad.focus();
   return !firstBad;
@@ -267,7 +279,7 @@ async function submitOrder() {
     wave_no: store.wave.waveNo,
     buyer: {
       name: store.attendees[0].name.trim(),
-      phone: store.phone,
+      phone: '+7' + store.phone,
       tg: store.tg.trim(),
     },
     attendees: store.attendees.map((a) => ({ name: a.name.trim(), minor: a.minor })),
@@ -370,7 +382,7 @@ function showFallback() {
   const names = store.attendees.map((a) => a.name.trim()).filter(Boolean).join(', ');
   const text =
     `Привет! Хочу ${store.qty} ${plural(store.qty, 'билет', 'билета', 'билетов')} на ${e.title} (${fmtWhen(e.startsAt)}). ` +
-    `Имена: ${names}. Телефон: ${store.phone}. Онлайн-оплата не сработала — оформите вручную?`;
+    `Имена: ${names}. Телефон: +7${store.phone}. Онлайн-оплата не сработала — оформите вручную?`;
   $('fallback-tg').href = `https://t.me/${SITE.tgManager}?text=${encodeURIComponent(text)}`;
   showPane('fallback');
 }

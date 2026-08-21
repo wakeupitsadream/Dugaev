@@ -86,7 +86,7 @@ export default async function handler(req, res) {
     try {
       const rows = await sql.query(ORDER_SQL, [
         qty, eventId, waveNo, oid, buyerName, phone, buyerTg,
-        utm ? JSON.stringify(utm) : null, tids, names, ages,
+        utm ? JSON.stringify(utm) : null, tids, names, ages, 'stub',
       ]);
       const r = (rows.rows || rows)[0] || {};
       priceRub = r.price_rub === null ? null : Number(r.price_rub);

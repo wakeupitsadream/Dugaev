@@ -30,6 +30,22 @@
 
       <!-- Дашборд -->
       <div id="dash" hidden>
+        <div class="admin-section no-print">
+          <h3 style="margin-bottom: 12px;">Сервис</h3>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <button class="btn btn-acid" id="svc-seed" type="button">Инициализировать БД</button>
+            <label class="check" style="margin: 0;">
+              <input type="checkbox" id="svc-demo" checked />
+              <span>посеять демо-продажи (для показа)</span>
+            </label>
+          </div>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+            <button class="btn btn-ghost" id="svc-selftest" type="button">Боевой самотест</button>
+            <span class="muted" id="svc-note" style="font-size: 0.84rem;"></span>
+          </div>
+          <div class="scan-feed" id="selftest-list" style="margin-top: 12px;"></div>
+        </div>
+
         <div class="admin-section no-print" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
           <select class="admin-select" id="ev-select" aria-label="Выбор тусовки"></select>
           <button class="btn btn-ghost" id="btn-offline" type="button">Скачать офлайн-список</button>
@@ -65,7 +81,8 @@
         </div>
 
         <p class="form-note no-print" id="db-missing" style="display: none;">
-          БД не настроена: панель заработает после привязки Neon Postgres и запуска /api/seed — см. BRIEF.md.
+          БД пока не отвечает: подключи Neon Postgres в Vercel (Storage → Neon), сделай Redeploy
+          и нажми «Инициализировать БД» выше. Подробно — BRIEF.md, раздел 7.
         </p>
       </div>
     </div>

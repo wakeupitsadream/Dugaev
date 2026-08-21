@@ -123,6 +123,7 @@ function bindSheet() {
   const open = () => {
     if (!store.wave) return;
     document.body.classList.add('sheet-open');
+    if (SITE.paymentDemo) $('demo-pay-note').classList.remove('hidden');
     renderAttendees();
     updateTotal();
   };
@@ -211,7 +212,11 @@ function updateTotal() {
   const w = store.wave;
   $('ot-label').textContent = `${store.qty} ${plural(store.qty, 'билет', 'билета', 'билетов')}${w ? ` · ${w.name.toLowerCase()}` : ''}`;
   $('ot-sum').textContent = w ? `${w.priceRub * store.qty} ₽` : '— ₽';
-  $('submit-order').textContent = w ? `Оплатить ${w.priceRub * store.qty} ₽` : 'Билетов нет';
+  $('submit-order').textContent = !w
+    ? 'Билетов нет'
+    : SITE.paymentDemo
+      ? `Получить билеты · ${w.priceRub * store.qty} ₽ (демо)`
+      : `Оплатить ${w.priceRub * store.qty} ₽`;
   $('submit-order').disabled = !w || store.sending;
   $('sh-title').textContent = store.event ? `Билеты · ${store.event.title}` : 'Билеты';
 }
@@ -344,6 +349,10 @@ function alertNote(text) {
 
 function showSuccess(j) {
   store.showingDone = true;
+  if (SITE.paymentDemo) {
+    document.querySelector('#pane-success .success-note').textContent =
+      'Демо-покупка прошла (деньги не списывались). Каждому гостю — свой именной QR: открой билет и отправь его владельцу.';
+  }
   $('success-list').innerHTML = (j.tickets || [])
     .map(
       (t) => `

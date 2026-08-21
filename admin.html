@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Панель — TRAP HOUSE</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#070709" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070709'/%3E%3Ctext x='32' y='44' font-family='Arial Black,sans-serif' font-size='30' font-weight='900' fill='%23c8ff00' text-anchor='middle'%3ETH%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <header class="site-header no-print">
+    <div class="container">
+      <a class="logo" href="/">TRAP<span class="l2">HOUSE</span></a>
+      <span class="muted" style="font-size: 0.85rem;">панель организатора</span>
+    </div>
+  </header>
+
+  <main class="admin-wrap">
+    <div class="container">
+      <!-- PIN-гейт -->
+      <div id="gate" class="pin-panel" style="margin-top: 60px;" hidden>
+        <div class="guest-brand" style="text-align: center; margin-bottom: 16px;">TRAP<span class="l2">HOUSE</span></div>
+        <input type="password" id="gate-key" placeholder="Ключ администратора" autocomplete="off" />
+        <input type="text" id="gate-name" placeholder="Твоё имя" autocomplete="off" />
+        <button class="btn btn-acid btn-block" id="gate-go" type="button">Войти</button>
+        <p class="form-note" id="gate-err" style="color: var(--danger); display: none; margin-top: 10px;">Ключ не подошёл</p>
+      </div>
+
+      <!-- Дашборд -->
+      <div id="dash" hidden>
+        <div class="admin-section no-print" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+          <select class="admin-select" id="ev-select" aria-label="Выбор тусовки"></select>
+          <button class="btn btn-ghost" id="btn-offline" type="button">Скачать офлайн-список</button>
+          <button class="btn btn-ghost" id="btn-print" type="button">Версия для печати</button>
+          <span class="muted" id="offline-note" style="font-size: 0.82rem;"></span>
+        </div>
+
+        <div class="tiles" id="tiles"></div>
+
+        <div class="admin-section">
+          <h3 style="margin-bottom: 12px;">Волны</h3>
+          <div style="overflow-x: auto;">
+            <table class="admin-table" id="waves-table"></table>
+          </div>
+        </div>
+
+        <div class="admin-section" id="curve-section" hidden>
+          <h3 style="margin-bottom: 12px;">Кривая входа (по 10 минут)</h3>
+          <div style="overflow-x: auto;">
+            <table class="admin-table" id="curve-table"></table>
+          </div>
+        </div>
+
+        <div class="admin-section no-print">
+          <h3 style="margin-bottom: 12px;">Последние сканы</h3>
+          <div class="scan-feed" id="scan-feed"><p class="muted">Пока пусто</p></div>
+        </div>
+
+        <!-- Печатный список гостей -->
+        <div class="admin-section" id="print-list" hidden>
+          <h3>Список гостей</h3>
+          <table class="admin-table" id="guests-table"></table>
+        </div>
+
+        <p class="form-note no-print" id="db-missing" style="display: none;">
+          БД не настроена: панель заработает после привязки Neon Postgres и запуска /api/seed — см. BRIEF.md.
+        </p>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/assets/admin-page.js"></script>
+</body>
+</html>

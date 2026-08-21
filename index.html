@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TRAP HOUSE — вечеринки нового поколения. 14+, без алкоголя. Оренбург · Магнитогорск</title>
+  <meta name="description" content="TRAP HOUSE — дневные вечеринки 14+ без алкоголя: диджеи, батлы, съёмка клипа и билеты онлайн с именным QR-проходом. Оренбург и Магнитогорск. Домой до темноты." />
+  <meta property="og:title" content="TRAP HOUSE — вечеринки нового поколения" />
+  <meta property="og:description" content="14+, без алкоголя, домой до темноты. Билеты онлайн с QR-проходом за секунды." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="/assets/photos/crowd-red.jpg" />
+  <meta name="theme-color" content="#070709" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070709'/%3E%3Ctext x='32' y='44' font-family='Arial Black,sans-serif' font-size='30' font-weight='900' fill='%23ccff00' text-anchor='middle'%3ETH%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="logo" href="/">TRAP<span class="l2">HOUSE</span></a>
+      <nav class="top-nav" aria-label="Основная навигация">
+        <a href="#afisha">Афиша</a>
+        <a href="#program">Шоу</a>
+        <a href="#face">Фейсконтроль</a>
+        <a href="#parents">Родителям</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="btn btn-acid header-cta" id="header-buy" href="#afisha">Билеты</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-bg">
+        <img class="hero-photo" src="/assets/photos/crowd-red.jpg" alt="" aria-hidden="true" />
+      </div>
+      <div class="container">
+        <div class="hero-city-chip rise rise-1">Оренбург · Магнитогорск</div>
+        <h1 class="hero-title">
+          <span class="row rise rise-2">TRAP</span>
+          <span class="row outline rise rise-3">HOUSE</span>
+        </h1>
+        <div class="hero-rules rise rise-4" aria-label="Правила входа">
+          <span>с 14 лет</span><i>/</i><span>без алкоголя</span><i>/</i><span>домой до темноты</span>
+        </div>
+        <p class="hero-sub rise rise-4">
+          Вечеринки нового поколения — днём, на нормальном звуке и свете.
+          Билет покупается за минуту, вход — по именному QR: <b>без списков в личке и очередей на кассе</b>.
+        </p>
+
+        <div class="next-event rise rise-5" id="next-event" hidden>
+          <div class="ne-date"><span id="ne-day">—</span><small id="ne-mon"></small></div>
+          <div class="ne-info">
+            <div class="ne-title" id="ne-title"></div>
+            <div class="ne-meta" id="ne-meta"></div>
+          </div>
+          <div class="ne-cta"><a class="btn btn-acid" id="ne-link" href="#afisha">Купить билет</a></div>
+        </div>
+
+        <div class="countdown rise rise-5" id="countdown" hidden aria-label="До ближайшей тусовки">
+          <div class="cd-cell"><div class="cd-num" id="cd-d">0</div><div class="cd-label" id="cd-d-l">дней</div></div>
+          <div class="cd-cell"><div class="cd-num" id="cd-h">0</div><div class="cd-label">часов</div></div>
+          <div class="cd-cell"><div class="cd-num" id="cd-m">0</div><div class="cd-label">минут</div></div>
+          <div class="cd-cell"><div class="cd-num" id="cd-s">0</div><div class="cd-label">секунд</div></div>
+        </div>
+
+        <div class="hero-facts rise rise-5" id="hero-facts"></div>
+      </div>
+    </section>
+
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee-track" id="marquee-track"></div>
+    </div>
+
+    <!-- 01 МАНИФЕСТ -->
+    <section class="section" id="about">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">01 — кто мы</div>
+            <h2>Место, куда пускают тебя</h2>
+          </div>
+        </div>
+        <div class="manifesto">
+          <p>
+            Тебе четырнадцать — и в этом городе тебе некуда пойти. Клубы с восемнадцати,
+            во дворе тоска, дома опять рилсы. Поэтому мы сделали свою тусовку:
+            <em>настоящий звук, настоящий свет, диджеи и толпа своих</em>.
+            Днём. Полностью без алкоголя. И домой до темноты.
+          </p>
+          <a class="btn btn-ghost" href="https://t.me/trap_house56" target="_blank" rel="noopener">
+            Телега — там уже 4 700+ своих
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 ВОЛНЫ ЦЕН -->
+    <section class="section" id="waves">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">02 — цена растёт</div>
+            <h2>Билеты дорожают.<br />Это не маркетинг — это волны.</h2>
+          </div>
+        </div>
+        <p class="muted" style="max-width: 560px; margin-top: -12px;">
+          Каждая цена ограничена количеством билетов. Закончилась волна — цена выросла для всех.
+          Дешевле, чем сейчас, уже не будет.
+        </p>
+        <div class="waves-panel" id="waves-panel" hidden>
+          <div class="wp-head">
+            <span class="wp-event" id="wp-event"></span>
+            <span class="wp-going" id="wp-going"></span>
+          </div>
+          <div id="wp-rows"></div>
+          <div class="waves-cta"><a class="btn btn-acid" id="wp-buy" href="#afisha">Успеть по этой цене</a></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 АФИША -->
+    <section class="section" id="afisha">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">03 — афиша</div>
+            <h2>Ближайшие тусовки</h2>
+          </div>
+          <div class="chips" id="city-chips" role="group" aria-label="Фильтр по городу">
+            <button class="chip is-on" data-city="all">Все</button>
+            <button class="chip" data-city="orenburg">Оренбург</button>
+            <button class="chip" data-city="magnitogorsk">Магнитогорск</button>
+          </div>
+        </div>
+        <div class="afisha-grid" id="afisha-grid"></div>
+      </div>
+    </section>
+
+    <!-- 04 ШОУ-ПРОГРАММА -->
+    <section class="section" id="program">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">04 — что будет</div>
+            <h2><span>Шоу</span>-<span class="h-outline">программа</span></h2>
+          </div>
+        </div>
+        <div class="program-grid" id="program-grid"></div>
+      </div>
+    </section>
+
+    <!-- 05 КАК ЭТО ВЫГЛЯДИТ -->
+    <section class="section" id="media">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">05 — как это выглядит</div>
+            <h2>Тяни вбок <span class="acid">→</span></h2>
+          </div>
+        </div>
+      </div>
+      <div class="strip" id="strip"></div>
+    </section>
+
+    <!-- 06 ФЕЙСКОНТРОЛЬ -->
+    <section class="section face-section" id="face">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">06 — фейсконтроль</div>
+            <h2>Сколько тебе лет?</h2>
+          </div>
+        </div>
+        <div class="face-panel">
+          <div class="face-input-row">
+            <input type="number" id="face-age" inputmode="numeric" min="1" max="120" placeholder="16" aria-label="Твой возраст" />
+            <button class="btn btn-acid" id="face-check" type="button">Проверить</button>
+          </div>
+          <div class="face-result hidden" id="face-result" role="status">
+            <div class="face-bubble" id="face-bubble">
+              <span class="fb-brand">TRAP HOUSE</span>
+              <span class="fb-title" id="fb-title"></span>
+            </div>
+            <p class="face-sub" id="fb-sub"></p>
+            <div class="face-actions">
+              <button class="btn btn-ghost" id="face-copy" type="button">Скопировать и похвастаться</button>
+              <button class="btn btn-ghost" id="face-again" type="button">Ещё раз</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 ПРИВЕЗИТЕ К НАМ -->
+    <section class="section" id="cities">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">07 — города</div>
+            <h2><span class="h-outline">Привезите</span> к нам</h2>
+          </div>
+        </div>
+        <p class="muted" style="max-width: 560px; margin-top: -12px;">
+          Едем туда, где нас зовут. Напиши свой город — как наберётся достаточно заявок, приезжаем.
+        </p>
+        <div class="chips" id="city-request-chips" style="margin: 18px 0;"></div>
+        <form class="city-form" id="city-form" novalidate>
+          <div class="field">
+            <input type="text" id="cf-city" placeholder="Твой город" autocomplete="address-level2" aria-label="Твой город" />
+            <div class="err" id="err-cf-city">Напиши город</div>
+          </div>
+          <div class="field">
+            <input type="text" id="cf-contact" placeholder="Телега или телефон" autocomplete="off" aria-label="Телега или телефон" />
+            <div class="err" id="err-cf-contact">Оставь телегу или телефон — позовём первым</div>
+          </div>
+          <div style="position: absolute; left: -9999px;" aria-hidden="true">
+            <input type="text" id="cf-website" tabindex="-1" autocomplete="off" />
+          </div>
+          <label class="check">
+            <input type="checkbox" id="cf-consent" />
+            <span>Согласен на обработку данных — <a href="/privacy.html" target="_blank" rel="noopener">политика</a></span>
+          </label>
+          <div class="err" id="err-cf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
+          <button class="btn btn-acid btn-block" id="cf-send" type="submit">Отправить заявку</button>
+          <p class="form-note" id="cf-note" style="margin-top: 10px;">Как наберётся достаточно заявок из твоего города — напишем тебе первому.</p>
+        </form>
+      </div>
+    </section>
+
+    <!-- 08 РОДИТЕЛЯМ -->
+    <section class="section" id="parents">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">08 — родителям</div>
+            <h2>Если ребёнок попросил разрешения</h2>
+          </div>
+        </div>
+        <div class="parents-box">
+          <p>
+            Коротко и без маркетинга. Вечеринка идёт <mark>днём</mark>: двери в 16:00,
+            окончание в 22:00 — ребёнок возвращается домой засветло.
+            <mark>Алкоголь не продаётся и не проносится</mark> — мы против алкоголя и
+            запрещённых веществ, и это проверяется на входе. На площадке работают
+            охрана, организаторы и видеограф. Возраст входа — с 14 лет, на дверях фейсконтроль.
+          </p>
+          <p>
+            Билет именной: в нём видно, на кого куплен и когда человек прошёл вход.
+            Остались вопросы — напишите нам напрямую, ответим лично.
+          </p>
+          <a class="btn btn-ghost" id="parents-contact" href="#" target="_blank" rel="noopener">Связаться с организаторами</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">FAQ</div>
+            <h2>Вопросы, которые задают все</h2>
+          </div>
+        </div>
+        <div class="faq">
+          <details>
+            <summary>Со скольки лет пускают?</summary>
+            <div class="faq-a">С 14. Паспорт не спросим, но на дверях фейсконтроль: если выглядишь на двенадцать — развернём без обид. Взрослым 18+ вход тоже открыт — но будь готов оказаться самым взрослым на танцполе.</div>
+          </details>
+          <details>
+            <summary>Правда совсем без алкоголя?</summary>
+            <div class="faq-a">Да. Алкоголь не продаётся и не проносится — сумки и состояние проверяются на входе. Это правило входа, а не строчка мелким шрифтом. На баре — лимонады и безалкогольные коктейли.</div>
+          </details>
+          <details>
+            <summary>Во сколько приходить и когда всё закончится?</summary>
+            <div class="faq-a">Двери открываются в 16:00, программа стартует в 17:00, финиш в 22:00. Успеваешь домой засветло и без вопросов от родителей.</div>
+          </details>
+          <details>
+            <summary>Я вышел подышать — пустят обратно?</summary>
+            <div class="faq-a">Да. На входе всем надевают браслет — он и есть твой пропуск обратно. Покажи его админу на дверях.</div>
+          </details>
+          <details>
+            <summary>Можно передать билет другу?</summary>
+            <div class="faq-a">Билет именной и одноразовый: QR сработает только один раз. Если планы поменялись — напиши нам до начала тусовки, переоформим на другое имя. Пересланный скриншот на входе не пройдёт.</div>
+          </details>
+          <details>
+            <summary>Возврат билета</summary>
+            <div class="faq-a">Если тусовка отменяется или переносится — вернём деньги полностью. По собственному желанию — напиши нам не позднее чем за 24 часа до начала.</div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- КОНТАКТЫ -->
+    <section class="section" id="contacts">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Контакты</div>
+            <h2>Мы на связи</h2>
+          </div>
+        </div>
+        <div class="contact-cards" id="contact-cards"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container f-grid">
+      <div>
+        <a class="logo" href="/">TRAP<span class="l2">HOUSE</span></a>
+        <p class="f-note" style="margin-top: 10px;">
+          Мероприятия 14+. Мы против алкоголя и запрещённых веществ — это проверяется на входе.
+          Дневной формат: 16:00–22:00, домой до темноты.
+        </p>
+        <p class="f-note"><!-- ЗАГЛУШКА: реквизиты организатора -->ИП (реквизиты уточняются) · <a href="/privacy.html">Политика конфиденциальности</a> · © 2026 TRAP HOUSE · Оренбург</p>
+      </div>
+      <div class="dev-sign">Дизайн и разработка — <a href="https://maxim-batutin.ru" target="_blank" rel="noopener">maxim-batutin.ru</a></div>
+    </div>
+  </footer>
+
+  <div class="sticky-cta" id="sticky-cta">
+    <a class="btn btn-acid" id="sticky-buy" href="#afisha">Билеты</a>
+  </div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>

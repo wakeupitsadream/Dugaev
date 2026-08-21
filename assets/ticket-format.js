@@ -114,6 +114,14 @@ export function formatRuPhoneDigits(digits) {
   return out;
 }
 
+// Режим смешанного поля «телега или телефон»: ввод, начинающийся с цифры
+// или «+», считаем телефоном (включается маска +7); с «@» или буквы — ник.
+export function detectContactMode(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return 'free';
+  return /^[+\d]/.test(s) ? 'phone' : 'free';
+}
+
 export function normalizePhone(raw) {
   if (typeof raw !== 'string') return null;
   const digits = raw.replace(/\D/g, '');

@@ -78,9 +78,9 @@
   --muted: #9b9ba6;
   --dim: #62626e;
 
-  --acid: #c8ff00;
-  --acid-deep: #97c400;
-  --acid-glow: rgba(200, 255, 0, 0.16);
+  --acid: #ccff00; /* фирменный лайм kirdydirty */
+  --acid-deep: #9ac400;
+  --acid-glow: rgba(204, 255, 0, 0.16);
   --ink: #0a0a0c; /* чёрный текст на лаймовых заливках */
 
   /* светофор статусов — отдельная палитра */
@@ -662,6 +662,141 @@ body::after {
   .no-print { display: none !important; }
   .admin-table th, .admin-table td { border-color: #999; color: #000; }
 }
+
+/* ============================================================
+   v2: секции реальной концепции (14+, без алкоголя, днём)
+   ============================================================ */
+
+/* hero: фото-фон с затемнением */
+.hero-photo {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; opacity: 0.35;
+  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 95%);
+  mask-image: linear-gradient(180deg, #000 30%, transparent 95%);
+  filter: saturate(0.9) contrast(1.05);
+}
+.hero-bg::before {
+  content: ''; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(180deg, rgba(7,7,9,0.55), rgba(7,7,9,0.85) 60%, var(--bg));
+}
+.hero-bg > * { z-index: 0; }
+.hero .container { position: relative; z-index: 2; }
+
+/* правила входа: с 14 лет / без алкоголя / домой до темноты */
+.hero-rules {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  font-family: var(--font-display); font-weight: 700; font-size: 0.78rem;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.hero-rules span { background: var(--acid); color: var(--ink); padding: 6px 10px; border-radius: 6px; }
+.hero-rules i { color: var(--acid); font-style: normal; font-weight: 400; }
+
+/* заголовки с аутлайн-словом */
+.h-outline { color: transparent; -webkit-text-stroke: 1.5px var(--acid); }
+
+/* 01 манифест */
+.manifesto p {
+  font-size: clamp(1.15rem, 3.4vw, 1.6rem); font-weight: 600; line-height: 1.5;
+  max-width: 760px; margin-bottom: 24px;
+}
+.manifesto em { font-style: normal; color: var(--acid); }
+
+/* 04 шоу-программа */
+.program-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 14px; }
+.program-item {
+  position: relative; background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px 16px 16px;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.program-item:hover { border-color: rgba(204, 255, 0, 0.45); transform: translateY(-2px); }
+.program-item .p-num {
+  font-family: var(--font-display); font-weight: 900; font-size: 0.8rem;
+  color: var(--acid); letter-spacing: 0.1em;
+}
+.program-item h3 { margin: 6px 0 6px; font-size: 0.98rem; text-transform: uppercase; }
+.program-item p { color: var(--muted); font-size: 0.88rem; margin: 0; }
+
+/* 05 фотолента «тяни вбок» */
+.strip {
+  display: flex; gap: 14px; overflow-x: auto; padding: 4px 20px 18px;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.strip::-webkit-scrollbar { display: none; }
+.strip-item {
+  position: relative; flex: 0 0 auto; margin: 0;
+  width: min(78vw, 340px); aspect-ratio: 4 / 5;
+  border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
+  scroll-snap-align: center; background: var(--bg-3);
+}
+.strip-item:nth-child(even) { transform: rotate(0.8deg); }
+.strip-item:nth-child(odd) { transform: rotate(-0.8deg); }
+.strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.35s ease; }
+.strip-item:hover img { transform: scale(1.04); }
+.strip-item figcaption { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.strip-tag {
+  background: var(--acid); color: var(--ink); font-family: var(--font-display);
+  font-weight: 700; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 5px 10px; border-radius: 5px; transform: rotate(-1.5deg);
+}
+.strip-note { background: rgba(7, 7, 9, 0.75); color: var(--text); font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; }
+.strip-item.no-img img { display: none; }
+@media (min-width: 900px) { .strip { padding-inline: calc((100vw - var(--container)) / 2 + 20px); } }
+
+/* 06 фейсконтроль */
+.face-section {
+  background:
+    radial-gradient(60% 50% at 80% 20%, rgba(124, 58, 237, 0.18), transparent 70%),
+    radial-gradient(50% 40% at 15% 85%, rgba(124, 58, 237, 0.12), transparent 70%);
+}
+.face-panel { max-width: 460px; }
+.face-input-row { display: flex; gap: 10px; }
+.face-input-row input {
+  flex: 1; min-width: 0; background: var(--bg-3); border: 1px solid var(--line);
+  border-radius: var(--radius-s); color: var(--text);
+  font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; text-align: center;
+  padding: 10px 12px; outline: none; -moz-appearance: textfield;
+}
+.face-input-row input::-webkit-outer-spin-button, .face-input-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.face-input-row input:focus { border-color: var(--acid); }
+.face-result { margin-top: 20px; }
+.face-bubble {
+  display: inline-flex; flex-direction: column; gap: 2px;
+  border-radius: 24px; padding: 16px 24px; transform: rotate(-1.5deg);
+}
+.face-bubble .fb-brand { font-family: var(--font-display); font-weight: 700; font-size: 0.66rem; letter-spacing: 0.16em; opacity: 0.75; }
+.face-bubble .fb-title { font-family: var(--font-display); font-weight: 900; font-size: 1.5rem; text-transform: uppercase; line-height: 1.1; }
+.fb-list, .fb-okay { background: var(--acid); color: var(--ink); box-shadow: 0 0 40px var(--acid-glow); }
+.fb-early { background: #ff6a00; color: var(--ink); box-shadow: 0 0 40px rgba(255, 106, 0, 0.25); }
+.face-sub { color: var(--muted); max-width: 420px; margin: 14px 0 16px; }
+.face-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+@media (prefers-reduced-motion: no-preference) {
+  .shake { animation: shake 0.35s ease; }
+  @keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+}
+
+/* 07 города */
+.city-form { max-width: 460px; position: relative; }
+.city-form .field { margin-bottom: 12px; }
+.city-form input[type='text'] {
+  width: 100%; background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--radius-s);
+  color: var(--text); font-family: inherit; font-size: 1rem; padding: 13px 14px; outline: none;
+}
+.city-form input[type='text']:focus { border-color: var(--acid); }
+.chip-ghost { opacity: 0.55; border-style: dashed; }
+
+/* 08 родителям */
+.parents-box {
+  max-width: 720px; background: var(--bg-2); border: 1px solid var(--line);
+  border-left: 4px solid var(--acid); border-radius: var(--radius);
+  padding: 24px 22px;
+}
+.parents-box p { font-size: 1rem; line-height: 1.65; }
+.parents-box mark { background: var(--warn); color: var(--ink); padding: 1px 6px; border-radius: 4px; font-weight: 700; }
+
+/* бейдж «0% алк» */
+.badge-dry { background: rgba(7, 7, 9, 0.8); color: var(--text); border-color: transparent; }
 
 /* ---------- Утилиты ---------- */
 .hidden { display: none !important; }

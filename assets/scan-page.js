@@ -129,11 +129,17 @@ function badKey() {
 }
 
 function renderActive(j) {
-  const minor = j.age_cat === 'minor';
-  const cls = minor ? 'warn' : 'ok';
+  const ageRating = Number(j.event?.ageRating || 18);
+  // Жёлтый «надеть браслет» — только на смешанных 16+ ивентах.
+  // На 14+ браслет надевают всем — обычный зелёный с напоминанием.
+  const braceletWarn = j.age_cat === 'minor' && ageRating === 16;
+  const cls = braceletWarn ? 'warn' : 'ok';
+  let sub = '';
+  if (braceletWarn) sub = '<p class="scan-sub">Несовершеннолетний гость — браслет обязателен, бар закрыт.</p>';
+  else if (ageRating < 18) sub = '<p class="scan-sub">Браслет на входе — как всем: он же пропуск обратно.</p>';
   stage(cls, `
-    <div class="scan-verdict">${minor ? 'Надеть браслет' : 'Пропустить'}</div>
-    ${minor ? '<p class="scan-sub">Несовершеннолетний гость — браслет обязателен, бар закрыт.</p>' : ''}
+    <div class="scan-verdict">${braceletWarn ? 'Надеть браслет' : 'Пропустить'}</div>
+    ${sub}
     <div class="scan-name">${esc(j.holder_name)}</div>
     <div class="scan-detail">${esc(j.event?.title || '')} · ${esc(j.wave_name || '')} · билет ${formatTicketCode(state.token.id)}</div>
   `);

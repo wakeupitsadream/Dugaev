@@ -1,11 +1,13 @@
-// Главная страница: hero, волны, афиша, галерея, контакты.
-// Правило: данные и формулы — в модулях, здесь только связка с DOM.
+// Главная страница: hero, волны, афиша, шоу-программа, фотолента,
+// фейсконтроль, заявки городов, контакты. Данные и формулы — в модулях,
+// здесь только связка с DOM.
 import { SITE } from './data/config.js';
-import { FACTS, GALLERY } from './data/events.js';
+import { FACTS, GALLERY, SHOW_PROGRAM } from './data/events.js';
 import { loadEvents, upcoming, pastEvents, esc } from './events-load.js';
 import { waveStates, fromPrice, totalSold } from './waves.js';
 import { goingCount } from './social.js';
 import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
+import { faceControl, shareText } from './facecontrol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,8 +23,12 @@ init();
 async function init() {
   renderMarquee();
   renderFacts();
-  renderGallery();
+  renderProgram();
+  renderStrip();
   renderContacts();
+  initFaceControl();
+  initCityForm();
+  $('parents-contact').href = `https://t.me/${SITE.tgManager}`;
 
   const { events, live } = await loadEvents();
   state.events = events;
@@ -49,7 +55,7 @@ function renderHero() {
   $('ne-day').textContent = db.day;
   $('ne-mon').textContent = db.mon;
   $('ne-title').textContent = e.title;
-  $('ne-meta').textContent = `${SITE.cities[e.city] || e.city} · ${e.venue} · ${fmtWhen(e.startsAt)}`;
+  $('ne-meta').textContent = `${SITE.cities[e.city] || e.city} · ${fmtWhen(e.startsAt)} · ${ageLabel(e.ageRating)}`;
   $('ne-link').href = `/e/${e.id}`;
   $('next-event').hidden = false;
 
@@ -68,11 +74,11 @@ function renderFacts() {
 
 function renderMarquee() {
   const words = [
-    'TRAP HOUSE', '★', 'ОРЕНБУРГ', '★', 'МАГНИТОГОРСК', '★', 'ВХОД ПО QR', '★',
-    'ЧЁРНЫЙ ДРЕСС-КОД', '★', '18+ ПО ПАСПОРТУ', '★', '16+ БЕЗ БАРА', '★',
+    '14+', '★', 'БЕЗ АЛКОГОЛЯ', '★', 'ДНЁМ', '★', 'ДО 22:00', '★',
+    'ВХОД ПО QR', '★', 'ОРЕНБУРГ', '★', 'МАГНИТОГОРСК', '★',
   ];
   const half = words
-    .map((w, i) => `<span class="${w === '★' ? 'm-acid' : ''}">${esc(w)}</span>`)
+    .map((w) => `<span class="${w === '★' ? 'm-acid' : ''}">${esc(w)}</span>`)
     .join('');
   $('marquee-track').innerHTML = half + half; // трек в две копии для бесшовного цикла
 }
@@ -83,8 +89,7 @@ function startCountdown() {
   const e = state.nearest;
   if (!e) return;
   const target = Date.parse(e.startsAt);
-  const el = $('countdown');
-  el.hidden = false;
+  $('countdown').hidden = false;
   const tick = () => {
     let left = Math.max(0, target - Date.now());
     const d = Math.floor(left / 86400_000);
@@ -108,7 +113,6 @@ function startCountdown() {
 function renderWavesPanel() {
   const e = state.nearest;
   if (!e) return;
-  const panel = $('waves-panel');
   const ws = waveStates(e.waves);
   const sold = totalSold(e.waves);
   const going = goingCount(e.id, Date.parse(e.startsAt), sold, Date.now());
@@ -138,7 +142,7 @@ function renderWavesPanel() {
   buy.href = `/e/${e.id}`;
   buy.textContent = active ? `Успеть за ${active.priceRub} ₽` : 'Все билеты проданы';
   if (!active) buy.classList.replace('btn-acid', 'btn-ghost');
-  panel.hidden = false;
+  $('waves-panel').hidden = false;
 }
 
 // ---------- АФИША ----------
@@ -149,7 +153,7 @@ function renderAfisha() {
   const filtered = list.filter((e) => state.city === 'all' || e.city === state.city);
 
   if (!filtered.length) {
-    grid.innerHTML = `<p class="muted">В этом городе пока ничего не анонсировано — следи за нами в Telegram.</p>`;
+    grid.innerHTML = `<p class="muted">В этом городе пока ничего не анонсировано — следи за <a class="acid" href="${esc(SITE.tgChannel)}" target="_blank" rel="noopener">телегой</a>.</p>`;
     return;
   }
 
@@ -185,6 +189,7 @@ function cardHtml(e) {
         <div class="ec-datebox"><b>${db.day}</b><small>${db.mon}</small></div>
         <div class="ec-badges">
           <span class="badge badge-age ${e.ageRating < 18 ? 'age-16' : ''}">${ageLabel(e.ageRating)}</span>
+          <span class="badge badge-dry">0% алк</span>
         </div>
       </div>
       <div class="ec-body">
@@ -198,24 +203,132 @@ function cardHtml(e) {
     </a>`;
 }
 
-// ---------- ГАЛЕРЕЯ ----------
-function renderGallery() {
-  $('gallery').innerHTML = GALLERY.map(
-    (g) => `
-      <div class="g-item">
-        <span class="g-glyph">TH</span>
-        <div class="g-title">${esc(g.title)}</div>
-        <div class="g-note">${esc(g.note)}</div>
+// ---------- ШОУ-ПРОГРАММА ----------
+function renderProgram() {
+  $('program-grid').innerHTML = SHOW_PROGRAM.map(
+    (p, i) => `
+      <div class="program-item">
+        <span class="p-num">${String(i + 1).padStart(2, '0')}</span>
+        <h3>${esc(p.title)}</h3>
+        <p>${esc(p.text)}</p>
       </div>`
   ).join('');
+}
+
+// ---------- ФОТОЛЕНТА ----------
+function renderStrip() {
+  $('strip').innerHTML = GALLERY.map(
+    (g) => `
+      <figure class="strip-item">
+        <img src="${esc(g.src)}" alt="${esc(g.title)}" loading="lazy" onerror="this.closest('figure').classList.add('no-img')" />
+        <figcaption><span class="strip-tag">${esc(g.title)}</span><span class="strip-note">${esc(g.note)}</span></figcaption>
+      </figure>`
+  ).join('');
+}
+
+// ---------- ФЕЙСКОНТРОЛЬ ----------
+function initFaceControl() {
+  const input = $('face-age');
+  const run = () => {
+    const r = faceControl(input.value);
+    if (r.verdict === 'invalid') {
+      input.focus();
+      input.classList.add('shake');
+      setTimeout(() => input.classList.remove('shake'), 400);
+      return;
+    }
+    const bubble = $('face-bubble');
+    bubble.className = `face-bubble fb-${r.verdict}`;
+    $('fb-title').textContent = r.title;
+    $('fb-sub').textContent = r.sub;
+    $('face-result').classList.remove('hidden');
+    const copy = $('face-copy');
+    copy.textContent = 'Скопировать и похвастаться';
+    copy.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(shareText(r, location.origin));
+        copy.textContent = 'Скопировано';
+      } catch {
+        copy.textContent = 'Не вышло — заскринь';
+      }
+    };
+  };
+  $('face-check').onclick = run;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  $('face-again').onclick = () => {
+    $('face-result').classList.add('hidden');
+    input.value = '';
+    input.focus();
+  };
+}
+
+// ---------- ПРИВЕЗИТЕ К НАМ ----------
+function initCityForm() {
+  const done = new Set(SITE.homeCities);
+  $('city-request-chips').innerHTML = [
+    ...SITE.homeCities.map((c) => `<span class="chip is-on">${esc(c)} ✓</span>`),
+    ...SITE.expansionCities.map((c) => `<button type="button" class="chip" data-city="${esc(c)}">${esc(c)}</button>`),
+    `<span class="chip chip-ghost">Твой город?</span>`,
+  ].join('');
+  document.querySelectorAll('#city-request-chips .chip[data-city]').forEach((chip) => {
+    chip.onclick = () => {
+      $('cf-city').value = chip.dataset.city;
+      $('cf-contact').focus();
+    };
+  });
+
+  const form = $('city-form');
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const city = $('cf-city').value.trim();
+    const contact = $('cf-contact').value.trim();
+    const consent = $('cf-consent').checked;
+    let bad = false;
+    toggleErr('cf-city', city.length < 2) && (bad = true);
+    toggleErr('cf-contact', contact.length < 2) && (bad = true);
+    toggleErr('cf-consent', !consent) && (bad = true);
+    if (bad || done.has(city)) {
+      if (done.has(city)) $('cf-note').textContent = `${city} — мы уже здесь! Следи за афишей выше.`;
+      return;
+    }
+    const btn = $('cf-send');
+    btn.disabled = true;
+    btn.textContent = 'Отправляем…';
+    let ok = false;
+    try {
+      const r = await fetch('/api/cityrequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city, contact, consent, website: $('cf-website').value }),
+      });
+      ok = r.ok;
+    } catch { /* деградация ниже */ }
+    btn.disabled = false;
+    if (ok) {
+      btn.textContent = 'Заявка принята';
+      $('cf-note').textContent = `${city} в списке. Как наберётся достаточно заявок — напишем тебе первому.`;
+    } else {
+      // сервер недоступен — отправка заявки напрямую в телегу, без ошибок
+      btn.textContent = 'Отправить заявку';
+      const text = `Привет! Привезите TRAP HOUSE в ${city}. Мой контакт: ${contact}`;
+      window.open(`https://t.me/${SITE.tgManager}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+      $('cf-note').textContent = 'Открыли телегу — жми «Отправить», заявка уйдёт напрямую организаторам.';
+    }
+  };
+
+  function toggleErr(id, isBad) {
+    const el = $(`err-${id}`);
+    if (el) el.style.display = isBad ? 'block' : 'none';
+    return isBad;
+  }
 }
 
 // ---------- КОНТАКТЫ ----------
 function renderContacts() {
   const cards = [
-    { kind: 'Telegram', val: 'Канал TRAP HOUSE', note: 'Анонсы, розыгрыши, афтемуви', href: SITE.tgChannel },
-    { kind: 'VK', val: 'Группа VK', note: 'Фотоотчёты со всех тусовок', href: SITE.vk },
-    { kind: 'Сотрудничество', val: `@${SITE.tgManager}`, note: 'Площадкам, артистам, спонсорам', href: `https://t.me/${SITE.tgManager}` },
+    { kind: 'Telegram-канал', val: SITE.tgChannelName, note: `${SITE.tgSubscribers} подписчиков · анонсы и афиши — тут раньше всех`, href: SITE.tgChannel },
+    { kind: 'Менеджер', val: `@${SITE.tgManager}`, note: 'Вопросы по билетам, спискам и возвратам', href: `https://t.me/${SITE.tgManager}` },
+    { kind: 'Сотрудничество', val: 'Партнёрам и площадкам', note: 'Реклама, интеграции, свои города', href: `https://t.me/${SITE.tgManager}` },
   ];
   $('contact-cards').innerHTML = cards
     .map(

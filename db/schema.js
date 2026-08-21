@@ -76,4 +76,9 @@ export const SCHEMA = [
     scanned_by text,
     at         timestamptz NOT NULL DEFAULT now()
   )`,
+
+  `CREATE TABLE IF NOT EXISTS tg_updates (
+    update_id  bigint PRIMARY KEY,
+    at         timestamptz NOT NULL DEFAULT now()
+  )`,
 ];

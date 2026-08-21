@@ -69,12 +69,16 @@ function renderEvent() {
   $('eh-lineup').innerHTML = (e.lineup || [])
     .map((n) => `<span class="badge">${esc(n)}</span>`)
     .join('');
-  $('eh-meta').innerHTML = [
+  const rows = [
     ['Когда', fmtWhen(e.startsAt)],
     ['Где', `${e.venue} · ${SITE.cities[e.city] || e.city}`],
     ['Адрес', e.address || 'придёт в билете'],
     ['Возраст', `${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`],
-  ]
+  ];
+  if (e.ageRating < 18) {
+    rows.push(['Регламент', `двери ${SITE.doorsOpen} · старт ${SITE.showStart} · финиш ${SITE.showEnd}, домой засветло`]);
+  }
+  $('eh-meta').innerHTML = rows
     .map(([k, v]) => `<div class="eh-meta-item"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`)
     .join('');
   $('event-root').hidden = false;
@@ -175,7 +179,9 @@ function setQty(q) {
 // Перерисовка списка гостей только по смене qty; ввод хранится в store.
 function renderAttendees() {
   const e = store.event;
-  const minorAllowed = e.ageRating < 18;
+  // Тумблер «нет 18» осмыслен только на смешанных 16+ ивентах:
+  // на 14+ браслет надевают всем, на 18+ несовершеннолетним нельзя.
+  const minorAllowed = e.ageRating === 16;
   $('qty-val').textContent = String(store.qty);
   $('qty-minus').disabled = store.qty <= 1;
   $('qty-plus').disabled = store.qty >= 10;

@@ -74,7 +74,10 @@ function render(parsed, t) {
     `<span class="badge badge-age ${t.event.ageRating < 18 ? 'age-16' : ''}">${ageLabel(t.event.ageRating)}</span>`,
     `<span class="badge">${esc(t.waveName || 'билет')}</span>`,
   ];
-  if (t.ageCat === 'minor') {
+  if (t.event.ageRating < 18) {
+    badges.push('<span class="badge">0% алкоголя</span>');
+  }
+  if (t.ageCat === 'minor' && t.event.ageRating === 16) {
     badges.push('<span class="badge" style="border-color: var(--warn); color: var(--warn);">браслет на входе</span>');
   }
   $('t-badges').innerHTML = badges.join('');

@@ -7,6 +7,7 @@
     "dev": "vercel dev"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@neondatabase/serverless": "^1.0.1"
   },
   "devDependencies": {

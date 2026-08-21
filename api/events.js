@@ -22,7 +22,7 @@ export default async function handler(req, res) {
                 ) AS waves
          FROM events e
          LEFT JOIN price_waves w ON w.event_id = e.id
-         WHERE e.status <> 'draft'
+         WHERE e.status IN ('onsale', 'soldout', 'past')
          GROUP BY e.id
          ORDER BY e.starts_at`
       ), 4000);

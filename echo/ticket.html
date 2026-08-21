@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Твой билет — ECHO</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0d0805" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d0805'/%3E%3Ctext x='32' y='45' font-family='Arial Black,sans-serif' font-size='26' font-weight='900' fill='%23ff9e1b' text-anchor='middle'%3EEX%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="ticket-wrap">
+    <div style="width: 100%; max-width: 400px;">
+      <div class="ticket-card" id="ticket-card" hidden>
+        <div class="tc-head">
+          <div class="tc-brand">ECHO</div>
+          <div class="tc-event" id="t-event">Билет</div>
+        </div>
+        <div class="ticket-status-strip hidden" id="t-strip"></div>
+        <div class="tc-body">
+          <div class="tc-name" id="t-name">—</div>
+          <div class="tc-meta" id="t-meta"></div>
+          <div class="tc-badges" id="t-badges"></div>
+          <div class="tc-qr-zone" id="t-qr" aria-label="QR-код для входа"></div>
+          <div class="tc-code" id="t-code"></div>
+          <p class="tc-warn">Покажи этот QR на входе. Он именной и сработает один раз —
+          не публикуй его и не пересылай никому, кроме владельца билета.</p>
+        </div>
+        <div class="tc-cut"><span></span></div>
+        <div class="tc-actions">
+          <button class="btn btn-acid btn-block" id="t-save" type="button">Сохранить в фото</button>
+          <button class="btn btn-ghost btn-block" id="t-share" type="button" hidden>Отправить владельцу</button>
+        </div>
+      </div>
+
+      <div id="t-missing" hidden style="text-align: center;">
+        <div class="guest-brand" style="margin-bottom: 12px;"><span class="l2">ECHO</span></div>
+        <h1 style="font-size: 1.3rem;">Билет не найден</h1>
+        <p class="muted">Проверь ссылку из заказа или напиши нам — поможем найти билет по имени и телефону.</p>
+        <a class="btn btn-ghost" href="/">На главную</a>
+      </div>
+
+      <p class="tc-warn" style="margin-top: 16px; text-align: center;">
+        <a href="/" style="color: inherit;">echo · афиша</a>
+      </p>
+    </div>
+  </div>
+  <script type="module" src="/assets/ticket-page.js"></script>
+</body>
+</html>

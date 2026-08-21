@@ -60,6 +60,7 @@ async function boot() {
   $('gate').hidden = true;
   $('dash').hidden = false;
   bindService(); // кнопки сервиса доступны и до инициализации БД
+  bindWalkin();
 
   if (!j || !j.ok) {
     $('db-missing').style.display = 'block';
@@ -97,27 +98,53 @@ async function refresh() {
     j = await r.json().catch(() => null);
   } catch { /* сеть мигнула — не трогаем экран */ }
   if (!j || !j.ok) return;
+  state.lastStats = j;
 
   // «осталось» — из волн (та же математика, что видит гость на сайте)
   const leftTotal = (j.by_wave || []).reduce((s, w) => s + Math.max(0, Number(w.quota) - Number(w.sold)), 0);
+  const sold = j.sold ?? 0;
+  const checked = j.checked_in ?? 0;
+  const conv = sold > 0 ? Math.round((checked / sold) * 100) : 0;
+  const prov = Object.fromEntries((j.by_provider || []).map((p) => [p.provider, p]));
+  const onlineRub = prov.stub?.rub ?? 0;
+  const doorRub = prov.door?.rub ?? 0;
   $('tiles').innerHTML = [
-    { n: j.sold ?? 0, label: 'билетов продано' },
-    { n: `${(j.revenue_rub ?? 0).toLocaleString('ru-RU')} ₽`, label: 'выручка' },
-    { n: j.checked_in ?? 0, label: 'вошло на тусовку' },
-    { n: leftTotal, label: 'осталось мест' },
-    { n: j.minors ?? 0, label: 'браслетов (16+)' },
+    { n: sold, label: 'билетов продано', sub: `онлайн ${prov.stub?.n ?? 0} · касса ${prov.door?.n ?? 0}` },
+    { n: `${(j.revenue_rub ?? 0).toLocaleString('ru-RU')} ₽`, label: 'выручка', sub: `онлайн ${onlineRub.toLocaleString('ru-RU')} ₽ · касса ${doorRub.toLocaleString('ru-RU')} ₽` },
+    { n: checked, label: 'вошло на тусовку', sub: sold ? `${conv}% от проданных` : '' },
+    { n: leftTotal, label: 'осталось мест', sub: '' },
+    { n: j.minors ?? 0, label: 'браслетов (16+)', sub: '' },
   ]
-    .map((t) => `<div class="tile"><div class="t-num">${esc(String(t.n))}</div><div class="t-label">${esc(t.label)}</div></div>`)
+    .map((t) => `<div class="tile"><div class="t-num">${esc(String(t.n))}</div><div class="t-label">${esc(t.label)}</div>${t.sub ? `<div class="t-sub">${esc(t.sub)}</div>` : ''}</div>`)
     .join('');
 
+  // продажи по дням
+  const days = j.sales_by_day || [];
+  $('sales-panel').hidden = days.length === 0;
+  if (days.length) {
+    const maxRub = Math.max(...days.map((d) => d.rub));
+    $('sales-table').innerHTML =
+      `<tr><th>День</th><th class="num">Билетов</th><th class="num">Выручка</th><th style="width: 42%;"></th></tr>` +
+      days
+        .map((d) => `<tr><td>${esc(d.d.slice(5).split('-').reverse().join('.'))}</td>
+              <td class="num">${d.n}</td><td class="num">${d.rub.toLocaleString('ru-RU')} ₽</td>
+              <td class="bar-cell"><i style="width:${maxRub ? Math.max(4, Math.round((d.rub / maxRub) * 100)) : 0}%"></i></td></tr>`)
+        .join('');
+  }
+
   $('waves-table').innerHTML =
-    `<tr><th>Волна</th><th class="num">Цена</th><th class="num">Продано</th><th class="num">Квота</th></tr>` +
+    `<tr><th>Волна</th><th class="num">Цена</th><th class="num">Продано</th><th class="num">Остаток</th><th style="width: 34%;">Заполнение</th></tr>` +
     (j.by_wave || [])
-      .map(
-        (w) => `<tr><td>${esc(w.name)}</td><td class="num">${w.price_rub} ₽</td>
-                <td class="num">${w.sold}</td><td class="num">${w.quota}</td></tr>`
-      )
+      .map((w) => {
+        const pct = Math.round((Number(w.sold) / Number(w.quota)) * 100);
+        return `<tr><td>${esc(w.name)}</td><td class="num">${w.price_rub} ₽</td>
+                <td class="num">${w.sold} / ${w.quota}</td>
+                <td class="num">${Math.max(0, Number(w.quota) - Number(w.sold))}</td>
+                <td class="bar-cell"><i style="width:${Math.max(2, pct)}%; ${pct >= 100 ? 'background: var(--dim);' : ''}"></i></td></tr>`;
+      })
       .join('');
+
+  renderWalkinWaves();
 
   const curve = j.checkin_curve || [];
   $('curve-section').hidden = curve.length === 0;
@@ -192,6 +219,81 @@ function renderGuestsTable(tickets) {
 async function printList() {
   if ($('print-list').hidden) await downloadOfflineList();
   if (!$('print-list').hidden) window.print();
+}
+
+// ---------- Касса на входе: ручное оформление гостя ----------
+function renderWalkinWaves() {
+  const sel = $('wi-wave');
+  if (!sel || !state.lastStats) return;
+  const prev = sel.value;
+  const options = (state.lastStats.by_wave || [])
+    .map((w) => {
+      const left = Math.max(0, Number(w.quota) - Number(w.sold));
+      return { no: Number(w.wave_no), label: `${w.name} · ${w.price_rub} ₽ · осталось ${left}`, left };
+    });
+  sel.innerHTML = options
+    .map((o) => `<option value="${o.no}" ${o.left === 0 ? 'disabled' : ''}>${esc(o.label)}</option>`)
+    .join('');
+  // по умолчанию — последняя доступная волна (обычно «на входе»)
+  const avail = options.filter((o) => o.left > 0);
+  sel.value = prev && options.some((o) => String(o.no) === prev && o.left > 0) ? prev : String(avail.at(-1)?.no ?? '');
+}
+
+function bindWalkin() {
+  if ($('wi-add').dataset.bound) return;
+  $('wi-add').dataset.bound = '1';
+  $('wi-name').oninput = () => { $('err-wi-name').style.display = 'none'; };
+  $('wi-add').onclick = async () => {
+    const name = $('wi-name').value.trim();
+    if (name.length < 2) {
+      $('err-wi-name').style.display = 'block';
+      $('wi-name').focus();
+      return;
+    }
+    const btn = $('wi-add');
+    btn.disabled = true;
+    btn.textContent = 'Оформляю…';
+    let j = null;
+    try {
+      const r = await fetch('/api/walkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify({
+          event_id: state.current,
+          wave_no: Number($('wi-wave').value),
+          name,
+          checkin: $('wi-checkin').checked,
+          by: `касса · ${state.name}`,
+        }),
+      });
+      j = await r.json().catch(() => null);
+    } catch { /* ниже */ }
+    btn.disabled = false;
+    btn.textContent = 'Оформить';
+    const log = $('walkin-log');
+    if (j?.ok) {
+      $('wi-name').value = '';
+      log.insertAdjacentHTML(
+        'afterbegin',
+        `<div class="scan-feed-item"><span class="dot dot-ok"></span>
+         <span><b>${esc(j.ticket.holder_name)}</b> · ${j.price_rub} ₽${j.checked_in_at ? ' · впущен' : ''}</span>
+         <a class="muted" style="margin-left:auto;" href="${esc(j.ticket.url)}" target="_blank" rel="noopener">билет</a></div>`
+      );
+      refresh();
+    } else if (j?.error === 'wave_sold_out') {
+      log.insertAdjacentHTML(
+        'afterbegin',
+        `<div class="scan-feed-item"><span class="dot dot-bad"></span>
+         <span>${esc(j.message)}${j.next_wave ? ` — следующая: ${esc(j.next_wave.name)} за ${j.next_wave.priceRub} ₽` : ''}</span></div>`
+      );
+      refresh();
+    } else {
+      log.insertAdjacentHTML(
+        'afterbegin',
+        `<div class="scan-feed-item"><span class="dot dot-bad"></span><span>${esc(j?.message || 'Не получилось — проверь сеть')}</span></div>`
+      );
+    }
+  };
 }
 
 // ---------- Сервис: инициализация БД и боевой самотест ----------

@@ -30,10 +30,10 @@ after(async () => {
   await pg.close();
 });
 
-function orderParams({ qty, eventId = 'ev1', waveNo = 1, oid, tids, names, ages }) {
+function orderParams({ qty, eventId = 'ev1', waveNo = 1, oid, tids, names, ages, provider = 'stub' }) {
   return [
     qty, eventId, waveNo, oid, 'Покупатель Тест', '+79123456789', null, null,
-    tids, names, ages,
+    tids, names, ages, provider,
   ];
 }
 
@@ -153,7 +153,7 @@ test('cleanupTest: сносит только заказы самотеста и 
   // тестовый заказ (телефон самотеста) через боевой ORDER_SQL
   const r = await pg.query(ORDER_SQL, [
     1, 'ev1', 2, 'ord_selftest', 'ТЕХ. ПРОВЕРКА', TEST_PHONE, null, null,
-    ['selftestaa'], ['ТЕХ. ПРОВЕРКА'], ['adult'],
+    ['selftestaa'], ['ТЕХ. ПРОВЕРКА'], ['adult'], 'stub',
   ]);
   assert.equal(r.rows[0].created, 1);
   await pg.query(CHECKIN_SQL, ['selftestaa', null, 'самотест']);
@@ -173,4 +173,14 @@ test('cleanupTest: сносит только заказы самотеста и 
 
   // повторная уборка идемпотентна
   assert.equal((await pg.query(CLEANUP_TEST_SQL)).rows.length, 0);
+});
+
+test('провайдер заказа сохраняется (онлайн vs касса)', async () => {
+  const r = await pg.query(ORDER_SQL, orderParams({
+    qty: 1, waveNo: 2, oid: 'ord_door01', tids: ['doorticket'], names: ['Кассовый Гость'], ages: ['adult'],
+    provider: 'door',
+  }));
+  assert.equal(r.rows[0].created, 1);
+  const o = await pg.query(`SELECT provider FROM orders WHERE id = 'ord_door01'`);
+  assert.equal(o.rows[0].provider, 'door');
 });

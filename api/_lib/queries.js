@@ -6,7 +6,8 @@
 // N именных билетов. Волна распродана (или ивент не в продаже) → w пуст,
 // каскад не создаёт ничего. Цена берётся только из БД.
 // Параметры: $1 qty, $2 event_id, $3 wave_no, $4 order_id, $5 buyer_name,
-// $6 phone, $7 tg, $8 utm json, $9 ticket_ids[], $10 names[], $11 age_cats[]
+// $6 phone, $7 tg, $8 utm json, $9 ticket_ids[], $10 names[], $11 age_cats[],
+// $12 provider ('stub' — онлайн, 'door' — касса на входе)
 export const ORDER_SQL = `
 WITH w AS (
   UPDATE price_waves SET sold = sold + $1
@@ -20,7 +21,7 @@ WITH w AS (
 o AS (
   INSERT INTO orders (id, event_id, wave_id, qty, amount_rub, buyer_name,
                       buyer_phone, buyer_tg, status, provider, consent, utm, paid_at)
-  SELECT $4, $2, w.id, $1, w.price_rub * $1, $5, $6, $7, 'paid', 'stub', true, $8::jsonb, now()
+  SELECT $4, $2, w.id, $1, w.price_rub * $1, $5, $6, $7, 'paid', $12, true, $8::jsonb, now()
   FROM w
   RETURNING id
 ),

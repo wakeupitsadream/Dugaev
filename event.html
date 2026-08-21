@@ -85,8 +85,11 @@
 
       <div class="field">
         <label for="f-phone">Телефон для связи</label>
-        <input type="tel" id="f-phone" placeholder="+7 912 000-00-00" autocomplete="tel" />
-        <div class="err" id="err-phone">Нужен телефон в формате +7…</div>
+        <div class="phone-wrap">
+          <span class="phone-prefix" aria-hidden="true">+7</span>
+          <input type="tel" id="f-phone" inputmode="numeric" placeholder="912 000-00-00" autocomplete="tel-national" />
+        </div>
+        <div class="err" id="err-phone">Нужны 10 цифр номера после +7</div>
       </div>
       <div class="field">
         <label for="f-tg">Telegram (необязательно)</label>

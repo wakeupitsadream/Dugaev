@@ -1,7 +1,9 @@
-// Мини-дашборд организатора: продажи, выручка, чек-ины, лента сканов.
+// Мини-дашборд организатора: продажи, выручка, чек-ины, лента сканов,
+// сервис (инициализация БД, боевой самотест).
 // Это витрина тех же данных, которые позже заберёт TG-бот через /api/stats.
 import { plural, fmtWhen, fmtTime } from './ticket-format.js';
 import { esc } from './events-load.js';
+import { activeWave } from './waves.js';
 
 const $ = (id) => document.getElementById(id);
 const LS_KEY = 'th_admin_key';
@@ -57,6 +59,7 @@ async function boot() {
   }
   $('gate').hidden = true;
   $('dash').hidden = false;
+  bindService(); // кнопки сервиса доступны и до инициализации БД
 
   if (!j || !j.ok) {
     $('db-missing').style.display = 'block';
@@ -189,4 +192,123 @@ function renderGuestsTable(tickets) {
 async function printList() {
   if ($('print-list').hidden) await downloadOfflineList();
   if (!$('print-list').hidden) window.print();
+}
+
+// ---------- Сервис: инициализация БД и боевой самотест ----------
+const TEST_PHONE = '+70000000000'; // маркер тестовых заказов, чистится cleanupTest
+
+function bindService() {
+  if ($('svc-seed').dataset.bound) return;
+  $('svc-seed').dataset.bound = '1';
+
+  $('svc-seed').onclick = async () => {
+    const btn = $('svc-seed');
+    btn.disabled = true;
+    $('svc-note').textContent = 'Инициализирую…';
+    let j = null;
+    try {
+      const r = await fetch('/api/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify({ demoSold: $('svc-demo').checked }),
+      });
+      j = await r.json().catch(() => null);
+    } catch { /* ниже */ }
+    btn.disabled = false;
+    if (j?.ok) {
+      $('svc-note').textContent = `Готово: схема применена, событий засеяно — ${j.seeded}. Перезагружаю…`;
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      $('svc-note').textContent = j?.message
+        ? `Не получилось: ${j.message}`
+        : 'Не получилось: проверь, что DATABASE_URL добавлен и сделан Redeploy';
+    }
+  };
+
+  $('svc-selftest').onclick = runSelfTest;
+}
+
+// Боевой самотест: полный цикл покупка → билет → скан → чек-ин → повтор →
+// статистика → уборка. Гоняется на этом же домене с ключом из localStorage —
+// ключ не покидает устройство.
+async function runSelfTest() {
+  const btn = $('svc-selftest');
+  const list = $('selftest-list');
+  btn.disabled = true;
+  list.innerHTML = '';
+  const row = (ok, name, detail = '') => {
+    list.insertAdjacentHTML(
+      'beforeend',
+      `<div class="scan-feed-item"><span class="dot ${ok ? 'dot-ok' : 'dot-bad'}"></span>
+       <span><b>${ok ? 'OK' : 'FAIL'}</b> · ${esc(name)}</span>
+       ${detail ? `<span class="muted" style="margin-left:auto;">${esc(String(detail).slice(0, 60))}</span>` : ''}</div>`
+    );
+    return ok;
+  };
+  const api = async (path, opts = {}) => {
+    const r = await fetch(path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...headers(), ...(opts.headers || {}) },
+    });
+    return { status: r.status, j: await r.json().catch(() => null) };
+  };
+
+  try {
+    // 1. афиша живая (из БД, не из сида)
+    const ev = await api('/api/events');
+    const live = ev.j?.ok && !ev.j.degraded && ev.j.events?.length;
+    if (!row(Boolean(live), 'БД отвечает, афиша живая', live ? `${ev.j.events.length} событий` : 'degraded/пусто')) {
+      throw new Error('stop');
+    }
+    const target = ev.j.events.find((e) => e.status === 'onsale' && activeWave(e.waves));
+    if (!row(Boolean(target), 'есть событие в продаже', target?.title || 'нет')) throw new Error('stop');
+    const wave = activeWave(target.waves);
+
+    // 2. тестовая покупка
+    const order = await api('/api/order', {
+      method: 'POST',
+      body: JSON.stringify({
+        event_id: target.id,
+        wave_no: wave.waveNo,
+        buyer: { name: 'ТЕХ. ПРОВЕРКА', phone: TEST_PHONE },
+        attendees: [{ name: 'ТЕХ. ПРОВЕРКА', minor: false }],
+        consent: true,
+        website: '',
+      }),
+    });
+    const ticket = order.j?.ok && order.j.tickets?.[0];
+    if (!row(Boolean(ticket), 'покупка проходит (заказ + билет)', ticket ? order.j.order_id : order.j?.message)) {
+      throw new Error('stop');
+    }
+    const token = ticket.url.replace('/t/', '');
+
+    // 3. билет читается
+    const t = await api(`/api/ticket?token=${encodeURIComponent(token)}`);
+    row(Boolean(t.j?.ok && t.j.ticket), 'билет открывается', t.j?.ticket?.holderName);
+
+    // 4. верификация: активен
+    const v1 = await api(`/api/verify?token=${encodeURIComponent(token)}`);
+    row(v1.j?.status === 'active', 'скан: билет активен', v1.j?.status);
+
+    // 5-6. чек-ин ровно один раз
+    const c1 = await api('/api/checkin', { method: 'POST', body: JSON.stringify({ token, by: 'самотест' }) });
+    row(c1.j?.ok && c1.j.first === true, 'чек-ин: впущен', c1.j?.checked_in_at ? fmtTime(c1.j.checked_in_at) : '');
+    const c2 = await api('/api/checkin', { method: 'POST', body: JSON.stringify({ token, by: 'самотест' }) });
+    row(c2.j?.ok && c2.j.first === false, 'повторный чек-ин отклонён (одноразовость)');
+
+    // 7. статистика отражает
+    const st = await api(`/api/stats?event_id=${encodeURIComponent(target.id)}`);
+    row(Boolean(st.j?.ok && st.j.sold >= 1 && st.j.checked_in >= 1), 'статистика видит продажу и вход',
+      st.j?.ok ? `продано ${st.j.sold}, вошло ${st.j.checked_in}` : '');
+
+    // 8. уборка тестовых данных
+    const cl = await api('/api/seed', { method: 'POST', body: JSON.stringify({ cleanupTest: true }) });
+    row(Boolean(cl.j?.ok), 'тестовые данные убраны, квоты возвращены', cl.j?.ok ? `заказов: ${cl.j.cleaned}` : '');
+
+    $('svc-note').textContent = 'Самотест завершён — если всё зелёное, боевая связка работает.';
+    refresh();
+  } catch {
+    $('svc-note').textContent = 'Самотест остановлен на красном шаге — смотри список выше.';
+  }
+  btn.disabled = false;
 }

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { SCHEMA } from '../db/schema.js';
 import { ORDER_SQL, CHECKIN_SQL, NEXT_WAVE_SQL } from '../api/_lib/queries.js';
+import { CLEANUP_TEST_SQL, TEST_PHONE } from '../api/seed.js';
 
 let pg;
 
@@ -144,4 +145,32 @@ test('CHECK-констрейнт не даёт sold уйти выше quota да
     pg.query(`UPDATE price_waves SET sold = quota + 1 WHERE event_id='ev1' AND wave_no=1`),
     /check|constraint/i
   );
+});
+
+test('cleanupTest: сносит только заказы самотеста и возвращает квоты', async () => {
+  const soldBefore = (await pg.query(`SELECT sold FROM price_waves WHERE event_id='ev1' AND wave_no=2`)).rows[0].sold;
+
+  // тестовый заказ (телефон самотеста) через боевой ORDER_SQL
+  const r = await pg.query(ORDER_SQL, [
+    1, 'ev1', 2, 'ord_selftest', 'ТЕХ. ПРОВЕРКА', TEST_PHONE, null, null,
+    ['selftestaa'], ['ТЕХ. ПРОВЕРКА'], ['adult'],
+  ]);
+  assert.equal(r.rows[0].created, 1);
+  await pg.query(CHECKIN_SQL, ['selftestaa', null, 'самотест']);
+  await pg.query(`INSERT INTO scan_log (ticket_id, result, scanned_by) VALUES ('selftestaa','ok','самотест')`);
+
+  const cleaned = await pg.query(CLEANUP_TEST_SQL);
+  assert.equal(cleaned.rows.length, 1);
+
+  const soldAfter = (await pg.query(`SELECT sold FROM price_waves WHERE event_id='ev1' AND wave_no=2`)).rows[0].sold;
+  assert.equal(soldAfter, soldBefore); // квота вернулась
+  assert.equal((await pg.query(`SELECT 1 FROM tickets WHERE id='selftestaa'`)).rows.length, 0);
+  assert.equal((await pg.query(`SELECT 1 FROM orders WHERE id='ord_selftest'`)).rows.length, 0);
+  assert.equal((await pg.query(`SELECT 1 FROM scan_log WHERE ticket_id='selftestaa'`)).rows.length, 0);
+
+  // чужие заказы не тронуты
+  assert.ok((await pg.query(`SELECT count(*)::int AS n FROM orders`)).rows[0].n > 0);
+
+  // повторная уборка идемпотентна
+  assert.equal((await pg.query(CLEANUP_TEST_SQL)).rows.length, 0);
 });

@@ -1,6 +1,8 @@
 // Идемпотентная инициализация БД: применяет DDL и upsert-ит афишу из
-// assets/data/events.js. Защищено ADMIN_KEY. body: { demoSold: true } —
-// проставить волнам демо-продажи (лестница FOMO для показа демо).
+// assets/data/events.js. Защищено ADMIN_KEY.
+// body: { demoSold: true }    — проставить волнам демо-продажи (показ демо);
+// body: { cleanupTest: true } — удалить данные боевого самотеста
+//   (заказы с телефоном +70000000000) и вернуть квоты волн.
 import { SCHEMA } from '../db/schema.js';
 import { EVENTS } from '../assets/data/events.js';
 import { demoWaves } from '../assets/waves.js';
@@ -14,8 +16,20 @@ export default async function handler(req, res) {
   if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен админ-ключ');
   if (!hasDb()) return fail(res, 503, 'db_unavailable', 'DATABASE_URL не настроен');
 
-  const demoSold = Boolean(req.body && req.body.demoSold);
   const sql = db();
+
+  // уборка после боевого самотеста: только тестовый телефон, ничего больше
+  if (req.body && req.body.cleanupTest) {
+    try {
+      const rows = await sql.query(CLEANUP_TEST_SQL);
+      return ok(res, { cleaned: (rows.rows || rows).length });
+    } catch (err) {
+      console.error('cleanupTest failed:', err);
+      return fail(res, 500, 'cleanup_failed', 'Не удалось убрать тестовые данные');
+    }
+  }
+
+  const demoSold = Boolean(req.body && req.body.demoSold);
   try {
     for (const stmt of SCHEMA) await sql.query(stmt);
 
@@ -55,3 +69,29 @@ export default async function handler(req, res) {
     fail(res, 500, 'seed_failed', 'Не удалось применить схему/данные');
   }
 }
+
+// Телефон, которым помечаются заказы самотеста (см. admin.html)
+export const TEST_PHONE = '+70000000000';
+
+// Один атомарный стейтмент: вернуть квоты волн, снести сканы, билеты и
+// заказы самотеста. Чужие данные не трогаются по определению WHERE.
+export const CLEANUP_TEST_SQL = `
+WITH doomed AS (
+  SELECT id, wave_id, qty FROM orders WHERE buyer_phone = '${TEST_PHONE}'
+),
+dec AS (
+  UPDATE price_waves w SET sold = GREATEST(0, w.sold - d.total)
+  FROM (SELECT wave_id, sum(qty)::int AS total FROM doomed GROUP BY wave_id) d
+  WHERE w.id = d.wave_id
+  RETURNING w.id
+),
+del_scan AS (
+  DELETE FROM scan_log WHERE ticket_id IN (
+    SELECT t.id FROM tickets t WHERE t.order_id IN (SELECT id FROM doomed)
+  )
+),
+del_tickets AS (
+  DELETE FROM tickets WHERE order_id IN (SELECT id FROM doomed)
+)
+DELETE FROM orders WHERE id IN (SELECT id FROM doomed)
+RETURNING id`;

@@ -63,7 +63,19 @@
    `curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook?url=https://<домен>/api/tg-webhook&secret_token=<TG_WEBHOOK_SECRET>"`
 3. Готово: каждый новый пост канала попадает в конвейер мгновенно.
 
-Стоимость анализа: модель Haiku, ~пост в день → меньше 1 ₽/мес.
+**Провайдер анализа — Polza AI** (российский OpenAI-совместимый агрегатор,
+оплата в рублях, ключ на polza.ai): env `POLZA_API_KEY` + опционально
+`POLZA_MODEL` (по умолчанию `openai/gpt-4o-mini`) и `POLZA_BASE_URL`
+(по умолчанию `https://api.polza.ai/api/v1`). Смена модели = смена одной env.
+`ANTHROPIC_API_KEY` — необязательный фолбэк (используется, только если
+Polza-ключа нет). Без обоих ключей посты пересылаются владельцу вручную.
+
+Экономика при 1–2 постах в день (~62 вызова/мес, ~1100 токенов промпт +
+~300 ответ): на gpt-4o-mini — копейки; даже на полноразмерном gpt-4o
+(7,5/22,5 ₽ за 1M токенов на Polza) — порядка 1 ₽/мес. Предохранители:
+пост обрезается до 3000 символов, max_tokens 700, temperature 0, ровно один
+вызов на пост (повторные апдейты отсекаются по update_id). Бюджет 500 ₽/мес
+недостижим даже теоретически.
 
 ## 4. Вопросы владельцу (★ — блокируют боевой запуск)
 
@@ -110,11 +122,26 @@ Env-переменные (Vercel → Settings → Environment Variables):
 `DATABASE_URL` (Neon из Marketplace) · `TICKET_SECRET` (32+ случайных символов) ·
 `ADMIN_KEY` (ключ админов входа) · `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`
 (уведомления и кнопки) · `TG_WEBHOOK_SECRET` (для вебхука канала) ·
-`ANTHROPIC_API_KEY` (анализ постов; без него — пересылка вручную) ·
-опционально `AUTO_PUBLISH=1`, `BOT_API_TOKEN`, `TICKET_SECRET_OLD`.
+`POLZA_API_KEY` (анализ постов через Polza AI; `POLZA_MODEL` и
+`POLZA_BASE_URL` — опциональные переопределения) · опционально
+`ANTHROPIC_API_KEY` (фолбэк анализа), `AUTO_PUBLISH=1`, `BOT_API_TOKEN`,
+`TICKET_SECRET_OLD`.
 
-Инициализация БД: `POST /api/seed` с заголовком `X-Admin-Key`
-(тело `{"demoSold":true}` — демо-продажи для показа; без тела — чистые квоты).
+**Подключение БД (Neon, 3 шага):**
+1. Vercel → проект → вкладка **Storage** → **Create Database → Neon** (Marketplace,
+   Free plan) → **Connect to project** — `DATABASE_URL` добавится в env сам.
+2. **Redeploy** (Deployments → ⋯ у последнего → Redeploy), чтобы функции
+   увидели новые переменные.
+3. Открыть `/admin.html` → ввести `ADMIN_KEY` → кнопка **«Инициализировать БД»**
+   (галочка «посеять демо-продажи» — для показа; снять — для боя).
+   Эквивалент curl: `curl -X POST https://<домен>/api/seed -H "X-Admin-Key: <ключ>"
+   -H "Content-Type: application/json" -d '{"demoSold":true}'`
+
+**Боевой самотест** — кнопка в `/admin.html`: прогоняет на проде весь цикл
+(покупка → билет → верификация → чек-ин → повтор отклонён → статистика →
+уборка тестовых данных с возвратом квот) и рисует чек-лист. Ключ при этом
+не покидает устройство. Повторять можно сколько угодно.
+
 Афиша правится: постом в канале (конвейер) или в `assets/data/events.js` + seed.
 
 Тесты: `npm test`. Локально без Neon: `DEV_PGLITE=1` (настоящий Postgres в памяти).

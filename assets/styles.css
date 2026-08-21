@@ -541,7 +541,8 @@ body::after {
 .check.is-error { border-color: var(--danger); background: var(--danger-bg); }
 .check.is-error span { color: var(--text); }
 
-/* поле телефона с фиксированным префиксом +7 */
+/* Поле телефона с фиксированным префиксом +7: единый контейнер, «+7» —
+   часть поля, без собственных рамок и фонов у внутреннего инпута */
 .phone-wrap {
   display: flex; align-items: center;
   background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--radius-s);
@@ -550,12 +551,14 @@ body::after {
 .phone-wrap:focus-within { border-color: var(--acid); }
 .field.is-error .phone-wrap { border-color: var(--danger); }
 .phone-prefix {
-  font-family: var(--font-display); font-weight: 700; font-size: 1rem; color: var(--text);
-  padding: 13px 0 13px 14px; user-select: none;
+  font-weight: 600; font-size: 1rem; color: var(--muted);
+  padding-left: 14px; user-select: none;
 }
-.phone-wrap input {
-  flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
-  color: var(--text); font-family: inherit; font-size: 1rem; padding: 13px 14px 13px 8px;
+.field .phone-wrap input[type='tel'] {
+  flex: 1; min-width: 0; width: auto;
+  background: transparent; border: 0; border-radius: 0; box-shadow: none; outline: none;
+  color: var(--text); font-family: inherit; font-size: 1rem;
+  padding: 13px 14px 13px 6px;
 }
 .check input { width: 18px; height: 18px; accent-color: var(--acid); margin-top: 1px; flex: 0 0 auto; }
 .check a { color: var(--acid); }

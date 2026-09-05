@@ -189,7 +189,7 @@ function cardHtml(e) {
         <div class="ec-datebox"><b>${db.day}</b><small>${db.mon}</small></div>
         <div class="ec-badges">
           <span class="badge badge-age ${e.ageRating < 18 ? 'age-16' : ''}">${ageLabel(e.ageRating)}</span>
-          <span class="badge badge-dry">0% алк</span>
+          <span class="badge badge-dry">FC/DC</span>
         </div>
       </div>
       <div class="ec-body">

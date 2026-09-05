@@ -49,7 +49,7 @@ async function renderGuest() {
     } catch { /* молчим */ }
   }
   stage('neutral', `
-    <div class="guest-brand"><span class="l2">PROJECT X</span></div>
+    <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
     <p class="scan-sub" style="margin-top: 10px;">Покажи этот экран на входе — админ отсканирует и впустит.</p>
     ${eventLine ? `<div class="scan-meta-pill">${esc(eventLine)}</div>` : ''}
     ${state.token ? `<div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>` : ''}
@@ -62,7 +62,7 @@ async function renderGuest() {
 
 function renderPin() {
   stage('neutral', `
-    <div class="guest-brand"><span class="l2">PROJECT X</span></div>
+    <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
     <p class="scan-sub" style="margin: 10px 0 18px;">Режим сотрудника</p>
     <div class="pin-panel">
       <input type="password" id="pin-key" placeholder="Ключ администратора" autocomplete="off" />
@@ -308,7 +308,7 @@ function stageLockOk(title, sub) {
 // ---------- Ручной ввод ----------
 function renderManualOnly() {
   stage('neutral', `
-    <div class="guest-brand"><span class="l2">PROJECT X</span></div>
+    <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
     <p class="scan-sub" style="margin: 10px 0 18px;">Режим сотрудника · ${esc(state.name)}</p>
     <div class="pin-panel">
       <input type="text" id="manual-id" placeholder="Номер билета, напр. 7K3F-9QZ2-MX" autocomplete="off" />

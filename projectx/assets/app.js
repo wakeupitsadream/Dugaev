@@ -74,11 +74,11 @@ function renderFacts() {
 
 function renderMarquee() {
   const words = [
-    '18+', '★', 'НОЧЬ', '★', 'ДВЕРИ 23:00', '★', 'ДО 06:00', '★',
-    'ВХОД ПО QR', '★', 'ОРЕНБУРГ', '★', 'PROJECT X', '★',
+    '18+', '✕', 'FC/DC', '✕', 'ДВЕРИ 22:00', '✕', 'СТАРТ 23:00', '✕',
+    'SECRET PLACE', '✕', 'ВХОД ПО QR', '✕', 'ОРЕНБУРГ', '✕',
   ];
   const half = words
-    .map((w) => `<span class="${w === '★' ? 'm-acid' : ''}">${esc(w)}</span>`)
+    .map((w) => `<span class="${w === '✕' ? 'm-acid' : ''}">${esc(w)}</span>`)
     .join('');
   $('marquee-track').innerHTML = half + half; // трек в две копии для бесшовного цикла
 }

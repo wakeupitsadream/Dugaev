@@ -75,7 +75,7 @@ function renderEvent() {
     ['Адрес', e.address || 'придёт в проходке'],
     ['Возраст', `${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`],
   ];
-  rows.push(['Регламент', `двери ${SITE.doorsOpen} · финиш ${SITE.showEnd}`]);
+  rows.push(['Регламент', `двери ${SITE.doorsOpen} · старт ${SITE.showStart} · до утра`]);
   $('eh-meta').innerHTML = rows
     .map(([k, v]) => `<div class="eh-meta-item"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`)
     .join('');

@@ -1,8 +1,8 @@
 /* ============================================================
    PROJECT X — дизайн-система
-   Ночь 18+: чёрно-фиолетовая база, UV-фиолет и лазерный розовый.
+   Фирменная гамма из логотипа: чёрный, белый и алый «X».
    Светофор статусов (ok/warn/danger/amber) — ОТДЕЛЬНАЯ палитра,
-   с брендовым UV не пересекается.
+   с брендовым красным пересекается только по смыслу «стоп».
    ============================================================ */
 
 /* ---------- Шрифты (self-host, кириллица + латиница) ---------- */
@@ -59,21 +59,21 @@
 
 /* ---------- Токены ---------- */
 :root {
-  --bg: #08060d;
-  --bg-2: #120d1c;
-  --bg-3: #1a1226;
-  --line: #2a2138;
-  --line-soft: #201830;
-  --text: #f2eefc;
-  --muted: #a89cc4;
-  --dim: #6c5f8a;
+  --bg: #070707;
+  --bg-2: #101010;
+  --bg-3: #171717;
+  --line: #262626;
+  --line-soft: #1c1c1c;
+  --text: #f5f3f2;
+  --muted: #9a9494;
+  --dim: #5f5a5a;
 
-  --acid: #b43bff; /* фирменный UV-фиолет PROJECT X */
-  --acid-deep: #7a1fd0;
-  --acid-glow: rgba(180, 59, 255, 0.20);
-  --laser: #ff2b6a; /* лазерный розовый: даты, X-мотив */
-  --laser-deep: #b3123f;
-  --ink: #0a0612; /* тёмный текст на UV-заливках */
+  --acid: #e51a20; /* алый X с логотипа PROJECT X */
+  --acid-deep: #a50f14;
+  --acid-glow: rgba(229, 26, 32, 0.22);
+  --laser: #ffffff; /* белый: контур логотипа и вторые акценты */
+  --laser-deep: #d8d3d3;
+  --ink: #ffffff; /* текст на красных заливках */
 
   /* светофор статусов — отдельная палитра */
   --ok: #17d16d;
@@ -144,7 +144,7 @@ body::after {
 }
 .btn:active { transform: translateY(1px) scale(0.99); }
 .btn-acid { background: var(--acid); color: var(--ink); box-shadow: 0 0 32px var(--acid-glow); }
-.btn-acid:hover { box-shadow: 0 0 44px rgba(180, 59, 255, 0.3); }
+.btn-acid:hover { box-shadow: 0 0 44px rgba(229, 26, 32, 0.3); }
 .btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
 .btn-ghost:hover { border-color: var(--acid); color: var(--acid); }
 .btn-block { width: 100%; }
@@ -198,8 +198,8 @@ body::after {
 .hero-bg {
   position: absolute; inset: 0; z-index: -1;
   background:
-    radial-gradient(52% 44% at 78% 12%, rgba(180, 59, 255, 0.13), transparent 70%),
-    radial-gradient(40% 36% at 12% 82%, rgba(180, 59, 255, 0.07), transparent 70%),
+    radial-gradient(52% 44% at 78% 12%, rgba(229, 26, 32, 0.13), transparent 70%),
+    radial-gradient(40% 36% at 12% 82%, rgba(229, 26, 32, 0.07), transparent 70%),
     var(--bg);
 }
 .hero-bg::after {
@@ -207,8 +207,8 @@ body::after {
   content: '';
   position: absolute; inset: auto -10% 18% -10%; height: 52px;
   transform: rotate(-4deg);
-  background: repeating-linear-gradient(45deg, rgba(180, 59, 255,0.08) 0 14px, transparent 14px 30px);
-  border-block: 1px solid rgba(180, 59, 255, 0.12);
+  background: repeating-linear-gradient(45deg, rgba(229, 26, 32,0.08) 0 14px, transparent 14px 30px);
+  border-block: 1px solid rgba(229, 26, 32, 0.12);
 }
 .hero-city-chip {
   display: inline-flex; gap: 8px; align-items: center;
@@ -324,19 +324,19 @@ body::after {
   overflow: hidden; text-decoration: none;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.25s ease;
 }
-.event-card:hover { transform: translateY(-3px); border-color: rgba(180, 59, 255, 0.55); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5); }
+.event-card:hover { transform: translateY(-3px); border-color: rgba(229, 26, 32, 0.55); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5); }
 .ec-poster {
   aspect-ratio: 3 / 2; position: relative; overflow: hidden;
   background:
-    repeating-linear-gradient(-45deg, rgba(180, 59, 255, 0.06) 0 2px, transparent 2px 14px),
-    radial-gradient(80% 90% at 50% 110%, rgba(180, 59, 255, 0.16), transparent 70%),
+    repeating-linear-gradient(-45deg, rgba(229, 26, 32, 0.06) 0 2px, transparent 2px 14px),
+    radial-gradient(80% 90% at 50% 110%, rgba(229, 26, 32, 0.16), transparent 70%),
     var(--bg-3);
   display: flex; align-items: flex-end; padding: 16px;
 }
 .ec-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .ec-poster .ec-word {
   font-family: var(--font-display); font-weight: 900; font-size: 1.7rem; line-height: 1;
-  text-transform: uppercase; color: transparent; -webkit-text-stroke: 1.5px rgba(180, 59, 255, 0.8);
+  text-transform: uppercase; color: transparent; -webkit-text-stroke: 1.5px rgba(229, 26, 32, 0.8);
   word-break: break-word;
 }
 .ec-poster.has-img .ec-word { display: none; }
@@ -387,7 +387,7 @@ body::after {
 .g-item {
   aspect-ratio: 4 / 5; border-radius: var(--radius-s); overflow: hidden; position: relative;
   background:
-    repeating-linear-gradient(135deg, rgba(180, 59, 255,0.04) 0 3px, transparent 3px 18px),
+    repeating-linear-gradient(135deg, rgba(229, 26, 32,0.04) 0 3px, transparent 3px 18px),
     linear-gradient(200deg, var(--bg-3), var(--bg-2));
   border: 1px solid var(--line);
   display: flex; flex-direction: column; justify-content: flex-end; padding: 14px;
@@ -402,7 +402,7 @@ body::after {
 .g-item .g-note { color: var(--muted); font-size: 0.76rem; position: relative; }
 .g-item .g-glyph {
   position: absolute; top: 12px; right: 12px;
-  font-family: var(--font-display); font-weight: 900; font-size: 0.85rem; color: rgba(180, 59, 255, 0.55);
+  font-family: var(--font-display); font-weight: 900; font-size: 0.85rem; color: rgba(229, 26, 32, 0.55);
 }
 
 /* ---------- FAQ ---------- */
@@ -450,7 +450,7 @@ body::after {
   background: linear-gradient(transparent, rgba(7, 7, 9, 0.6) 26%, rgba(7, 7, 9, 0.94));
   display: none;
 }
-.sticky-cta .btn { width: 100%; box-shadow: 0 8px 34px rgba(180, 59, 255, 0.22); }
+.sticky-cta .btn { width: 100%; box-shadow: 0 8px 34px rgba(229, 26, 32, 0.22); }
 @media (max-width: 760px) { .sticky-cta { display: block; } }
 
 /* ============================================================
@@ -463,8 +463,8 @@ body::after {
   aspect-ratio: 3 / 4; border-radius: var(--radius); overflow: hidden; position: relative;
   border: 1px solid var(--line);
   background:
-    repeating-linear-gradient(-45deg, rgba(180, 59, 255,0.05) 0 2px, transparent 2px 14px),
-    radial-gradient(90% 70% at 50% 100%, rgba(180, 59, 255, 0.16), transparent 75%),
+    repeating-linear-gradient(-45deg, rgba(229, 26, 32,0.05) 0 2px, transparent 2px 14px),
+    radial-gradient(90% 70% at 50% 100%, rgba(229, 26, 32, 0.16), transparent 75%),
     var(--bg-3);
   display: flex; align-items: flex-end; padding: 22px;
 }
@@ -750,7 +750,7 @@ body::after {
   border-radius: var(--radius); padding: 18px 16px 16px;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
-.program-item:hover { border-color: rgba(180, 59, 255, 0.45); transform: translateY(-2px); }
+.program-item:hover { border-color: rgba(229, 26, 32, 0.45); transform: translateY(-2px); }
 .program-item .p-num {
   font-family: var(--font-display); font-weight: 900; font-size: 0.8rem;
   color: var(--acid); letter-spacing: 0.1em;
@@ -869,48 +869,56 @@ body::before {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(120% 70% at 50% -10%, rgba(180, 59, 255, 0.20), transparent 60%),
-    radial-gradient(90% 60% at 100% 105%, rgba(255, 43, 106, 0.14), transparent 65%),
-    radial-gradient(70% 50% at 0% 100%, rgba(122, 31, 208, 0.16), transparent 70%);
+    radial-gradient(120% 65% at 50% -8%, rgba(229, 26, 32, 0.16), transparent 62%),
+    radial-gradient(80% 55% at 100% 105%, rgba(229, 26, 32, 0.10), transparent 68%);
 }
 
 /* Лого и дисплейные заголовки — UV-градиент с неоновым ореолом */
+/* Знак бренда: белое PROJECT со свечением и алый X поверх середины —
+   ровно как на аватаре и афишах. .lx — сам крест, .l2 оставлен для
+   страниц, где разметка проще. */
 .logo {
-  background: linear-gradient(180deg, #f4e9ff 0%, var(--acid) 55%, var(--acid-deep) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  letter-spacing: 0.06em;
-  filter: drop-shadow(0 0 10px rgba(180, 59, 255, 0.45));
+  color: #fff;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.35);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
+.logo .lx {
+  color: var(--acid);
+  font-weight: 700;
+  margin-inline: -0.06em;
+  text-shadow: 0 0 18px rgba(229, 26, 32, 0.6);
+  transform: scale(1.35);
+  display: inline-block;
+}
+.logo .l2 { color: var(--acid); }
 /* Градиент кладём на .row: у .hero-title своего текста нет, и прозрачный
    цвет с родителя просто гасил бы дочерние строки. */
-.hero-title { filter: drop-shadow(0 2px 0 rgba(10, 6, 18, 0.9)) drop-shadow(0 0 26px rgba(180, 59, 255, 0.35)); }
+.hero-title { filter: drop-shadow(0 2px 0 rgba(10, 6, 18, 0.9)) drop-shadow(0 0 26px rgba(229, 26, 32, 0.35)); }
 .hero-title .row {
-  background: linear-gradient(180deg, #ffffff 0%, #e7d4ff 42%, var(--acid) 80%, var(--acid-deep) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #fff;
+  text-shadow: 0 0 30px rgba(255, 255, 255, 0.25), 0 2px 0 rgba(0, 0, 0, 0.6);
 }
 .hero-title .row.outline {
-  background: none;
-  color: transparent;
-  -webkit-text-stroke: 2px var(--laser);
-  filter: drop-shadow(0 0 18px rgba(255, 43, 106, 0.45));
+  color: var(--acid);
+  -webkit-text-stroke: 0;
+  text-shadow: 0 0 40px rgba(229, 26, 32, 0.55);
 }
 
 /* Мотив «X» за заголовком — тот самый знак бренда */
 .hero-x {
   position: absolute;
-  right: -6%;
+  right: -10%;
   top: 50%;
-  transform: translateY(-50%) rotate(-8deg);
+  transform: translateY(-50%) rotate(-6deg);
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: clamp(16rem, 62vw, 30rem);
-  line-height: 0.8;
-  color: transparent;
-  -webkit-text-stroke: 2px rgba(255, 43, 106, 0.28);
+  font-size: clamp(18rem, 70vw, 34rem);
+  line-height: 0.78;
+  color: rgba(229, 26, 32, 0.16);
+  text-shadow: 0 0 90px rgba(229, 26, 32, 0.35);
   z-index: 0;
   pointer-events: none;
   user-select: none;
@@ -920,11 +928,11 @@ body::before {
 
 /* Кнопки-акценты: UV-заливка со стробом по краю */
 .btn-acid {
-  background: linear-gradient(135deg, var(--acid) 0%, #d67bff 45%, var(--acid-deep) 100%);
+  background: var(--acid);
   color: #fff;
   border: 0;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 8px 30px rgba(180, 59, 255, 0.35);
-  text-shadow: 0 1px 0 rgba(10, 6, 18, 0.4);
+  box-shadow: 0 8px 30px rgba(229, 26, 32, 0.3);
+  text-shadow: none;
 }
 .btn-acid:hover { filter: brightness(1.08); }
 
@@ -933,7 +941,7 @@ body::before {
   background: linear-gradient(160deg, var(--laser) 0%, var(--laser-deep) 100%);
   color: #fff;
   border-color: transparent;
-  box-shadow: 0 6px 24px rgba(255, 43, 106, 0.3);
+  box-shadow: 0 6px 24px rgba(255, 255, 255, 0.3);
 }
 .strip-tag { background: var(--laser); color: #fff; }
 .marquee .m-acid { color: var(--laser); }
@@ -947,16 +955,15 @@ body::before {
   line-height: 1.05;
   text-transform: uppercase;
   color: transparent;
-  -webkit-text-stroke: 1.5px rgba(180, 59, 255, 0.8);
+  -webkit-text-stroke: 1.5px rgba(229, 26, 32, 0.8);
   word-break: break-word;
 }
 
 /* Плейсхолдеры фото (материалы приедут из Instagram): «X» в дымке */
 .ec-poster, .eh-poster, .strip-item.no-img {
   background:
-    radial-gradient(80% 60% at 30% 20%, rgba(180, 59, 255, 0.22), transparent 60%),
-    radial-gradient(70% 60% at 80% 90%, rgba(255, 43, 106, 0.18), transparent 65%),
-    linear-gradient(160deg, #150e22 0%, #0a0612 100%);
+    radial-gradient(80% 60% at 30% 20%, rgba(229, 26, 32, 0.20), transparent 60%),
+    linear-gradient(160deg, #171717 0%, #070707 100%);
   position: relative;
 }
 .strip-item.no-img::after,
@@ -971,7 +978,7 @@ body::before {
   font-weight: 700;
   font-size: 5rem;
   color: transparent;
-  -webkit-text-stroke: 1.5px rgba(180, 59, 255, 0.42);
+  -webkit-text-stroke: 1.5px rgba(229, 26, 32, 0.5);
   pointer-events: none;
 }
 .strip-item.no-img figcaption { z-index: 1; }
@@ -992,11 +999,11 @@ body::before {
 .countdown small { color: var(--muted); font-family: var(--font-text); letter-spacing: 0; }
 
 /* Фейсконтроль: UV-градиент вместо лаймового */
-.face-section { background: radial-gradient(90% 80% at 50% 0%, rgba(122, 31, 208, 0.28), transparent 70%); }
-.fb-early { background: rgba(255, 43, 106, 0.14); border-color: rgba(255, 43, 106, 0.4); }
+.face-section { background: radial-gradient(90% 80% at 50% 0%, rgba(229, 26, 32, 0.20), transparent 70%); }
+.fb-early { background: rgba(229, 26, 32, 0.14); border-color: rgba(229, 26, 32, 0.45); }
 
 /* Шапка билета */
-.tc-head { background: linear-gradient(135deg, var(--acid) 0%, #d67bff 50%, var(--acid-deep) 100%); }
+.tc-head { background: linear-gradient(135deg, var(--acid) 0%, var(--acid-deep) 100%); }
 
 /* ---------- Админка: форма событий ---------- */
 .event-form .ef-grid {
@@ -1062,4 +1069,32 @@ body::before {
 @media (max-width: 560px) {
   .ef-wave { grid-template-columns: 1fr 1fr; }
   .ef-wave .ef-sold { grid-column: 1 / -1; }
+}
+
+/* Знак бренда на билете, сканере и в гостевых заставках */
+.guest-brand .lx, .tc-head .tc-brand .lx {
+  color: var(--acid);
+  transform: scale(1.3);
+  display: inline-block;
+  margin-inline: -0.05em;
+}
+.tc-head .tc-brand .lx { color: #fff; text-shadow: 0 0 12px rgba(255, 255, 255, 0.6); }
+
+/* ---------- Знак бренда в hero: настоящий логотип с афиш ---------- */
+.hero-logo {
+  display: block;
+  width: min(100%, 520px);
+  margin-bottom: 18px;
+  /* логотип снят с чёрного постера — режим blend убирает его фон,
+     чтобы он лёг на страницу без прямоугольной «заплатки» */
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 40px rgba(229, 26, 32, 0.35));
+}
+.hero-logo-sub {
+  font-family: var(--font-display);
+  font-size: clamp(0.9rem, 3.6vw, 1.3rem);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: -6px 0 18px;
 }

@@ -85,7 +85,7 @@ function render(parsed, t) {
 
   const strip = $('t-strip');
   if (t.status === 'revoked' || t.status === 'refunded') {
-    strip.textContent = 'Билет отозван — напиши нам, если это ошибка';
+    strip.textContent = 'Проходка отозвана — напиши нам, если это ошибка';
     strip.classList.remove('hidden');
     strip.classList.add('revoked');
   } else if (t.checkedInAt) {

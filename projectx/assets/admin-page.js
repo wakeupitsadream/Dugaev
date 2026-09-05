@@ -113,7 +113,7 @@ async function refresh() {
   const onlineRub = prov.stub?.rub ?? 0;
   const doorRub = prov.door?.rub ?? 0;
   $('tiles').innerHTML = [
-    { n: sold, label: 'билетов продано', sub: `онлайн ${prov.stub?.n ?? 0} · касса ${prov.door?.n ?? 0}` },
+    { n: sold, label: 'проходок продано', sub: `онлайн ${prov.stub?.n ?? 0} · касса ${prov.door?.n ?? 0}` },
     { n: `${(j.revenue_rub ?? 0).toLocaleString('ru-RU')} ₽`, label: 'выручка', sub: `онлайн ${onlineRub.toLocaleString('ru-RU')} ₽ · касса ${doorRub.toLocaleString('ru-RU')} ₽` },
     { n: checked, label: 'вошло на тусовку', sub: sold ? `${conv}% от проданных` : '' },
     { n: leftTotal, label: 'осталось мест', sub: '' },
@@ -128,7 +128,7 @@ async function refresh() {
   if (days.length) {
     const maxRub = Math.max(...days.map((d) => d.rub));
     $('sales-table').innerHTML =
-      `<tr><th>День</th><th class="num">Билетов</th><th class="num">Выручка</th><th style="width: 42%;"></th></tr>` +
+      `<tr><th>День</th><th class="num">Проходок</th><th class="num">Выручка</th><th style="width: 42%;"></th></tr>` +
       days
         .map((d) => `<tr><td>${esc(d.d.slice(5).split('-').reverse().join('.'))}</td>
               <td class="num">${d.n}</td><td class="num">${d.rub.toLocaleString('ru-RU')} ₽</td>
@@ -209,7 +209,7 @@ async function downloadOfflineList() {
 function renderGuestsTable(tickets) {
   $('print-list').hidden = false;
   $('guests-table').innerHTML =
-    `<tr><th>Гость</th><th>Билет</th><th>Возраст</th><th>Статус</th><th>Вошёл</th></tr>` +
+    `<tr><th>Гость</th><th>Проходка</th><th>Возраст</th><th>Статус</th><th>Вошёл</th></tr>` +
     tickets
       .map(
         (t) => `<tr><td>${esc(t.holder_name)}</td><td>${esc(t.id.toUpperCase())}</td>

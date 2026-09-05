@@ -252,12 +252,12 @@ function updateTotal() {
   $('ot-label').textContent = `${store.qty} ${plural(store.qty, 'проходка', 'проходки', 'проходок')}${w ? ` · ${w.name.toLowerCase()}` : ''}`;
   $('ot-sum').textContent = w ? `${w.priceRub * store.qty} ₽` : '— ₽';
   $('submit-order').textContent = !w
-    ? 'Билетов нет'
+    ? 'Проходок нет'
     : SITE.paymentDemo
       ? `Получить проходки · ${w.priceRub * store.qty} ₽ (демо)`
       : `Оплатить ${w.priceRub * store.qty} ₽`;
   $('submit-order').disabled = !w || store.sending;
-  $('sh-title').textContent = store.event ? `Билеты · ${store.event.title}` : 'Билеты';
+  $('sh-title').textContent = store.event ? `Проходки · ${store.event.title}` : 'Проходки';
 }
 
 function clearErr(k) {

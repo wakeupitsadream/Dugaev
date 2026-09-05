@@ -179,7 +179,7 @@ function renderRevoked(j) {
   stage('danger', `
     <div class="scan-verdict">Отозван</div>
     <div class="scan-name">${esc(j.holder_name || '')}</div>
-    <p class="scan-sub">Билет отозван или возвращён. Не пускать.</p>
+    <p class="scan-sub">Проходка отозвана или возвращена. Не пускать.</p>
   `);
   foot(scanNextBtn());
   bindScanNext();

@@ -483,6 +483,10 @@ body::after {
   position: fixed; inset: 0; z-index: 80; background: rgba(0, 0, 0, 0.66);
   opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
 }
+body.sheet-dragging .sheet, body.sheet-dragging .sheet-backdrop { transition: none; }
+/* Пока лист ведут пальцем, текст под пальцем выделяться не должен */
+body.sheet-dragging, body.sheet-dragging .sheet { user-select: none; -webkit-user-select: none; }
+body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hidden; }
 .sheet {
   position: fixed; inset-inline: 0; bottom: 0; z-index: 81;
   max-height: 88svh; overflow-y: auto; overscroll-behavior: contain;
@@ -490,12 +494,24 @@ body::after {
   border-radius: 20px 20px 0 0;
   padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
   transform: translateY(102%); transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Лист — материал, а не сплошная плашка: содержимое под ним просвечивает. */
+  background: rgba(16, 16, 16, 0.92);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.6);
+  touch-action: pan-y;
+  will-change: transform;
 }
+/* Полоска-ручка: подсказывает, что лист можно тянуть */
+.sheet::before { transition: background 0.15s ease, width 0.15s ease; }
+.sheet.is-dragging::before { background: var(--muted); width: 56px; }
 .sheet::before { content: ''; display: block; width: 44px; height: 4px; border-radius: 2px; background: var(--line); margin: 6px auto 14px; }
 .sheet-open .sheet { transform: none; }
-.sheet-open .sheet-backdrop { opacity: 1; pointer-events: auto; }
+/* Пока лист тянут, подложка светлеет вместе с ним: движение заранее
+   показывает, чем всё кончится (--sheet-progress ставит sheet-drag.js). */
+.sheet-open .sheet-backdrop { opacity: var(--sheet-progress, 1); pointer-events: auto; }
 @media (min-width: 761px) {
-  .sheet { inset-inline: auto; right: 0; top: 0; bottom: 0; width: 440px; max-height: none; border-radius: 0; border-left: 1px solid var(--line); transform: translateX(102%); }
+  .sheet { inset-inline: auto; right: 0; top: 0; bottom: 0; width: 440px; max-height: none; border-radius: 0; border-left: 1px solid var(--line); transform: translateX(102%); touch-action: auto; }
   .sheet::before { display: none; }
   .sheet-open .sheet { transform: none; }
 }
@@ -1102,3 +1118,78 @@ body::before {
   color: var(--muted);
   margin: -6px 0 18px;
 }
+
+/* ============================================================
+   Доводка по apple-design: доступность, материалы, типографика.
+   ============================================================ */
+
+/* --- §14: три независимых сигнала, а не один --- */
+@media (prefers-reduced-motion: reduce) {
+  /* Не «выключить движение», а заменить его на спокойный эквивалент:
+     оставляем прозрачность и цвет, убираем перемещения и перелёты. */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.12s !important;
+    scroll-behavior: auto !important;
+  }
+  .rise { opacity: 1; transform: none; animation: none; }
+  .sheet { transition: opacity 0.12s ease; }
+  .event-card:hover, .strip-item:hover img, .program-item:hover { transform: none; }
+  .btn:active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* Прозрачность — украшение; читаемость важнее. Гасим стекло. */
+  .site-header { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .sheet { background: var(--bg-2); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .sticky-cta { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  body::before { display: none; }
+  body::after { display: none; }
+}
+@media (prefers-contrast: more) {
+  :root {
+    --muted: #cfc9c9;   /* серый текст подтягиваем к белому */
+    --dim: #a49e9e;
+    --line: #4a4a4a;    /* границы должны быть видны, а не угадываться */
+    --line-soft: #3a3a3a;
+  }
+  .btn-ghost { border-color: var(--text); }
+  .badge { border-color: var(--muted); color: var(--text); }
+  body::after { display: none; } /* зерно поверх текста снижает контраст */
+}
+
+/* --- §16 Craft: клавиатура должна быть видна --- */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.btn:focus-visible { outline-offset: 3px; }
+
+/* --- §1 Response: убираем 300-мс задержку тапа на всём интерактивном --- */
+a, button, summary, .chip, .stepper button, label.check { touch-action: manipulation; }
+
+/* --- §10: зона нажатия не меньше 44px там, где палец --- */
+.top-nav a, .faq summary, .ec-go, .dev-sign a { min-height: 44px; display: inline-flex; align-items: center; }
+.sh-close { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* --- §12: край прокрутки вместо жёсткой линейки под шапкой --- */
+.site-header { border-bottom: 0; }
+.site-header::after {
+  content: '';
+  position: absolute; inset-inline: 0; top: 100%; height: 20px;
+  background: linear-gradient(to bottom, rgba(7, 7, 7, 0.55), transparent);
+  pointer-events: none;
+}
+
+/* --- §15: трекинг зависит от размера, а не один на всё --- */
+/* Крупный дисплейный текст: буквы «расходятся» с ростом кегля — стягиваем. */
+.hero-title, .eh-title, .scan-verdict, .ec-word { letter-spacing: -0.01em; }
+/* Мелкие подписи капсом: наоборот, разрежаем — иначе слипаются. */
+.kicker, .badge, .btn, .ap-kicker, .cc-kind { letter-spacing: 0.08em; }
+/* Тело текста живёт на нуле. */
+p, .muted, .faq-a, .ec-meta, .eh-descr { letter-spacing: 0; }
+/* Интерлиньяж обратен кеглю: у заголовков плотнее, у текста свободнее. */
+h1, .hero-title { line-height: 1.02; }
+h2 { line-height: 1.1; }
+.faq-a, .manifesto p, .parents-box p { line-height: 1.6; }

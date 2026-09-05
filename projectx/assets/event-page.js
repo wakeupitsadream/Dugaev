@@ -1,6 +1,7 @@
 // Страница ивента + чекаут. Состояние формы живёт в store (переживает
 // перерисовки), экран успеха держится флагом showingDone.
 import { SITE } from './data/config.js';
+import { makeSheetDraggable } from './sheet-drag.js';
 import { loadEvents, esc } from './events-load.js';
 import { waveStates, activeWave, totalSold } from './waves.js';
 import { goingCount } from './social.js';
@@ -118,17 +119,33 @@ function renderWaves() {
 
 // ---------- Шторка ----------
 function bindSheet() {
+  const sheet = $('sheet');
+  // Шторку можно тянуть пальцем: жест ведёт лист 1:1, бросок уносит его по
+  // инерции, анимацию можно перехватить на любом кадре (assets/sheet-drag.js).
+  const drag = makeSheetDraggable({
+    sheet,
+    isOpen: () => document.body.classList.contains('sheet-open'),
+    onClose: () => finishClose(),
+  });
+
+  const finishClose = () => {
+    document.body.classList.remove('sheet-open');
+    unlockScroll();
+    if (store.showingDone) resetAfterSuccess();
+  };
+
   const open = () => {
     if (!store.wave) return;
+    drag.reset();
+    lockScroll();
     document.body.classList.add('sheet-open');
     if (SITE.paymentDemo) $('demo-pay-note').classList.remove('hidden');
     renderAttendees();
     updateTotal();
   };
-  const close = () => {
-    document.body.classList.remove('sheet-open');
-    if (store.showingDone) resetAfterSuccess();
-  };
+  // закрытие любым способом идёт тем же путём, что и жест — лист уходит вниз
+  const close = () => drag.close();
+
   $('buy-open').onclick = open;
   $('sticky-buy').onclick = open;
   $('sheet-close').onclick = close;
@@ -136,8 +153,23 @@ function bindSheet() {
   $('success-close').onclick = close;
   $('fallback-close').onclick = close;
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') close();
+    if (ev.key === 'Escape' && document.body.classList.contains('sheet-open')) close();
   });
+}
+
+// Фон за открытой шторкой прокручиваться не должен — иначе человек теряет
+// место, к которому вернётся. Положение страницы запоминаем и возвращаем.
+let scrollLockY = 0;
+function lockScroll() {
+  scrollLockY = window.scrollY;
+  document.body.style.top = `-${scrollLockY}px`;
+  document.body.classList.add('scroll-locked');
+}
+function unlockScroll() {
+  if (!document.body.classList.contains('scroll-locked')) return;
+  document.body.classList.remove('scroll-locked');
+  document.body.style.top = '';
+  window.scrollTo(0, scrollLockY);
 }
 
 function showPane(name) {

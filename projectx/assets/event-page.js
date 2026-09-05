@@ -233,7 +233,10 @@ let heightSpring = null;
 function swapPane(name) {
   const sheet = $('sheet');
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduced || !sheet) return showPane(name);
+  // Настольная раскладка — боковая панель во всю высоту окна: задавать ей
+  // height значит выбить её из распорки top/bottom. Там панель не «растёт».
+  const mobile = window.matchMedia('(max-width: 760px)').matches;
+  if (reduced || !mobile || !sheet) return showPane(name);
 
   const from = sheet.getBoundingClientRect().height;
   showPane(name);

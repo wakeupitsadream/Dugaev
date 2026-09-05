@@ -44,11 +44,19 @@ async function init() {
   renderWaves();
   bindSheet();
   bindForm();
-  setInterval(renderWaves, 60_000); // живость счётчика; шторку не трогает
+  renderSavedTickets();
+  // Счётчик волн живой, но пока человек заполняет форму или ждёт ответа,
+  // цена и надпись на кнопке под ним меняться не должны — это его сделка.
+  setInterval(() => {
+    if (document.body.classList.contains('sheet-open') || store.sending) return;
+    renderWaves();
+  }, 60_000);
 }
 
 function renderEvent() {
   const e = store.event;
+  // Данные пришли — только теперь кнопки могут что-то обещать
+  for (const id of ['buy-open', 'sticky-buy']) $(id).disabled = false;
   document.title = `${e.title} — проходки · PROJECT X`;
   const db = dateBox(e.startsAt);
   $('eh-word').textContent = e.title;
@@ -124,7 +132,10 @@ function bindSheet() {
   // инерции, анимацию можно перехватить на любом кадре (assets/sheet-drag.js).
   const drag = makeSheetDraggable({
     sheet,
-    isOpen: () => document.body.classList.contains('sheet-open'),
+    // Пока заказ уходит на сервер, лист не отпускаем: экран успеха со ссылками
+    // на проходки рисуется именно здесь, и закрыть его в этот момент — значит
+    // забрать у человека то, за что он только что заплатил.
+    isOpen: () => document.body.classList.contains('sheet-open') && !store.sending,
     onClose: () => finishClose(),
   });
 
@@ -144,7 +155,14 @@ function bindSheet() {
     updateTotal();
   };
   // закрытие любым способом идёт тем же путём, что и жест — лист уходит вниз
-  const close = () => drag.close();
+  const close = () => {
+    if (store.sending) {
+      // отвечаем на нажатие, но не закрываем: заказ в полёте
+      alertNote('Заказ уже уходит — секунду.');
+      return;
+    }
+    drag.close();
+  };
 
   $('buy-open').onclick = open;
   $('sticky-buy').onclick = open;
@@ -169,7 +187,9 @@ function unlockScroll() {
   if (!document.body.classList.contains('scroll-locked')) return;
   document.body.classList.remove('scroll-locked');
   document.body.style.top = '';
-  window.scrollTo(0, scrollLockY);
+  // Мгновенно: у html глобально scroll-behavior: smooth, и обычный scrollTo
+  // заставлял страницу плавно «уползать» на место после каждого закрытия.
+  window.scrollTo({ top: scrollLockY, left: 0, behavior: 'instant' });
 }
 
 function showPane(name) {
@@ -262,13 +282,13 @@ function updateTotal() {
 
 function clearErr(k) {
   const el = $(`err-${k}`);
-  if (el) el.style.display = 'none';
+  if (el) el.classList.remove('is-on');
   $(`f-${k}`)?.closest('.field')?.classList.remove('is-error');
 }
-function clearAttErr(i) { const el = $(`err-att-${i}`); if (el) el.style.display = 'none'; $(`att-${i}`)?.closest('.field')?.classList.remove('is-error'); }
+function clearAttErr(i) { const el = $(`err-att-${i}`); if (el) el.classList.remove('is-on'); $(`att-${i}`)?.closest('.field')?.classList.remove('is-error'); }
 function showFieldErr(fieldEl, errEl, msg) {
   if (msg && errEl) errEl.textContent = msg;
-  if (errEl) errEl.style.display = 'block';
+  if (errEl) errEl.classList.add('is-on');
   fieldEl?.closest('.field')?.classList.add('is-error');
 }
 
@@ -286,11 +306,11 @@ function validate() {
   }
   const consentBox = $('f-consent').closest('.check');
   if (!store.consent) {
-    $('err-consent').style.display = 'block';
+    $('err-consent').classList.add('is-on');
     consentBox?.classList.add('is-error');
     firstBad = firstBad || $('f-consent');
   } else {
-    $('err-consent').style.display = 'none';
+    $('err-consent').classList.remove('is-on');
     consentBox?.classList.remove('is-error');
   }
   if (firstBad) firstBad.focus();
@@ -301,8 +321,13 @@ async function submitOrder() {
   if (store.sending || !store.wave) return;
   if (!validate()) return;
   store.sending = true;
-  $('submit-order').disabled = true;
-  $('submit-order').textContent = 'Оформляем…';
+  const btn = $('submit-order');
+  // Не disabled: заблокированная кнопка перестаёт принимать ввод вовсе, а
+  // человеку нужно видеть, что процесс идёт, и иметь право передумать.
+  btn.classList.add('is-busy');
+  btn.textContent = 'Оформляем…';
+  const cancelBtn = $('submit-cancel');
+  const cancelTimer = setTimeout(() => cancelBtn?.classList.remove('hidden'), 3000);
 
   const body = {
     event_id: store.event.id,
@@ -321,7 +346,11 @@ async function submitOrder() {
   let resp = null;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    store.ctrl = ctrl;
+    if (cancelBtn) cancelBtn.onclick = () => ctrl.abort();
+    // 8 секунд: дольше на ночной мобильной сети всё равно читается как отказ,
+    // а ручное оформление в директ уже готово и ждёт.
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
     const r = await fetch('/api/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -334,6 +363,10 @@ async function submitOrder() {
     resp = null;
   }
   store.sending = false;
+  store.ctrl = null;
+  clearTimeout(cancelTimer);
+  cancelBtn?.classList.add('hidden');
+  btn.classList.remove('is-busy');
   updateTotal();
 
   // сервер недоступен/упал — фолбэк в директ Instagram, никакой «ошибки 500»
@@ -347,7 +380,7 @@ async function submitOrder() {
   if (j.error === 'wave_sold_out') return handleSoldOut(j.next_wave);
   if (j.error === 'validation') {
     if (j.fields?.phone) showFieldErr($('f-phone'), $('err-phone'), j.fields.phone);
-    if (j.fields?.consent) $('err-consent').style.display = 'block';
+    if (j.fields?.consent) $('err-consent').classList.add('is-on');
     (j.attendees || []).forEach((er) => {
       if (er.i >= 0) showFieldErr($(`att-${er.i}`), $(`err-att-${er.i}`), er.code === 'minor_forbidden' ? 'На 18+ только совершеннолетние' : undefined);
     });
@@ -395,6 +428,16 @@ function showSuccess(j) {
     document.querySelector('#pane-success .success-note').textContent =
       'Демо-покупка прошла (деньги не списывались). Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.';
   }
+  // Дубликат ссылок на случай, если лист закроют: единственный экземпляр
+  // «моих проходок» на сайте не должен исчезать вместе со шторкой.
+  try {
+    localStorage.setItem(
+      `px_tickets_${store.event.id}`,
+      JSON.stringify({ at: Date.now(), tickets: j.tickets || [] })
+    );
+  } catch { /* приватный режим — не беда, экран успеха всё равно показан */ }
+  renderSavedTickets();
+
   $('success-list').innerHTML = (j.tickets || [])
     .map(
       (t) => `
@@ -405,6 +448,34 @@ function showSuccess(j) {
     )
     .join('');
   showPane('success');
+}
+
+// Проходки, купленные на этой странице, остаются доступными и после закрытия
+// шторки: единственная ссылка на именной QR не должна жить в одном модальном окне.
+function renderSavedTickets() {
+  const host = $('saved-tickets');
+  if (!host || !store.event) return;
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(`px_tickets_${store.event.id}`) || 'null');
+  } catch { /* нечитаемое хранилище — просто не показываем блок */ }
+  const list = saved?.tickets || [];
+  if (!list.length) {
+    host.hidden = true;
+    return;
+  }
+  host.innerHTML =
+    `<div class="st-head">Твои проходки на эту ночь</div>` +
+    list
+      .map(
+        (t) => `
+      <a href="${esc(t.url)}">
+        <span>${esc(t.holder_name)}</span>
+        <span class="st-open">открыть</span>
+      </a>`
+      )
+      .join('');
+  host.hidden = false;
 }
 
 function showFallback() {

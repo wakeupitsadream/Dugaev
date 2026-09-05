@@ -224,14 +224,14 @@
         <form class="city-form" id="city-form" novalidate>
           <div class="field">
             <input type="text" id="cf-city" placeholder="Твой город" autocomplete="address-level2" aria-label="Твой город" />
-            <div class="err" id="err-cf-city">Напиши город</div>
+            <div class="err" role="alert" id="err-cf-city">Напиши город</div>
           </div>
           <div class="field">
             <div class="phone-wrap">
               <span class="phone-prefix hidden" id="cf-prefix" aria-hidden="true">+7</span>
               <input type="text" id="cf-contact" placeholder="@ник или телефон" autocomplete="off" aria-label="Ник или телефон" />
             </div>
-            <div class="err" id="err-cf-contact">Оставь ник или телефон — позовём первым</div>
+            <div class="err" role="alert" id="err-cf-contact">Оставь ник или телефон — позовём первым</div>
           </div>
           <div style="position: absolute; left: -9999px;" aria-hidden="true">
             <input type="text" id="cf-website" tabindex="-1" autocomplete="off" />
@@ -240,7 +240,7 @@
             <input type="checkbox" id="cf-consent" />
             <span>Согласен на обработку данных — <a href="/privacy.html" target="_blank" rel="noopener">политика</a></span>
           </label>
-          <div class="err" id="err-cf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
+          <div class="err" role="alert" id="err-cf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
           <button class="btn btn-acid btn-block" id="cf-send" type="submit">Отправить заявку</button>
           <p class="form-note" id="cf-note" style="margin-top: 10px;">Как наберётся достаточно заявок из твоего города — напишем тебе первому.</p>
         </form>

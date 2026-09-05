@@ -45,8 +45,10 @@
             <div id="ev-wp-rows"></div>
           </div>
 
+          <div class="saved-tickets" id="saved-tickets" hidden></div>
+
           <div style="margin-top: 22px;">
-            <button class="btn btn-acid btn-block" id="buy-open" type="button">Взять проходку</button>
+            <button class="btn btn-acid btn-block" id="buy-open" type="button" disabled>Загружаем…</button>
             <p class="form-note" style="margin-top: 10px;">Оплата онлайн · именной QR каждому гостю · вход за секунды</p>
           </div>
         </div>
@@ -89,7 +91,7 @@
           <span class="phone-prefix" aria-hidden="true">+7</span>
           <input type="tel" id="f-phone" inputmode="numeric" placeholder="912 000-00-00" autocomplete="tel-national" />
         </div>
-        <div class="err" id="err-phone">Укажи номер телефона</div>
+        <div class="err" role="alert" id="err-phone">Укажи номер телефона</div>
       </div>
       <div class="field">
         <label for="f-tg">Telegram (необязательно)</label>
@@ -105,7 +107,7 @@
         <input type="checkbox" id="f-consent" />
         <span>Согласен на обработку персональных данных — <a href="/privacy.html" target="_blank" rel="noopener">политика конфиденциальности</a></span>
       </label>
-      <div class="err" id="err-consent" style="margin-top: -8px; margin-bottom: 10px;">Без согласия не сможем оформить проходку</div>
+      <div class="err" role="alert" id="err-consent" style="margin-top: -8px; margin-bottom: 10px;">Без согласия не сможем оформить проходку</div>
 
       <div class="fallback-box hidden" id="wave-note"></div>
 
@@ -114,6 +116,7 @@
         <span class="ot-sum" id="ot-sum">— ₽</span>
       </div>
       <button class="btn btn-acid btn-block" id="submit-order" type="button" style="margin-top: 14px;">Оплатить</button>
+      <button class="btn btn-ghost btn-block hidden" id="submit-cancel" type="button" style="margin-top: 8px;">Отменить и оформить вручную</button>
       <p class="form-note" style="margin-top: 10px;">Нажимая «Оплатить», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.</p>
     </div>
 
@@ -143,7 +146,7 @@
   </aside>
 
   <div class="sticky-cta" id="sticky-cta">
-    <button class="btn btn-acid" id="sticky-buy" type="button">Взять проходку</button>
+    <button class="btn btn-acid" id="sticky-buy" type="button" disabled>Загружаем…</button>
   </div>
 
   <footer class="site-footer">

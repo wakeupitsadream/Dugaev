@@ -351,7 +351,7 @@ function initCityForm() {
 
   function toggleErr(id, isBad) {
     const el = $(`err-${id}`);
-    if (el) el.style.display = isBad ? 'block' : 'none';
+    if (el) el.classList.toggle('is-on', isBad);
     return isBad;
   }
 }

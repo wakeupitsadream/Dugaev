@@ -30,12 +30,18 @@ function init() {
 function showGate(err) {
   $('gate').hidden = false;
   $('dash').hidden = true;
+  $('gate-err').textContent = 'Ключ не подошёл';
   $('gate-err').style.display = err ? 'block' : 'none';
   $('gate-name').value = state.name;
   $('gate-go').onclick = () => {
     state.key = $('gate-key').value.trim();
     state.name = $('gate-name').value.trim() || 'админ';
-    if (!state.key) return $('gate-key').focus();
+    if (!state.key) {
+      $('gate-key').focus();
+      $('gate-err').textContent = 'Введи ключ администратора.';
+      $('gate-err').style.display = 'block';
+      return;
+    }
     localStorage.setItem(LS_KEY, state.key);
     localStorage.setItem(LS_NAME, state.name);
     boot();
@@ -44,6 +50,18 @@ function showGate(err) {
 
 function headers() {
   return { 'X-Admin-Key': state.key };
+}
+
+function bindLogout() {
+  const b = $('btn-logout');
+  if (!b) return;
+  b.onclick = () => {
+    if (!window.confirm('Выйти из админки на этом устройстве? Ключ придётся вводить заново.')) return;
+    localStorage.removeItem(LS_KEY);
+    state.key = '';
+    $('gate-key').value = '';
+    showGate();
+  };
 }
 
 async function boot() {
@@ -62,6 +80,7 @@ async function boot() {
   }
   $('gate').hidden = true;
   $('dash').hidden = false;
+  bindLogout(); // ключ лежит в localStorage телефона, который на входе ходит по рукам
   bindService(); // кнопки сервиса доступны и до инициализации БД
   bindWalkin();
   bindEventEditor();
@@ -434,8 +453,13 @@ function bindEventEditor() {
   const form = $('event-form');
   if (!form) return;
   state.editorWaves = [];
-  $('ee-new').onclick = () => fillEditor(EMPTY_EVENT());
+  $('ee-new').onclick = () => { if (confirmDiscard()) fillEditor(EMPTY_EVENT()); };
   $('ee-select').onchange = () => {
+    if (!confirmDiscard()) {
+      // человек передумал уходить — возвращаем выбор на редактируемое событие
+      $('ee-select').value = $('ee-id').value;
+      return;
+    }
     const ev = (state.adminEvents || []).find((e) => e.id === $('ee-select').value);
     if (ev) fillEditor(toEditor(ev));
   };
@@ -490,6 +514,27 @@ async function loadAdminEvents(selectId) {
   } catch { /* редактор просто останется пустым */ }
 }
 
+// Слепок того, что сейчас в форме. Нужен, чтобы отличить «человек ничего не
+// трогал» от «человек полчаса набирал описание».
+function editorSnapshot() {
+  return JSON.stringify([
+    $('ee-id').value, $('ee-title').value, $('ee-date').value, $('ee-start').value,
+    $('ee-end').value, $('ee-age').value, $('ee-status').value, $('ee-venue').value,
+    $('ee-address').value, $('ee-descr').value,
+    (state.editorWaves || []).map((w) => [w.waveNo, w.name, w.priceRub, w.quota]),
+  ]);
+}
+
+// Переключение события затирало форму молча: набранное описание исчезало без
+// единого слова. Теперь несохранённое сначала спрашивает.
+function editorDirty() {
+  return Boolean(state.editorBase) && editorSnapshot() !== state.editorBase;
+}
+function confirmDiscard() {
+  if (!editorDirty()) return true;
+  return window.confirm('В форме есть несохранённые правки. Уйти и потерять их?');
+}
+
 function fillEditor(ev) {
   $('ee-id').value = ev.id || '';
   $('ee-title').value = ev.title || '';
@@ -507,6 +552,7 @@ function fillEditor(ev) {
   }));
   renderEditorWaves();
   $('ee-note').textContent = ev.id ? `Правишь: ${ev.id}` : 'Новое событие';
+  state.editorBase = editorSnapshot();
 }
 
 function renderEditorWaves() {

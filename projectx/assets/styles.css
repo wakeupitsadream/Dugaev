@@ -102,7 +102,10 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-text);
-  font-size: 16px;
+  /* Не 16px: жёсткий кегль в body игнорирует размер текста, выставленный
+     человеком в браузере. 1rem наследует его настройку — вёрстка в rem
+     тянется следом. */
+  font-size: 1rem;
   line-height: 1.55;
   overflow-x: hidden;
 }
@@ -515,6 +518,32 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
   .sheet::before { display: none; }
   .sheet-open .sheet { transform: none; }
 }
+/* Пока лист едет под пальцем, тяжёлое стекло пересчитывается каждый кадр — на
+   среднем телефоне это стоит кадров ровно там, где важнее всего гладкость.
+   На время движения материал становится плотным: за подложкой в 66% чёрного
+   всё равно почти ничего не видно, а жест остаётся ровным. */
+.sheet.is-dragging {
+  background: rgba(14, 14, 14, 0.98);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Модальная задача выходит вперёд, а страница уходит на второй план — вместе
+   с листом, а не отдельно от него: масштаб привязан к тому же прогрессу, что
+   и подложка, поэтому фон «дышит» ровно на столько, на сколько тянут лист. */
+@media (max-width: 760px) {
+  body.sheet-open main {
+    transform: scale(calc(1 - 0.024 * var(--sheet-progress, 1)));
+    transform-origin: 50% 0;
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  body.sheet-dragging main { transition: none; }
+  body.sheet-open .site-header,
+  body.sheet-open .sticky-cta { opacity: calc(1 - 0.55 * var(--sheet-progress, 1)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.sheet-open main { transform: none; }
+}
+
 .sheet h3 { font-size: 1.1rem; text-transform: uppercase; margin-bottom: 16px; }
 .sheet .sh-close {
   position: absolute; top: 14px; right: 14px; background: none; border: 0; color: var(--muted);
@@ -597,6 +626,12 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 /* фолбэк заказа */
 .fallback-box { background: var(--amber-bg); border: 1px solid rgba(255, 138, 0, 0.4); border-radius: var(--radius-s); padding: 16px; font-size: 0.92rem; }
 .fallback-box .btn { margin-top: 12px; }
+/* Обратная связь бывает четырёх видов, и различать их надо с одного взгляда.
+   Статус — спокойный серый: просто сообщаем. Предупреждение — янтарь: сделка
+   изменилась, посмотри. Ошибка — красный: так не получится, вот другой путь. */
+#wave-note.note-info { background: rgba(255, 255, 255, 0.05); border-color: var(--line); color: var(--text); }
+#wave-note.note-warn { background: var(--amber-bg); border-color: rgba(255, 138, 0, 0.4); }
+#wave-note.note-error { background: var(--danger-bg); border-color: rgba(255, 46, 77, 0.5); }
 
 /* ============================================================
    Билет гостя (/t/)
@@ -831,6 +866,8 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 .fb-early { background: #ff6a00; color: var(--ink); box-shadow: 0 0 40px rgba(255, 106, 0, 0.25); }
 .face-sub { color: var(--muted); max-width: 420px; margin: 14px 0 16px; }
 .face-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+#face-age.is-invalid { border-color: var(--danger); }
+#face-err { margin: 8px 0 0; }
 @media (prefers-reduced-motion: no-preference) {
   .shake { animation: shake 0.35s ease; }
   @keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
@@ -1229,6 +1266,12 @@ h2 { line-height: 1.1; }
   text-decoration: none; color: var(--text); font-weight: 600;
 }
 .saved-tickets .st-open { color: var(--acid); font-size: 0.82rem; }
+
+/* --- §10: чипы и тумблер «нет 18» были ниже 44px — палец мимо, а цена ошибки
+   на чекауте высокая. Растим зону нажатия, не трогая рисунок. --- */
+.chip { min-height: 44px; display: inline-flex; align-items: center; }
+.minor-toggle { min-height: 44px; padding-block: 6px; }
+.minor-toggle input { width: 20px; height: 20px; }
 
 /* --- §14/§20: кольцо фокуса должно доставать и до полей ввода --- */
 .field input:focus-visible, .field textarea:focus-visible,

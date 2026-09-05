@@ -2,6 +2,7 @@
 // перерисовки), экран успеха держится флагом showingDone.
 import { SITE } from './data/config.js';
 import { makeSheetDraggable } from './sheet-drag.js';
+import { springTo } from './spring.js';
 import { loadEvents, esc } from './events-load.js';
 import { waveStates, activeWave, totalSold } from './waves.js';
 import { goingCount } from './social.js';
@@ -142,23 +143,37 @@ function bindSheet() {
   const finishClose = () => {
     document.body.classList.remove('sheet-open');
     unlockScroll();
+    // Закрытый лист исчезает и для клавиатуры со скринридером: без этого он
+    // остаётся в порядке обхода — человек «проваливается» в невидимую форму.
+    sheet.inert = true;
+    pageLayers().forEach((el) => { el.inert = false; });
+    returnFocus();
     if (store.showingDone) resetAfterSuccess();
   };
 
   const open = () => {
     if (!store.wave) return;
-    drag.reset();
     lockScroll();
-    document.body.classList.add('sheet-open');
+    sheet.inert = false;
+    // Пока лист открыт, страницы под ним для обхода не существует: Tab ходит
+    // по кругу внутри диалога, как и положено модальному окну.
+    pageLayers().forEach((el) => { el.inert = true; });
+    lastFocused = document.activeElement;
     if (SITE.paymentDemo) $('demo-pay-note').classList.remove('hidden');
     renderAttendees();
     updateTotal();
+    // Замер положения листа — до навешивания класса, иначе стиль уже «схлопнет»
+    // трансформацию к нулю и пружине будет не с чего стартовать.
+    drag.open(() => document.body.classList.add('sheet-open'));
+    // Фокус — на сам диалог, а не на первое поле: автофокус в текстовое поле
+    // на телефоне мгновенно поднимает клавиатуру и закрывает половину листа.
+    sheet.focus({ preventScroll: true });
   };
   // закрытие любым способом идёт тем же путём, что и жест — лист уходит вниз
   const close = () => {
     if (store.sending) {
       // отвечаем на нажатие, но не закрываем: заказ в полёте
-      alertNote('Заказ уже уходит — секунду.');
+      alertNote('Заказ уже уходит — секунду.', 'info');
       return;
     }
     drag.close();
@@ -173,6 +188,19 @@ function bindSheet() {
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && document.body.classList.contains('sheet-open')) close();
   });
+}
+
+// Слои страницы, которые модальный лист выключает на время своей работы.
+const pageLayers = () =>
+  ['.site-header', 'main', '.site-footer', '#sticky-cta']
+    .map((sel) => document.querySelector(sel))
+    .filter(Boolean);
+
+let lastFocused = null;
+function returnFocus() {
+  const el = lastFocused;
+  lastFocused = null;
+  if (el && document.contains(el)) el.focus({ preventScroll: true });
 }
 
 // Фон за открытой шторкой прокручиваться не должен — иначе человек теряет
@@ -198,6 +226,39 @@ function showPane(name) {
   $('pane-fallback').classList.toggle('hidden', name !== 'fallback');
 }
 
+// Панели разной высоты, и мгновенная подмена дёргает верхний край листа на
+// пол-экрана — читается как «что-то сломалось». Лист доезжает до новой высоты
+// сам: замерили до, замерили после, прошли расстояние пружиной.
+let heightSpring = null;
+function swapPane(name) {
+  const sheet = $('sheet');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced || !sheet) return showPane(name);
+
+  const from = sheet.getBoundingClientRect().height;
+  showPane(name);
+  sheet.style.height = 'auto';
+  const to = sheet.getBoundingClientRect().height;
+  sheet.style.height = '';
+  if (Math.abs(to - from) < 4) return;
+
+  heightSpring?.stop();
+  const prevOverflow = sheet.style.overflowY;
+  sheet.style.overflowY = 'hidden';
+  heightSpring = springTo({
+    from,
+    to,
+    damping: 1,
+    response: 0.32,
+    onUpdate: (v) => { sheet.style.height = `${v}px`; },
+    onRest: () => {
+      sheet.style.height = '';
+      sheet.style.overflowY = prevOverflow;
+      heightSpring = null;
+    },
+  });
+}
+
 function resetAfterSuccess() {
   store.showingDone = false;
   store.qty = 1;
@@ -216,6 +277,10 @@ function bindForm() {
     store.phone = stripRuPhone(e.target.value);
     e.target.value = formatRuPhoneDigits(store.phone);
     clearErr('phone');
+  };
+  $('f-phone').onblur = () => {
+    // Начатый, но недобранный номер — уже ошибка: показываем сразу, а не на кнопке
+    if (store.phone && !normalizePhone('+7' + store.phone)) showFieldErr($('f-phone'), $('err-phone'));
   };
   $('f-tg').oninput = (e) => { store.tg = e.target.value; };
   $('f-consent').onchange = (e) => {
@@ -236,7 +301,41 @@ function setQty(q) {
   updateTotal();
 }
 
-// Перерисовка списка гостей только по смене qty; ввод хранится в store.
+// Одна строка гостя. Собирается разметкой, но заводится ровно один раз —
+// дальше живёт своей жизнью и не пересоздаётся.
+function attendeeRow(i, minorAllowed) {
+  const row = document.createElement('div');
+  row.className = 'field';
+  row.dataset.i = String(i);
+  row.innerHTML = `
+      <label for="att-${i}">${i === 0 ? 'Твоё имя и фамилия' : `Гость ${i + 1} — имя и фамилия`}</label>
+      <input type="text" id="att-${i}" placeholder="Как в паспорте" autocomplete="${i === 0 ? 'name' : 'off'}" />
+      <div class="err" id="err-att-${i}" role="alert">Напиши имя — проходка именная</div>
+      ${minorAllowed ? `
+      <label class="minor-toggle">
+        <input type="checkbox" id="minor-${i}" />
+        <span>Нет 18 — надо будет надеть браслет на входе</span>
+      </label>` : ''}`;
+  const input = row.querySelector(`#att-${i}`);
+  input.oninput = () => {
+    if (store.attendees[i]) store.attendees[i].name = input.value;
+    clearAttErr(i);
+  };
+  // Проверяем на уходе из поля, а не залпом на кнопке: человек узнаёт о
+  // проблеме там, где может её сразу поправить. Пустое поле, до которого ещё
+  // не дошли, не ругаем — это не ошибка, это «ещё не заполнено».
+  input.onblur = () => {
+    const v = (store.attendees[i]?.name || '').trim();
+    if (v && v.length < 2) showFieldErr(input, $(`err-att-${i}`));
+  };
+  const m = row.querySelector(`#minor-${i}`);
+  if (m) m.onchange = () => { if (store.attendees[i]) store.attendees[i].minor = m.checked; };
+  return row;
+}
+
+// Список гостей меняется по разнице, а не пересобирается целиком: полная
+// перерисовка вырывает каретку из поля, в котором печатают, роняет фокус и
+// сбрасывает состояние клавиатуры на телефоне.
 function renderAttendees() {
   const e = store.event;
   // Тумблер «нет 18» осмыслен только на смешанных 16+ ивентах:
@@ -245,25 +344,16 @@ function renderAttendees() {
   $('qty-val').textContent = String(store.qty);
   $('qty-minus').disabled = store.qty <= 1;
   $('qty-plus').disabled = store.qty >= 10;
-  $('attendees').innerHTML = store.attendees
-    .map(
-      (a, i) => `
-      <div class="field" data-i="${i}">
-        <label for="att-${i}">${i === 0 ? 'Твоё имя и фамилия' : `Гость ${i + 1} — имя и фамилия`}</label>
-        <input type="text" id="att-${i}" value="${esc(a.name)}" placeholder="Как в паспорте" autocomplete="${i === 0 ? 'name' : 'off'}" />
-        <div class="err" id="err-att-${i}">Напиши имя — проходка именная</div>
-        ${minorAllowed ? `
-        <label class="minor-toggle">
-          <input type="checkbox" id="minor-${i}" ${a.minor ? 'checked' : ''} />
-          <span>Нет 18 — надо будет надеть браслет на входе</span>
-        </label>` : ''}
-      </div>`
-    )
-    .join('');
+
+  const box = $('attendees');
+  while (box.children.length > store.attendees.length) box.lastElementChild.remove();
+  while (box.children.length < store.attendees.length) box.appendChild(attendeeRow(box.children.length, minorAllowed));
+
   store.attendees.forEach((a, i) => {
-    $(`att-${i}`).oninput = (ev) => { a.name = ev.target.value; clearAttErr(i); };
+    const input = $(`att-${i}`);
+    if (input && input.value !== a.name) input.value = a.name;
     const m = $(`minor-${i}`);
-    if (m) m.onchange = (ev) => { a.minor = ev.target.checked; };
+    if (m && m.checked !== a.minor) m.checked = a.minor;
   });
 }
 
@@ -374,7 +464,16 @@ async function submitOrder() {
 
   const j = resp.json;
   if (j.ok) {
-    if (handlePayment(j.payment) === 'redirect') return;
+    if (handlePayment(j.payment) === 'redirect') {
+      // Браузер уже уходит на страницу оплаты, но уход не мгновенный: на
+      // медленной сети окно в пару секунд хватает, чтобы нажать ещё раз и
+      // оформить второй заказ. До самого перехода кнопка занята.
+      store.sending = true;
+      btn.classList.add('is-busy');
+      btn.textContent = 'Переносим на оплату…';
+      btn.disabled = true;
+      return;
+    }
     return showSuccess(j);
   }
   if (j.error === 'wave_sold_out') return handleSoldOut(j.next_wave);
@@ -385,12 +484,20 @@ async function submitOrder() {
       if (er.i >= 0) showFieldErr($(`att-${er.i}`), $(`err-att-${er.i}`), er.code === 'minor_forbidden' ? 'На 18+ только совершеннолетние' : undefined);
     });
     if (j.attendees?.some((er) => er.code === 'minor_forbidden')) {
-      alertNote('Вечеринка 18+ — проходки несовершеннолетним не продаются.');
+      alertNote('Вечеринка 18+ — проходки несовершеннолетним не продаются.', 'error');
     }
     return;
   }
   if (j.error === 'sales_closed' || j.error === 'not_found') {
-    return alertNote('Продажи на эту тусовку уже закрыты.');
+    // Тупик без выхода — худшее, что можно показать человеку с деньгами в
+    // руках. Продажи закрылись — значит, ведём к другим ночам, а не к стене.
+    store.wave = null;
+    updateTotal();
+    return alertNote(
+      'Продажи на эту ночь закрылись, пока ты заполнял форму. Ближайшие ночи — на афише.',
+      'error',
+      { href: '/#afisha', label: 'Посмотреть афишу' }
+    );
   }
   showFallback();
 }
@@ -405,7 +512,7 @@ function handleSoldOut(nextWave) {
   if (!nextWave) {
     store.wave = null;
     updateTotal();
-    return alertNote('Только что забрали последние проходки. Следи за анонсами — бывают возвраты.');
+    return alertNote('Только что забрали последние проходки. Следи за анонсами — бывают возвраты.', 'error', { href: '/#afisha', label: 'Другие ночи на афише' });
   }
   store.wave = { waveNo: nextWave.waveNo, name: nextWave.name, priceRub: nextWave.priceRub };
   updateTotal();
@@ -415,9 +522,24 @@ function handleSoldOut(nextWave) {
   );
 }
 
-function alertNote(text) {
+// Обратная связь бывает четырёх видов, и «янтарная плашка на всё» их
+// смешивает: человек не отличает «цена изменилась» от «дальше хода нет».
+// kind: 'info' — что-то произошло, 'warn' — сделка изменилась, требует
+// внимания, 'error' — так не получится.
+function alertNote(text, kind = 'warn', action = null) {
   const n = $('wave-note');
+  n.classList.remove('note-info', 'note-warn', 'note-error');
+  n.classList.add(`note-${kind}`);
   n.textContent = text;
+  if (action) {
+    const a = document.createElement('a');
+    a.className = 'btn btn-ghost btn-block';
+    a.style.marginTop = '12px';
+    a.href = action.href;
+    a.textContent = action.label;
+    n.appendChild(a);
+  }
+  n.setAttribute('role', kind === 'error' ? 'alert' : 'status');
   n.classList.remove('hidden');
   n.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
@@ -447,7 +569,7 @@ function showSuccess(j) {
       </a>`
     )
     .join('');
-  showPane('success');
+  swapPane('success');
 }
 
 // Проходки, купленные на этой странице, остаются доступными и после закрытия
@@ -497,5 +619,5 @@ function showFallback() {
     }
   };
   $('fallback-tg').href = SITE.instagramDm;
-  showPane('fallback');
+  swapPane('fallback');
 }

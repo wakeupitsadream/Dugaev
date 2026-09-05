@@ -74,7 +74,10 @@ function renderPin() {
   $('pin-save').onclick = async () => {
     const key = $('pin-key').value.trim();
     const name = $('pin-name').value.trim();
-    if (!key) return $('pin-key').focus();
+    if (!key) {
+      $('pin-key').focus();
+      return pinHint('Введи ключ администратора — без него дверь не открыть.');
+    }
     state.key = key;
     state.name = name || 'админ';
     localStorage.setItem(LS_KEY, state.key);
@@ -83,6 +86,14 @@ function renderPin() {
     else renderManualOnly();
   };
   $('pin-cancel').onclick = () => (state.token ? renderGuest() : renderManualOnly());
+}
+
+// Подсказка над панелью ввода: молчаливый фокус на дверях в темноте
+// человек просто не замечает.
+function pinHint(text) {
+  document.querySelector('.pin-hint')?.remove();
+  const el = document.querySelector('.pin-panel');
+  if (el) el.insertAdjacentHTML('beforebegin', `<p class="scan-sub pin-hint" role="alert" style="color: var(--danger);">${esc(text)}</p>`);
 }
 
 // ---------- Админ ----------
@@ -124,8 +135,7 @@ function badKey() {
   localStorage.removeItem(LS_KEY);
   state.key = '';
   renderPin();
-  const el = document.querySelector('.pin-panel');
-  if (el) el.insertAdjacentHTML('beforebegin', '<p class="scan-sub" style="color: var(--danger);">Ключ не подошёл — проверь и введи заново</p>');
+  pinHint('Ключ не подошёл — проверь и введи заново.');
 }
 
 function renderActive(j) {
@@ -167,7 +177,7 @@ function renderRepeat(j) {
 function renderFake() {
   stage('danger', `
     <div class="scan-verdict">Подделка</div>
-    <p class="scan-sub">Подпись не сходится — этот QR не выпускали мы. Не пускать.</p>
+    <p class="scan-sub">Этот QR выпускали не мы — код не наш. Не пускать.</p>
   `);
   foot(scanNextBtn());
   bindScanNext();
@@ -189,7 +199,7 @@ function renderRevoked(j) {
 function renderNotFound() {
   stage('danger', `
     <div class="scan-verdict">Не найден</div>
-    <p class="scan-sub">Подпись похожа на нашу, но билета нет в базе. Проверь вручную по номеру или не пускай.</p>
+    <p class="scan-sub">Код похож на наш, но такой проходки в базе нет. Найди по номеру вручную — или не пускай.</p>
   `);
   foot(`${manualBtn()}${scanNextBtn()}`);
   bindManual();
@@ -333,7 +343,10 @@ function bindManual() {
 
 async function manualLookup() {
   const id = normalizeManualId($('manual-id').value);
-  if (!id) { $('manual-id').focus(); return; }
+  if (!id) {
+    $('manual-id').focus();
+    return pinHint('Набери номер с проходки — он под QR, вида 7K3F-9QZ2-MX.');
+  }
   let j = null;
   try {
     const r = await fetch(`/api/verify?manual=1&id=${id}`, { headers: adminHeaders() });

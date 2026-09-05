@@ -34,9 +34,15 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
   const setY = (y) => {
     sheet.style.transform = y === 0 ? '' : `translate3d(0, ${y}px, 0)`;
   };
+  // Читаем ПОКАЗАННОЕ значение, а не то, что мы записали в inline-стиль.
+  // Пока лист приезжает по CSS-переходу (или уезжает чужой анимацией),
+  // inline-стиля нет вовсе, и продолжать с него — значит прыгнуть. Матрица
+  // getComputedStyle всегда отдаёт то, что человек видит на этом кадре.
   const liveY = () => {
-    const m = /translate3d\(0(?:px)?,\s*(-?[\d.]+)px/.exec(sheet.style.transform || '');
-    return m ? parseFloat(m[1]) : 0;
+    const t = getComputedStyle(sheet).transform;
+    if (!t || t === 'none') return 0;
+    const m = new DOMMatrixReadOnly(t);
+    return m.m42;
   };
 
   const stopSpring = () => {
@@ -104,7 +110,9 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
     const flying = Boolean(spring) && !spring.done;
     if (!flying) {
       if (e.target.closest(NO_DRAG)) return;  // в покое по полям и кнопкам не таскаем
-      if (sheet.scrollTop > 0) return;        // содержимое прокручено — сначала вверх
+      // Порог, а не ноль: после инерционной прокрутки браузер оставляет
+      // дробный scrollTop (0.5px), и жест переставал ловиться у самого верха.
+      if (sheet.scrollTop > 1) return;        // содержимое прокручено — сначала вверх
     } else {
       suppressClick = true;
     }
@@ -213,13 +221,42 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
       });
       markDragging(true); // на время полёта CSS-переход не мешает
     },
-    // открытие: сбросить следы прошлого жеста
-    reset() {
-      stopSpring();
+    // Открытие — такая же пружина, как закрытие, и по тому же пути.
+    // CSS-переход тут не годится: лист, который ещё приезжает, нельзя поймать
+    // и увести обратно, а именно это человек и делает, когда передумал.
+    open(onOpen) {
+      const caught = stopSpring(); // если лист ещё уезжал — продолжаем с его места
       spring = null;
-      sheet.style.transform = '';
-      document.body.style.setProperty('--sheet-progress', '1');
-      markDragging(false);
+      const from = caught.value;
+
+      markDragging(true); // на время полёта CSS-переход не мешает
+      setY(from);
+      setProgress(from);
+      onOpen?.(); // класс sheet-open навешивается уже после замера
+
+      if (!mobile.matches || reduced.matches) {
+        sheet.style.transform = '';
+        document.body.style.setProperty('--sheet-progress', '1');
+        markDragging(false);
+        return;
+      }
+
+      spring = springTo({
+        from,
+        to: 0,
+        velocity: caught.velocity,
+        damping: 1, // открытие без перелёта: никакого броска ему не предшествовало
+        response: 0.3,
+        onUpdate: (v) => {
+          setY(v);
+          setProgress(v);
+        },
+        onRest: () => {
+          sheet.style.transform = '';
+          document.body.style.setProperty('--sheet-progress', '1');
+          requestAnimationFrame(() => markDragging(false));
+        },
+      });
     },
   };
 }

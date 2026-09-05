@@ -233,10 +233,16 @@ function initFaceControl() {
     const r = faceControl(input.value);
     if (r.verdict === 'invalid') {
       input.focus();
+      // Тряска — приятный довесок, но в режиме «меньше движения» её нет вовсе,
+      // и человек оставался без ответа. Текст и рамка говорят всегда.
+      input.classList.add('is-invalid');
+      $('face-err')?.classList.add('is-on');
       input.classList.add('shake');
       setTimeout(() => input.classList.remove('shake'), 400);
       return;
     }
+    input.classList.remove('is-invalid');
+    $('face-err')?.classList.remove('is-on');
     const bubble = $('face-bubble');
     bubble.className = `face-bubble fb-${r.verdict}`;
     $('fb-title').textContent = r.title;
@@ -342,10 +348,25 @@ function initCityForm() {
       btn.textContent = 'Заявка принята';
       $('cf-note').textContent = `${city} в списке. Как наберётся достаточно заявок — напишем тебе первому.`;
     } else {
-      // сервер недоступен — отправка заявки напрямую в телегу, без ошибок
+      // сервер недоступен — уводим заявку в директ, без «ошибки 500»
       btn.textContent = 'Отправить заявку';
-      window.open(SITE.instagramDm, '_blank', 'noopener');
-      $('cf-note').textContent = `Открыли директ — напиши «Привезите PROJECT X в ${city}», заявка уйдёт напрямую организаторам.`;
+      const opened = window.open(SITE.instagramDm, '_blank', 'noopener');
+      const note = $('cf-note');
+      note.textContent = '';
+      if (opened) {
+        note.textContent = `Открыли директ — напиши «Привезите PROJECT X в ${city}», заявка уйдёт напрямую организаторам.`;
+      } else {
+        // Safari на iPhone блокирует окно, открытое после ожидания сети: жест
+        // к этому моменту «протух». Обещать «открыли» тогда нельзя — врать
+        // человеку хуже, чем попросить его нажать самому.
+        note.append(`Связь подвела. Напиши в директ «Привезите PROJECT X в ${city}» — `);
+        const a = document.createElement('a');
+        a.href = SITE.instagramDm;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = 'открыть директ';
+        note.append(a);
+      }
     }
   };
 

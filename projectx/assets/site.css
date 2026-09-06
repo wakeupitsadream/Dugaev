@@ -30,7 +30,8 @@ body.site-v3::before { display: none; }
   backdrop-filter: none; -webkit-backdrop-filter: none;
   transition: background 0.3s ease, border-color 0.3s ease;
 }
-.site-v3 .site-header.is-solid {
+.site-v3 .site-header.is-solid,
+.site-v3.is-sub .site-header {
   background: rgba(7, 7, 7, 0.72);
   border-bottom-color: var(--line-soft);
   backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%);
@@ -39,6 +40,22 @@ body.site-v3::before { display: none; }
 .site-v3 .top-nav a:hover, .site-v3 .top-nav a.is-here { color: var(--text); }
 .site-v3 .header-cta { display: inline-flex; padding: 10px 16px; font-size: 0.8rem; }
 .site-v3 .site-header .container { gap: 12px; }
+/* iPhone: страница просвечивает под статус-баром, а шапка стоит ниже него —
+   между ними зазор с чужим контентом. Дотягиваем фон шапки вверх «козырьком»:
+   в прозрачном состоянии он невидим, в стеклянном закрывает щель. */
+.site-v3 .site-header::before {
+  content: ''; position: absolute; inset-inline: 0; bottom: 100%; height: 120px;
+  background: inherit; pointer-events: none;
+  backdrop-filter: inherit; -webkit-backdrop-filter: inherit;
+}
+/* Над открытым меню шапка остаётся сверху: логотип и бургер-крестик видны,
+   стекло шапки уступает стеклу меню */
+body.menu-open .site-header {
+  z-index: 80; background: transparent; border-bottom-color: transparent;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.menu-open .site-header::before { display: none; }
+body.menu-open .sticky-cta { display: none; }
 
 /* Бургер: две линии складываются в X — знак бренда и есть «закрыть» */
 .burger {
@@ -57,16 +74,19 @@ body.site-v3::before { display: none; }
 @media (max-width: 760px) {
   .burger { display: block; }
   .site-v3 .header-cta { display: inline-flex; }
-  .site-v3 .site-header .container { padding-right: 12px; }
+  /* Логотип слева, всё остальное прижато к правому краю: кнопка «Проходки»
+     стоит рядом с бургером, а не болтается посередине */
+  .site-v3 .site-header .container { justify-content: flex-end; gap: 8px; padding-right: 12px; }
+  .site-v3 .site-header .logo { margin-right: auto; }
 }
 
 /* Полноэкранное меню (телефон). Открывается изредка — стандартная анимация,
    ссылки входят лесенкой: движение подсказывает порядок. */
 .menu {
-  position: fixed; inset: 0; z-index: 70;
-  background: rgba(7, 7, 7, 0.86);
+  position: fixed; inset: 0; z-index: 75;
+  background: rgba(7, 7, 7, 0.9);
   backdrop-filter: blur(22px) saturate(140%); -webkit-backdrop-filter: blur(22px) saturate(140%);
-  padding: calc(var(--header-h) + 24px) 24px 40px;
+  padding: calc(var(--header-h) + 24px) 24px calc(32px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; justify-content: space-between;
   opacity: 0; pointer-events: none;
   transition: opacity 220ms var(--ease-out);
@@ -301,6 +321,8 @@ body.menu-open { overflow: hidden; }
 .night-nav i { width: 28px; height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; position: relative; display: block; }
 .night-nav i::after { content: ''; position: absolute; inset: 0; background: var(--acid); transform: scaleX(var(--f, 0)); transform-origin: left; }
 .night-kicker { position: absolute; top: calc(var(--header-h) + 18px); left: 24px; }
+.night-more { position: absolute; right: 24px; bottom: 22px; margin: 0; font-size: 0.9rem; }
+.night.is-static .night-more { position: static; }
 /* Без движения или на низком окне — три правила просто стоят друг под другом */
 .night.is-static { height: auto; padding: 64px 0; }
 .night.is-static .night-stage { position: static; height: auto; display: grid; gap: 48px; }
@@ -448,6 +470,101 @@ body.menu-open { overflow: hidden; }
 .f-links a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 0.9rem; min-height: 44px; display: inline-flex; align-items: center; }
 .f-links a:hover { color: var(--acid); }
 @media (min-width: 761px) { .site-v3 .f-grid { grid-template-columns: 1.3fr 1fr auto; align-items: start; } }
+
+/* ---------- Афиша: стена постеров ---------- */
+.wall-head { margin: clamp(48px, 10vw, 88px) 0 clamp(20px, 4vw, 32px); }
+.poster-wall { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (min-width: 620px) { .poster-wall { grid-template-columns: repeat(3, 1fr); gap: 16px; } }
+@media (min-width: 900px) { .poster-wall { grid-template-columns: repeat(4, 1fr); } }
+.poster {
+  position: relative; aspect-ratio: 4 / 5; border-radius: 12px; overflow: hidden; display: block;
+  background: var(--bg-3); color: inherit; text-decoration: none;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  transition: transform 160ms var(--ease-out), box-shadow 0.25s ease;
+  will-change: transform;
+}
+.poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Блик идёт за курсором — карточка читается как глянцевый постер */
+.poster::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(60% 50% at var(--gx, 50%) var(--gy, 0%), rgba(255, 255, 255, 0.16), transparent 70%),
+    linear-gradient(180deg, transparent 55%, rgba(7, 7, 7, 0.88));
+}
+.poster .p-date {
+  position: absolute; left: 10px; top: 10px; z-index: 2; font-family: var(--font-display); font-weight: 700; line-height: 0.9;
+  text-align: center; padding: 6px 7px; border-radius: 8px; background: var(--acid); color: var(--ink); min-width: 44px;
+}
+.poster .p-date b { display: block; font-size: 1.3rem; }
+.poster .p-date small { display: block; font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.poster .p-cap { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 2; display: grid; gap: 3px; }
+.poster .p-cap b { font-family: var(--font-display); text-transform: uppercase; font-size: 1rem; line-height: 1.05; }
+.poster .p-cap small { color: var(--muted); font-size: 0.72rem; }
+.poster.no-img img { display: none; }
+.poster.no-img { background: radial-gradient(70% 60% at 50% 40%, rgba(229, 26, 32, 0.35), var(--bg-3)); }
+a.poster:active { transform: scale(0.98); }
+@media (hover: hover) and (pointer: fine) { a.poster:hover { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 50px rgba(229, 26, 32, 0.12); } }
+
+/* ---------- Ночь: таймлайн ---------- */
+.timeline { position: relative; display: grid; gap: clamp(28px, 6vw, 48px); padding-left: 40px; max-width: 720px; }
+.tl-rail { position: absolute; left: 11px; top: 8px; bottom: 8px; width: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.tl-fill { position: absolute; inset: 0; background: var(--acid); transform: scaleY(0); transform-origin: top; will-change: transform; }
+.tl-stop { position: relative; }
+.tl-stop::before {
+  content: ''; position: absolute; left: -35px; top: 6px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--line); box-sizing: border-box;
+  transition: border-color 200ms ease, background 200ms ease, transform 200ms var(--ease-out);
+}
+.tl-stop.is-on::before { border-color: var(--acid); background: var(--acid); transform: scale(1.25); box-shadow: 0 0 18px rgba(229, 26, 32, 0.6); }
+.tl-time { font-family: var(--font-display); font-weight: 700; font-size: clamp(2rem, 7vw, 3.4rem); line-height: 0.9; color: var(--dim); transition: color 250ms ease; }
+.tl-stop.is-on .tl-time { color: var(--acid); }
+.tl-stop h3 { text-transform: uppercase; font-size: 1.15rem; margin: 8px 0 6px; }
+.tl-stop p { margin: 0; color: var(--muted); line-height: 1.55; max-width: 34em; }
+
+/* ---------- FC/DC: дресс-код, чеклист, двери ---------- */
+.page-hero.face-section .face-panel { margin-top: 24px; }
+.dc-grid { display: grid; gap: 14px; }
+@media (min-width: 761px) { .dc-grid { grid-template-columns: 1fr 1fr; } }
+.dc-col { padding: 22px; border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--line-soft); }
+.dc-head { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; text-transform: uppercase; font-size: 1.2rem; margin-bottom: 14px; }
+.dc-mark { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.9rem; }
+.dc-col.is-yes .dc-mark { background: var(--ok-bg); color: var(--ok); }
+.dc-col.is-no .dc-mark { background: rgba(229, 26, 32, 0.15); color: var(--acid); }
+.dc-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.dc-col li { padding-left: 18px; position: relative; color: var(--muted); line-height: 1.45; }
+.dc-col li::before { content: ''; position: absolute; left: 0; top: 0.62em; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.5; }
+.dc-col.is-yes li::before { background: var(--ok); opacity: 1; }
+.dc-col.is-no li::before { background: var(--acid); opacity: 1; }
+
+.pack-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 640px; }
+.pack-list label {
+  display: flex; gap: 14px; align-items: flex-start; padding: 16px; border-radius: var(--radius-s);
+  background: var(--bg-2); border: 1px solid var(--line-soft); cursor: pointer; min-height: 44px;
+  transition: border-color 0.15s ease, transform 160ms var(--ease-out);
+}
+.pack-list label:active { transform: scale(0.99); }
+.pack-list input { width: 22px; height: 22px; accent-color: var(--acid); flex: 0 0 auto; margin-top: 2px; }
+.pack-list label:has(input:checked) { border-color: rgba(229, 26, 32, 0.5); }
+.pack-list b { display: block; font-family: var(--font-display); text-transform: uppercase; font-size: 1rem; }
+.pack-list small { display: block; color: var(--muted); font-size: 0.84rem; margin-top: 3px; line-height: 1.4; }
+.pack-list label:has(input:checked) b { text-decoration: line-through; text-decoration-color: var(--acid); }
+.pack-done { margin-top: 20px; }
+.pack-done[hidden] { display: none; }
+@media (prefers-reduced-motion: no-preference) { .pack-done:not([hidden]) .face-bubble { animation: stamp 420ms var(--ease-out) both; } }
+
+.door-steps { display: grid; gap: 14px; }
+@media (min-width: 761px) { .door-steps { grid-template-columns: repeat(3, 1fr); } }
+.door-step { padding: 22px; border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--line-soft); }
+.door-step .ds-num { font-family: var(--font-display); font-weight: 700; font-size: 2rem; color: var(--acid); line-height: 1; }
+.door-step h3 { text-transform: uppercase; font-size: 1.1rem; margin: 10px 0 6px; }
+.door-step p { margin: 0; color: var(--muted); line-height: 1.5; }
+
+/* Меню: кнопка проходок внутри, раз липкая кнопка под ним прячется */
+.menu-foot .btn { margin-bottom: 6px; }
+
+/* Ссылка «дальше» под секцией главной — ведёт на свою страницу */
+.more-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 22px; font-weight: 700; color: var(--text); text-decoration: none; min-height: 44px; }
+.more-link .x { color: var(--acid); transition: transform 160ms var(--ease-out); display: inline-block; }
+@media (hover: hover) and (pointer: fine) { .more-link:hover .x { transform: translateX(4px); } }
 
 /* ---------- Страницы второго уровня ---------- */
 .page-hero { position: relative; overflow: hidden; padding: calc(var(--header-h) + clamp(48px, 10vw, 96px)) 0 clamp(32px, 6vw, 56px); }

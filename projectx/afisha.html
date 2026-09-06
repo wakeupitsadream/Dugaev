@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Контакты — PROJECT X Оренбург</title>
-  <meta name="description" content="Как связаться с PROJECT X: Instagram @project.x.prty, директ организаторам, сотрудничество. Заявка «Привезите PROJECT X в мой город»." />
+  <title>Афиша — PROJECT X Оренбург</title>
+  <meta name="description" content="Ближайшие ночи PROJECT X в Оренбурге и архив афиш: даты, площадки, волны цен. Проходка онлайн, вход по именному QR." />
+  <meta property="og:title" content="Афиша PROJECT X · Оренбург" />
+  <meta property="og:image" content="/assets/photos/poster-night-student.jpg" />
   <meta name="theme-color" content="#070707" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/assets/styles.css" />
@@ -54,47 +56,32 @@
     <section class="page-hero">
       <div class="hero-bgx" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
       <div class="container">
-        <div class="kicker">Контакты</div>
-        <h1>Мы <span class="x">на связи</span></h1>
-        <p class="lead">Единственный канал бренда — Instagram*. В России он открывается через VPN, поэтому всё важное дублируем здесь.</p>
+        <div class="kicker">Афиша · <span id="afisha-count">загружаем</span></div>
+        <h1>Ближайшие <span class="x">ночи</span></h1>
+        <p class="lead">Цена растёт волнами — ранняя всегда дешевле, на входе действует последняя. Адрес SECRET PLACE приходит в проходку перед стартом.</p>
       </div>
     </section>
 
     <section class="page-body">
       <div class="container">
-        <div class="contact-cards reveal-stagger" id="contact-cards"></div>
+        <div class="afisha-grid reveal" id="afisha-grid"></div>
 
-        <div class="city-block reveal">
-          <div class="section-head">
-            <div class="kicker">Привезите к нам</div>
-            <h2>Твой <span class="x">город?</span></h2>
-            <p class="lead">Пока мы в Оренбурге — и едем туда, где нас зовут. Напиши свой город: как наберётся достаточно заявок, приезжаем со своим светом, звуком и FC/DC.</p>
-          </div>
-          <div class="chips" id="city-request-chips" style="margin: 18px 0;"></div>
-          <form class="city-form" id="city-form" novalidate>
-            <div class="field">
-              <input type="text" id="cf-city" placeholder="Твой город" autocomplete="address-level2" aria-label="Твой город" />
-              <div class="err" role="alert" id="err-cf-city">Напиши город</div>
-            </div>
-            <div class="field">
-              <div class="phone-wrap">
-                <span class="phone-prefix hidden" id="cf-prefix" aria-hidden="true">+7</span>
-                <input type="text" id="cf-contact" placeholder="@ник или телефон" autocomplete="off" aria-label="Ник или телефон" />
-              </div>
-              <div class="err" role="alert" id="err-cf-contact">Оставь ник или телефон — позовём первым</div>
-            </div>
-            <div style="position: absolute; left: -9999px;" aria-hidden="true">
-              <input type="text" id="cf-website" tabindex="-1" autocomplete="off" />
-            </div>
-            <label class="check">
-              <input type="checkbox" id="cf-consent" />
-              <span>Согласен на обработку данных — <a href="/privacy.html" target="_blank" rel="noopener">политика</a></span>
-            </label>
-            <div class="err" role="alert" id="err-cf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
-            <button class="btn btn-acid btn-block" id="cf-send" type="submit">Отправить заявку</button>
-            <p class="form-note" id="cf-note" style="margin-top: 10px;">Как наберётся достаточно заявок из твоего города — напишем тебе первому.</p>
-          </form>
+        <div class="wall-head reveal">
+          <div class="kicker">Как это было</div>
+          <h2>Стена <span class="x">афиш</span></h2>
+          <p class="lead">Каждая ночь — свой постер. Нажми на прошедшую ночь, чтобы посмотреть, как всё было.</p>
         </div>
+        <div class="poster-wall reveal-stagger" id="poster-wall"></div>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <div class="cta-x" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
+      <div class="container reveal">
+        <div class="kicker">Не пропусти</div>
+        <h2>Афиши выходят <span class="x">в Instagram*</span></h2>
+        <p class="lead">Анонсы, промокоды и адреса SECRET PLACE — сначала там. Подпишись, чтобы узнавать первым.</p>
+        <a class="btn btn-ghost" href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">@project.x.prty</a>
       </div>
     </section>
   </main>
@@ -126,6 +113,10 @@
   </footer>
   <!-- /chrome:footer -->
 
-  <script type="module" src="/assets/contacts-page.js"></script>
+  <div class="sticky-cta" id="sticky-cta">
+    <a class="btn btn-acid" id="sticky-buy" href="#afisha-grid">Проходки</a>
+  </div>
+
+  <script type="module" src="/assets/afisha-page.js"></script>
 </body>
 </html>

@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "chrome": "node scripts/sync-chrome.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

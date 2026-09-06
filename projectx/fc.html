@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FC/DC — фейсконтроль и дресс-код PROJECT X</title>
+  <meta name="description" content="Фейсконтроль и дресс-код PROJECT X: сколько тебе лет, что надеть, что взять с собой и как проходит вход по QR." />
+  <meta property="og:title" content="FC/DC · PROJECT X — пройдёшь?" />
+  <meta property="og:image" content="/assets/photos/poster-halloween.jpg" />
+  <meta name="theme-color" content="#070707" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/site.css" />
+</head>
+<body class="site-v3 is-sub">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="x-mark" viewBox="0 0 100 100"><path d="M13 5 L87 95 M87 5 L13 95" stroke="currentColor" stroke-width="21" fill="none" /></symbol>
+  </svg>
+
+  <!-- chrome:header -->
+  <header class="site-header" id="site-header">
+    <div class="container">
+      <a class="logo" href="/" aria-label="PROJECT X — на главную">PRO<span class="lx">X</span>JECT</a>
+      <nav class="top-nav" aria-label="Основная навигация">
+        <a href="/afisha">Афиша</a>
+        <a href="/night">Ночь</a>
+        <a href="/fc">FC/DC</a>
+        <a href="/rules">Правила</a>
+        <a href="/faq">FAQ</a>
+        <a href="/contacts">Контакты</a>
+      </nav>
+      <a class="btn btn-acid header-cta" id="header-buy" href="/afisha">Проходки</a>
+      <button class="burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="Меню"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <!-- Полноэкранное меню (телефон). Шапка остаётся над ним: бургер складывается в крестик -->
+  <div class="menu" id="menu" role="dialog" aria-modal="true" aria-label="Меню" tabindex="-1" inert>
+    <nav>
+      <a href="/afisha">Афиша <small>ближайшие ночи и проходки</small></a>
+      <a href="/night">Ночь <small>три правила и как всё устроено</small></a>
+      <a href="/fc">FC/DC <small>дресс-код и что взять с собой</small></a>
+      <a href="/rules">Правила <small>чтобы не развернули на дверях</small></a>
+      <a href="/faq">FAQ <small>вопросы, которые задают все</small></a>
+      <a href="/contacts">Контакты <small>Instagram*, директ, свой город</small></a>
+    </nav>
+    <div class="menu-foot">
+      <a class="btn btn-acid btn-block" id="menu-buy" href="/afisha">Проходки</a>
+      <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">@project.x.prty — Instagram*</a>
+      <span>Оренбург · 18+ · FC/DC · двери 22:00 · старт 23:00</span>
+    </div>
+  </div>
+  <!-- /chrome:header -->
+
+  <main>
+    <!-- Интерактив прямо в hero: страница начинается с вопроса -->
+    <section class="page-hero face-section" id="face">
+      <div class="hero-bgx" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
+      <div class="container">
+        <div class="kicker">FC/DC</div>
+        <h1>Сколько тебе <span class="x">лет?</span></h1>
+        <p class="lead">Настоящий фейсконтроль проходят живьём, на дверях. Этот — шуточный: вбей возраст и посмотри, чем закончится разговор с охраной.</p>
+        <div class="face-panel">
+          <div class="face-input-row">
+            <input type="number" id="face-age" inputmode="numeric" min="1" max="120" placeholder="18" aria-label="Твой возраст" />
+            <button class="btn btn-acid" id="face-check" type="button">Проверить</button>
+          </div>
+          <p class="err" id="face-err" role="alert">Впиши возраст числом — от 1 до 120</p>
+          <div class="face-result hidden" id="face-result" role="status">
+            <div class="face-bubble" id="face-bubble">
+              <span class="fb-brand">PROJECT X</span>
+              <span class="fb-title" id="fb-title"></span>
+            </div>
+            <p class="face-sub" id="fb-sub"></p>
+            <div class="face-actions">
+              <button class="btn btn-ghost" id="face-copy" type="button">Скопировать и похвастаться</button>
+              <button class="btn btn-ghost" id="face-again" type="button">Ещё раз</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Дресс-код: две колонки -->
+    <section class="section" id="dc">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">DC — дресс-код</div>
+          <h2>Что надеть, <span class="x">а что нет</span></h2>
+          <p class="lead">Жёсткого списка нет. Правило одно: одевайся так, как будто тебя точно снимут для афтер-муви — потому что снимут.</p>
+        </div>
+        <div class="dc-grid reveal-stagger">
+          <div class="dc-col is-yes">
+            <div class="dc-head"><span class="dc-mark">✓</span>Проходит</div>
+            <ul>
+              <li>Стильно и чисто — как на кадр из фото-зоны</li>
+              <li>Тематика ночи, если она объявлена: Хэллоуин, американ-пати, red cups</li>
+              <li>Обувь, в которой можно танцевать до утра</li>
+              <li>Хорошее настроение и адекватное состояние</li>
+            </ul>
+          </div>
+          <div class="dc-col is-no">
+            <div class="dc-head"><span class="dc-mark">✕</span>Разворачиваем</div>
+            <ul>
+              <li>Спортивные костюмы и «только что с дачи»</li>
+              <li>Шлёпанцы и рабочая одежда</li>
+              <li>Пьяных в хлам и агрессивных</li>
+              <li>«Мы на пять минут» — без проходки и документа</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- С собой: чеклист -->
+    <section class="section" id="pack">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">С собой</div>
+          <h2>Четыре вещи, <span class="x">без которых никак</span></h2>
+        </div>
+        <ul class="pack-list reveal-stagger" id="pack-list">
+          <li><label><input type="checkbox" /><span><b>Документ</b><small>паспорт, права или загран — без него не пустим даже с проходкой</small></span></label></li>
+          <li><label><input type="checkbox" /><span><b>Проходка в телефоне</b><small>QR срабатывает один раз; скриншот друга не пройдёт</small></span></label></li>
+          <li><label><input type="checkbox" /><span><b>Заряженный телефон</b><small>адрес SECRET PLACE прилетит в проходку перед стартом</small></span></label></li>
+          <li><label><input type="checkbox" /><span><b>Компания</b><small>проходок можно взять до десяти — каждому свой именной QR</small></span></label></li>
+        </ul>
+        <div class="pack-done reveal" id="pack-done" hidden>
+          <div class="face-bubble fb-okay"><span class="fb-brand">PROJECT X</span><span class="fb-title">Собран</span></div>
+          <p class="face-sub">Двери в 22:00. Увидимся на входе.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- На дверях -->
+    <section class="section" id="door">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">На дверях</div>
+          <h2>Десять секунд <span class="x">и ты внутри</span></h2>
+        </div>
+        <div class="door-steps reveal-stagger">
+          <div class="door-step"><span class="ds-num">01</span><h3>Показываешь QR</h3><p>Прямо с экрана телефона. Интернет на входе не нужен — QR сработает и без него.</p></div>
+          <div class="door-step"><span class="ds-num">02</span><h3>Админ сканирует</h3><p>Зелёный — проходишь. Красный — проходка уже использована или не наша. Спорные случаи решают по номеру проходки.</p></div>
+          <div class="door-step"><span class="ds-num">03</span><h3>Браслет</h3><p>Надевают на входе: это пропуск обратно, если выйдешь подышать. Второй раз QR сканировать не нужно.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <div class="cta-x" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
+      <div class="container reveal">
+        <div class="kicker">Ближайшая ночь</div>
+        <h2>Взять <span class="x">проходку</span></h2>
+        <p class="lead">Проходка берётся за минуту, вход — по именному QR. Адрес SECRET PLACE придёт в неё перед стартом.</p>
+        <a class="btn btn-acid" id="cta-buy" href="/afisha">Смотреть афишу</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- chrome:footer -->
+  <footer class="site-footer">
+    <div class="container f-grid">
+      <div>
+        <a class="logo" href="/">PRO<span class="lx">X</span>JECT</a>
+        <p class="f-note" style="margin-top: 10px;">
+          Мероприятия 18+. Вход строго по документу, на дверях FC/DC — фейсконтроль и дресс-код.
+          Двери 22:00, старт 23:00, расходимся под утро.
+        </p>
+        <p class="f-note"><!-- ЗАГЛУШКА: реквизиты организатора -->ИП (реквизиты уточняются) · © 2026 PROJECT X · Оренбург</p>
+      </div>
+      <nav class="f-links" aria-label="Разделы">
+        <a href="/afisha">Афиша</a>
+        <a href="/night">Ночь</a>
+        <a href="/fc">FC/DC</a>
+        <a href="/rules">Правила</a>
+        <a href="/faq">FAQ</a>
+        <a href="/contacts">Контакты</a>
+        <a href="/privacy.html">Политика</a>
+        <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">Instagram*</a>
+      </nav>
+      <div class="dev-sign">Дизайн и разработка — <a href="https://maxim-batutin.ru" target="_blank" rel="noopener">maxim-batutin.ru</a></div>
+    </div>
+    <div class="container"><p class="f-note" style="margin-top: 18px;">* Instagram принадлежит Meta, признанной экстремистской организацией и запрещённой в РФ.</p></div>
+  </footer>
+  <!-- /chrome:footer -->
+
+  <div class="sticky-cta" id="sticky-cta">
+    <a class="btn btn-acid" id="sticky-buy" href="/afisha">Проходки</a>
+  </div>
+
+  <script type="module" src="/assets/fc-page.js"></script>
+</body>
+</html>

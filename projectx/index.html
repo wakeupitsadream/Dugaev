@@ -24,37 +24,40 @@
     <symbol id="x-mark" viewBox="0 0 100 100"><path d="M13 5 L87 95 M87 5 L13 95" stroke="currentColor" stroke-width="21" fill="none" /></symbol>
   </svg>
 
+  <!-- chrome:header -->
   <header class="site-header" id="site-header">
     <div class="container">
-      <a class="logo" href="/">PRO<span class="lx">X</span>JECT</a>
+      <a class="logo" href="/" aria-label="PROJECT X — на главную">PRO<span class="lx">X</span>JECT</a>
       <nav class="top-nav" aria-label="Основная навигация">
-        <a href="#afisha">Афиша</a>
-        <a href="#night">Ночь</a>
-        <a href="#face">FC/DC</a>
+        <a href="/afisha">Афиша</a>
+        <a href="/night">Ночь</a>
+        <a href="/fc">FC/DC</a>
         <a href="/rules">Правила</a>
         <a href="/faq">FAQ</a>
         <a href="/contacts">Контакты</a>
       </nav>
-      <a class="btn btn-acid header-cta" id="header-buy" href="#afisha">Проходки</a>
+      <a class="btn btn-acid header-cta" id="header-buy" href="/afisha">Проходки</a>
       <button class="burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="Меню"><span></span><span></span></button>
     </div>
   </header>
 
-  <!-- Полноэкранное меню (телефон) -->
+  <!-- Полноэкранное меню (телефон). Шапка остаётся над ним: бургер складывается в крестик -->
   <div class="menu" id="menu" role="dialog" aria-modal="true" aria-label="Меню" tabindex="-1" inert>
     <nav>
-      <a href="#afisha">Афиша <small>ближайшие ночи и проходки</small></a>
-      <a href="#night">Ночь <small>три правила</small></a>
-      <a href="#face">FC/DC <small>сколько тебе лет?</small></a>
+      <a href="/afisha">Афиша <small>ближайшие ночи и проходки</small></a>
+      <a href="/night">Ночь <small>три правила и как всё устроено</small></a>
+      <a href="/fc">FC/DC <small>дресс-код и что взять с собой</small></a>
       <a href="/rules">Правила <small>чтобы не развернули на дверях</small></a>
-      <a href="/faq">FAQ</a>
-      <a href="/contacts">Контакты</a>
+      <a href="/faq">FAQ <small>вопросы, которые задают все</small></a>
+      <a href="/contacts">Контакты <small>Instagram*, директ, свой город</small></a>
     </nav>
     <div class="menu-foot">
+      <a class="btn btn-acid btn-block" id="menu-buy" href="/afisha">Проходки</a>
       <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">@project.x.prty — Instagram*</a>
       <span>Оренбург · 18+ · FC/DC · двери 22:00 · старт 23:00</span>
     </div>
   </div>
+  <!-- /chrome:header -->
 
   <main>
     <!-- HERO: чёрная сцена, живой знак -->
@@ -121,7 +124,8 @@
           <div class="nr-word">Secret <span class="x">place</span></div>
           <p class="nr-line">Адрес не объявляем. Он <b>приходит в проходку</b> перед стартом — город узнаёт последним.</p>
         </div>
-        <div class="night-nav" id="night-nav" aria-hidden="true"><i></i><i></i><i></i><span id="night-idx">01 / 03</span></div>
+        <div class="night-nav" id="night-nav" aria-hidden="true"><i></i><i></i><i></i><span class="night-idx">01 / 03</span></div>
+        <a class="more-link night-more" href="/night">Как устроена ночь <span class="x">→</span></a>
       </div>
     </section>
 
@@ -140,6 +144,7 @@
             <span id="reel-hint">тяни вбок</span>
           </div>
           <div class="reel" id="reel" aria-label="Афиши прошедших ночей"></div>
+          <a class="more-link" href="/afisha">Вся афиша и стена постеров <span class="x">→</span></a>
         </div>
       </div>
     </section>
@@ -199,6 +204,7 @@
               <button class="btn btn-ghost" id="face-again" type="button">Ещё раз</button>
             </div>
           </div>
+          <a class="more-link" href="/fc">Дресс-код и что взять с собой <span class="x">→</span></a>
         </div>
       </div>
     </section>
@@ -215,6 +221,7 @@
     </section>
   </main>
 
+  <!-- chrome:footer -->
   <footer class="site-footer">
     <div class="container f-grid">
       <div>
@@ -226,7 +233,10 @@
         <p class="f-note"><!-- ЗАГЛУШКА: реквизиты организатора -->ИП (реквизиты уточняются) · © 2026 PROJECT X · Оренбург</p>
       </div>
       <nav class="f-links" aria-label="Разделы">
-        <a href="/rules">Правила входа</a>
+        <a href="/afisha">Афиша</a>
+        <a href="/night">Ночь</a>
+        <a href="/fc">FC/DC</a>
+        <a href="/rules">Правила</a>
         <a href="/faq">FAQ</a>
         <a href="/contacts">Контакты</a>
         <a href="/privacy.html">Политика</a>
@@ -236,6 +246,7 @@
     </div>
     <div class="container"><p class="f-note" style="margin-top: 18px;">* Instagram принадлежит Meta, признанной экстремистской организацией и запрещённой в РФ.</p></div>
   </footer>
+  <!-- /chrome:footer -->
 
   <div class="sticky-cta" id="sticky-cta">
     <a class="btn btn-acid" id="sticky-buy" href="#afisha">Проходки</a>

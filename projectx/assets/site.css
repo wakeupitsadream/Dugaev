@@ -1,0 +1,512 @@
+/* ============================================================
+   PROJECT X — витрина (главная и страницы второго уровня).
+   Подключается после styles.css: токены, кнопки, поля и шторка — оттуда,
+   здесь — только сцена. Характер: кино + постер. Чёрный, белый, алый X.
+
+   Правила движения (apple-design / animate):
+   - двигаем только transform и opacity, всё остальное — цвет и clip-path;
+   - вход — ease-out, движение на экране — ease-in-out, лента — linear;
+   - жест и курсор — пружина (assets/spring.js), не переход;
+   - reduced-motion: меньше и мягче, а не ноль.
+   ============================================================ */
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --header-h: 64px;
+  --x-glow: rgba(229, 26, 32, 0.55);
+}
+
+html { scroll-padding-top: calc(var(--header-h) + 12px); }
+body { overflow-x: clip; }
+/* Статичный отсвет базовой темы здесь не нужен: у hero свой свет */
+body.site-v3::before { display: none; }
+
+/* ---------- Шапка: прозрачная над hero, стекло после ---------- */
+.site-v3 .site-header {
+  background: transparent;
+  border-bottom-color: transparent;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+.site-v3 .site-header.is-solid {
+  background: rgba(7, 7, 7, 0.72);
+  border-bottom-color: var(--line-soft);
+  backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+.site-v3 .top-nav a { color: var(--muted); transition: color 0.15s ease; }
+.site-v3 .top-nav a:hover, .site-v3 .top-nav a.is-here { color: var(--text); }
+.site-v3 .header-cta { display: inline-flex; padding: 10px 16px; font-size: 0.8rem; }
+.site-v3 .site-header .container { gap: 12px; }
+
+/* Бургер: две линии складываются в X — знак бренда и есть «закрыть» */
+.burger {
+  display: none; width: 44px; height: 44px; margin-right: -10px;
+  background: none; border: 0; color: var(--text); position: relative; cursor: pointer;
+  border-radius: 12px;
+}
+.burger span {
+  position: absolute; left: 12px; width: 20px; height: 2px; background: currentColor; border-radius: 2px;
+  transition: transform 220ms var(--ease-out), opacity 150ms ease;
+}
+.burger span:nth-child(1) { top: 17px; }
+.burger span:nth-child(2) { top: 25px; }
+.burger[aria-expanded='true'] span:nth-child(1) { transform: translateY(4px) rotate(45deg); background: var(--acid); }
+.burger[aria-expanded='true'] span:nth-child(2) { transform: translateY(-4px) rotate(-45deg); background: var(--acid); }
+@media (max-width: 760px) {
+  .burger { display: block; }
+  .site-v3 .header-cta { display: inline-flex; }
+  .site-v3 .site-header .container { padding-right: 12px; }
+}
+
+/* Полноэкранное меню (телефон). Открывается изредка — стандартная анимация,
+   ссылки входят лесенкой: движение подсказывает порядок. */
+.menu {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(7, 7, 7, 0.86);
+  backdrop-filter: blur(22px) saturate(140%); -webkit-backdrop-filter: blur(22px) saturate(140%);
+  padding: calc(var(--header-h) + 24px) 24px 40px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  opacity: 0; pointer-events: none;
+  transition: opacity 220ms var(--ease-out);
+}
+.menu.is-open { opacity: 1; pointer-events: auto; }
+.menu nav { display: grid; gap: 4px; }
+.menu nav a {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: clamp(2.2rem, 10vw, 3.4rem); line-height: 1.05; letter-spacing: -0.01em;
+  color: var(--text); text-decoration: none; padding: 6px 0;
+  opacity: 0; transform: translateY(14px);
+  transition: opacity 260ms var(--ease-out), transform 260ms var(--ease-out), color 0.15s ease;
+}
+.menu.is-open nav a { opacity: 1; transform: none; }
+.menu nav a:nth-child(1) { transition-delay: 40ms; }
+.menu nav a:nth-child(2) { transition-delay: 80ms; }
+.menu nav a:nth-child(3) { transition-delay: 120ms; }
+.menu nav a:nth-child(4) { transition-delay: 160ms; }
+.menu nav a:nth-child(5) { transition-delay: 200ms; }
+.menu nav a:nth-child(6) { transition-delay: 240ms; }
+.menu nav a small { display: block; font-family: var(--font-text); font-weight: 600; font-size: 0.8rem; text-transform: none; letter-spacing: 0; color: var(--muted); }
+.menu nav a:active { color: var(--acid); }
+.menu-foot { color: var(--muted); font-size: 0.8rem; display: grid; gap: 10px; }
+.menu-foot a { color: var(--text); }
+body.menu-open { overflow: hidden; }
+
+/* ---------- Общие блоки витрины ---------- */
+.site-v3 .section { padding-block: clamp(64px, 12vw, 128px); }
+/* Базовый .section-head — flex со space-between: на десктопе это разносило
+   кикер и заголовок по краям. Витрине нужен вертикальный стек. */
+.site-v3 .section-head { display: block; margin-bottom: clamp(24px, 5vw, 44px); }
+.site-v3 .kicker {
+  font-family: var(--font-text); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--acid); display: flex; align-items: center; gap: 12px;
+}
+.site-v3 .kicker::before { content: ''; width: 24px; height: 1px; background: var(--acid); }
+.site-v3 h2 {
+  font-size: clamp(2.2rem, 7vw, 4.6rem); line-height: 0.96; letter-spacing: -0.015em;
+  text-transform: uppercase; margin: 12px 0 0;
+}
+.site-v3 h2 .x { color: var(--acid); }
+.site-v3 .lead { color: var(--muted); font-size: 1.05rem; max-width: 560px; margin-top: 16px; line-height: 1.55; }
+.site-v3 .lead b { color: var(--text); }
+
+/* Появление по скроллу. Один раз, из полупрозрачного и чуть снизу: страница
+   не должна воевать с читателем повторными въездами. */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out); }
+.reveal.is-in { opacity: 1; transform: none; }
+.reveal-stagger > * { opacity: 0; transform: translateY(14px); transition: opacity 500ms var(--ease-out), transform 500ms var(--ease-out); }
+.reveal-stagger.is-in > * { opacity: 1; transform: none; }
+.reveal-stagger.is-in > *:nth-child(2) { transition-delay: 60ms; }
+.reveal-stagger.is-in > *:nth-child(3) { transition-delay: 120ms; }
+.reveal-stagger.is-in > *:nth-child(4) { transition-delay: 180ms; }
+.reveal-stagger.is-in > *:nth-child(5) { transition-delay: 240ms; }
+.reveal-stagger.is-in > *:nth-child(6) { transition-delay: 300ms; }
+
+/* Зерно плёнки: маленькая плитка шума, сдвигаемая transform'ом — дёшево.
+   Мерцание в 8 кадров/с даёт «живую» картинку без единого движущегося объекта. */
+.grain {
+  position: absolute; inset: -50%; width: 200%; height: 200%; pointer-events: none; z-index: 3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.14; mix-blend-mode: overlay;
+  animation: grain 0.6s steps(5) infinite;
+  will-change: transform;
+}
+@keyframes grain {
+  0% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-4%, 3%, 0); }
+  40% { transform: translate3d(3%, -5%, 0); }
+  60% { transform: translate3d(-6%, -2%, 0); }
+  80% { transform: translate3d(5%, 4%, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+/* ---------- HERO: чёрная сцена, живой знак ---------- */
+.hero-v3 {
+  position: relative; min-height: 100svh; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  padding: calc(var(--header-h) + 24px) 0 28px;
+  background: var(--bg);
+}
+.hero-v3 .container { position: relative; z-index: 4; }
+
+/* Свет: алое пятно за знаком и тёплый отсвет снизу. Гасим края виньеткой. */
+.hero-light {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    radial-gradient(52% 40% at 50% 38%, rgba(229, 26, 32, 0.34), transparent 70%),
+    radial-gradient(70% 45% at 50% 100%, rgba(229, 26, 32, 0.12), transparent 70%);
+  will-change: transform;
+}
+.hero-vignette {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: radial-gradient(90% 80% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.72) 100%);
+}
+/* Огромный X далеко за сценой: глубина, движется медленнее всего */
+.hero-bgx {
+  position: absolute; z-index: 0; pointer-events: none;
+  width: 130vmin; height: 130vmin; right: -30vmin; top: -14vmin;
+  color: var(--acid); opacity: 0.09;
+  will-change: transform;
+}
+.hero-bgx svg { width: 100%; height: 100%; display: block; }
+
+/* Знак: PRO ✕ JECT. Буквы белые со свечением, крест алый, чуть крупнее
+   и поверх — как на аватаре бренда. Три отдельных элемента, чтобы каждый
+   мог войти своим путём и жить под курсором. */
+.hero-stage {
+  position: relative; z-index: 4;
+  flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+  gap: clamp(14px, 3vw, 26px);
+}
+.hero-kicker {
+  display: inline-flex; align-items: center; gap: 12px;
+  font-weight: 700; font-size: 0.74rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+}
+.hero-kicker::before { content: ''; width: 28px; height: 1px; background: var(--acid); }
+.hero-kicker b { color: var(--text); }
+.hero-mark {
+  display: flex; align-items: center;
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: clamp(4.4rem, 20vw, 13rem); line-height: 0.9; letter-spacing: -0.015em;
+  transform-style: preserve-3d; will-change: transform;
+  margin-left: -0.02em;
+}
+.hero-mark .hm-word {
+  color: #fff;
+  text-shadow: 0 0 22px rgba(255, 255, 255, 0.28), 0 0 2px rgba(255, 255, 255, 0.6);
+  position: relative; z-index: 1;
+}
+.hero-mark .hm-x {
+  position: relative; z-index: 2;
+  width: 0.98em; height: 1.06em; margin: 0 -0.1em;
+  display: block;
+}
+.hero-mark .hm-x svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.hero-mark .hm-x .x-core { color: var(--acid); }
+/* Ореол — отдельный слой с blur. Размывается один раз, дальше едет как картинка */
+.hero-mark .hm-x .x-glow { color: var(--acid); filter: blur(14px); opacity: 0.85; }
+.hero-mark .hm-x .x-glow2 { color: #ff5a5f; filter: blur(3px); opacity: 0.55; }
+
+.hero-tagline {
+  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
+  font-size: clamp(1.25rem, 4.6vw, 2.4rem); line-height: 1.08; letter-spacing: 0.01em;
+  max-width: 14em; color: var(--text);
+}
+.hero-tagline .x { color: var(--acid); }
+.hero-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.hero-tags span {
+  font-family: var(--font-display); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 7px 11px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.hero-tags span.is-acid { background: var(--acid); border-color: var(--acid); color: var(--ink); }
+
+/* Ближайшая ночь: карточка-билет внизу сцены */
+.next-night {
+  position: relative; z-index: 4; margin-top: clamp(24px, 6vw, 48px);
+  display: grid; grid-template-columns: auto 1fr; gap: 14px 16px; align-items: center;
+  padding: 16px; border-radius: var(--radius);
+  background: rgba(16, 16, 16, 0.74); border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.next-night[hidden] { display: none; }
+.nn-date {
+  font-family: var(--font-display); font-weight: 700; line-height: 0.9; text-align: center;
+  min-width: 62px; padding: 8px 6px; border-radius: 10px; background: var(--acid); color: var(--ink);
+}
+.nn-date b { display: block; font-size: 2rem; }
+.nn-date small { display: block; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 2px; }
+.nn-title { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; text-transform: uppercase; line-height: 1.05; }
+.nn-meta { color: var(--muted); font-size: 0.86rem; margin-top: 4px; }
+.nn-meta b { color: var(--text); }
+.nn-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.nn-foot .btn { flex: 1 1 200px; }
+.nn-count { display: flex; gap: 10px; color: var(--muted); font-size: 0.78rem; align-items: baseline; }
+.nn-count b { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--text); font-variant-numeric: tabular-nums; min-width: 2ch; display: inline-block; text-align: right; }
+.nn-count i { font-style: normal; }
+@media (min-width: 761px) {
+  .next-night { grid-template-columns: auto 1fr auto; max-width: 760px; }
+  .nn-foot { grid-column: auto; display: grid; justify-items: end; gap: 8px; }
+  .nn-foot .btn { flex: none; }
+}
+
+/* Вход сцены: знак собирается из центра, дальше — лесенка. Одноразовый момент,
+   бюджет «восторга» тратим здесь. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero-v3 .hm-x { opacity: 0; transform: scale(0.86); animation: x-in 800ms var(--ease-out) 60ms forwards; }
+  .hero-v3 .hm-pro { clip-path: inset(0 0 0 100%); animation: word-l 700ms var(--ease-out) 320ms forwards; }
+  .hero-v3 .hm-ject { clip-path: inset(0 100% 0 0); animation: word-r 700ms var(--ease-out) 320ms forwards; }
+  .hero-v3 .hi { opacity: 0; transform: translateY(16px); animation: hero-in 700ms var(--ease-out) forwards; }
+  .hero-v3 .hi-1 { animation-delay: 560ms; }
+  .hero-v3 .hi-2 { animation-delay: 680ms; }
+  .hero-v3 .hi-3 { animation-delay: 780ms; }
+  .hero-v3 .hi-4 { animation-delay: 900ms; }
+  .hero-v3 .hero-light { opacity: 0; animation: light-in 1400ms ease 100ms forwards; }
+}
+@keyframes x-in { to { opacity: 1; transform: none; } }
+@keyframes word-l { to { clip-path: inset(0 0 0 0); } }
+@keyframes word-r { to { clip-path: inset(0 0 0 0); } }
+@keyframes hero-in { to { opacity: 1; transform: none; } }
+@keyframes light-in { to { opacity: 1; } }
+
+/* ---------- НОЧЬ: сцена по скроллу — три правила ---------- */
+.night { position: relative; height: 330svh; }
+.night-stage {
+  position: sticky; top: 0; height: 100svh; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.night-x {
+  position: absolute; width: 78vmin; height: 78vmin; color: var(--acid); opacity: 0.16;
+  will-change: transform; pointer-events: none;
+}
+.night-x svg { width: 100%; height: 100%; display: block; }
+.night-rule {
+  position: absolute; inset-inline: 0; padding: 0 24px; text-align: center;
+  opacity: 0; will-change: transform, opacity; pointer-events: none;
+}
+.night-rule .nr-word {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: clamp(3.6rem, 19vw, 12rem); line-height: 0.9; letter-spacing: -0.02em; color: #fff;
+  text-shadow: 0 0 30px rgba(255, 255, 255, 0.2);
+}
+.night-rule .nr-word .x { color: var(--acid); }
+.night-rule .nr-line { color: var(--muted); font-size: clamp(1rem, 2.6vw, 1.25rem); max-width: 30em; margin: 18px auto 0; line-height: 1.5; }
+.night-rule .nr-line b { color: var(--text); }
+.night-nav {
+  position: absolute; left: 24px; bottom: 28px; display: flex; gap: 8px; align-items: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.12em; color: var(--muted);
+}
+.night-nav i { width: 28px; height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; position: relative; display: block; }
+.night-nav i::after { content: ''; position: absolute; inset: 0; background: var(--acid); transform: scaleX(var(--f, 0)); transform-origin: left; }
+.night-kicker { position: absolute; top: calc(var(--header-h) + 18px); left: 24px; }
+/* Без движения или на низком окне — три правила просто стоят друг под другом */
+.night.is-static { height: auto; padding: 64px 0; }
+.night.is-static .night-stage { position: static; height: auto; display: grid; gap: 48px; }
+.night.is-static .night-rule { position: static; opacity: 1; transform: none; }
+.night.is-static .night-x, .night.is-static .night-nav { display: none; }
+.night.is-static .night-kicker { position: static; margin-bottom: 24px; }
+
+/* ---------- АФИША ---------- */
+/* Карточки широкие и горизонтальные — по одной в ряд. Перебиваем базовые
+   auto-fill колонки, из-за которых карточка сжималась в узкий столбец. */
+.afisha-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.night-card {
+  display: grid; grid-template-columns: 1fr; border-radius: var(--radius); overflow: hidden;
+  background: var(--bg-2); border: 1px solid var(--line-soft); color: inherit; text-decoration: none;
+  transition: transform 220ms var(--ease-out), border-color 0.2s ease, box-shadow 0.3s ease;
+}
+.night-card:active { transform: scale(0.99); }
+@media (hover: hover) and (pointer: fine) {
+  .night-card:hover { transform: translateY(-4px); border-color: rgba(229, 26, 32, 0.5); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55), 0 0 60px rgba(229, 26, 32, 0.12); }
+}
+.nc-poster { position: relative; aspect-ratio: 4 / 3; background: #000; overflow: hidden; }
+.nc-poster img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0.92; }
+.nc-poster::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 50%, rgba(16, 16, 16, 0.9)); }
+.nc-date {
+  position: absolute; left: 14px; top: 14px; z-index: 2;
+  font-family: var(--font-display); font-weight: 700; line-height: 0.9; text-align: center;
+  padding: 8px 8px; border-radius: 10px; background: var(--acid); color: var(--ink); min-width: 56px;
+}
+.nc-date b { display: block; font-size: 1.7rem; }
+.nc-date small { display: block; font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.nc-badges { position: absolute; right: 12px; top: 12px; z-index: 2; display: flex; gap: 6px; }
+.nc-body { padding: 18px 18px 20px; display: grid; gap: 10px; }
+.nc-title { font-family: var(--font-display); font-weight: 700; text-transform: uppercase; font-size: clamp(1.4rem, 5vw, 2rem); line-height: 1; }
+.nc-meta { color: var(--muted); font-size: 0.9rem; display: grid; gap: 4px; }
+.nc-meta b { color: var(--text); }
+.nc-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+.nc-price { font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; }
+.nc-price small { font-family: var(--font-text); font-weight: 600; font-size: 0.8rem; color: var(--muted); margin-right: 6px; }
+.nc-left { color: var(--muted); font-size: 0.82rem; }
+.nc-left b { color: var(--acid); }
+.nc-cta { display: inline-flex; }
+@media (min-width: 761px) {
+  .night-card { grid-template-columns: 5fr 6fr; }
+  .nc-poster { aspect-ratio: auto; min-height: 340px; }
+  .nc-poster::after { background: linear-gradient(90deg, transparent 60%, rgba(16, 16, 16, 0.9)); }
+  .nc-body { padding: 28px 28px 28px 22px; align-content: center; }
+}
+
+/* Лента афиш: настоящие постеры как объекты. Прокрутка — родная (инерция
+   платформы лучше любой нашей), наклон — по расстоянию до центра. */
+.reel-wrap { position: relative; margin-top: clamp(36px, 8vw, 64px); }
+.reel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.reel-head h3 { font-size: clamp(1.4rem, 4.6vw, 2rem); text-transform: uppercase; letter-spacing: -0.01em; margin: 0; }
+.reel-head span { color: var(--muted); font-size: 0.82rem; }
+.reel {
+  display: flex; gap: 14px; overflow-x: auto; overflow-y: hidden;
+  /* Лента бьётся в край экрана: отступ и вынос считаем от паддинга контейнера
+     (20px), а не от 100vw — vw включает полосу прокрутки и давал +4px по X. */
+  padding: 14px 20px 26px;
+  margin-inline: -20px;
+  scroll-snap-type: x mandatory; scrollbar-width: none; -ms-overflow-style: none;
+  perspective: 900px; cursor: grab; user-select: none; -webkit-user-select: none;
+  touch-action: pan-x pan-y;
+}
+.reel::-webkit-scrollbar { display: none; }
+.reel.is-dragging { cursor: grabbing; scroll-snap-type: none; }
+.reel-item {
+  flex: 0 0 auto; width: min(62vw, 300px); aspect-ratio: 4 / 5; scroll-snap-align: center;
+  border-radius: 12px; overflow: hidden; position: relative; background: var(--bg-3);
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.55);
+  transform-style: preserve-3d; will-change: transform;
+}
+.reel-item img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+/* Блик стекла: показывает объём, когда карточка наклонена */
+.reel-item::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.14), transparent 45%, rgba(0, 0, 0, 0.35));
+  opacity: var(--sheen, 0.5); pointer-events: none;
+}
+.reel-item figcaption {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 2; display: grid; gap: 4px;
+}
+.reel-item .rt { font-family: var(--font-display); font-weight: 700; text-transform: uppercase; font-size: 1rem; line-height: 1; padding: 5px 8px; background: var(--acid); color: var(--ink); border-radius: 5px; justify-self: start; }
+.reel-item .rn { font-size: 0.72rem; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8); }
+.reel-item.no-img img { display: none; }
+.reel-item.no-img { background: radial-gradient(70% 60% at 50% 40%, rgba(229, 26, 32, 0.35), var(--bg-3)); }
+
+/* ---------- МАНИФЕСТ: три фразы, слова входят по одному ---------- */
+.manifest { display: grid; gap: clamp(22px, 5vw, 40px); }
+.manifest p {
+  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
+  font-size: clamp(1.55rem, 5.4vw, 3.3rem); line-height: 1.06; letter-spacing: -0.005em; margin: 0; max-width: 20em;
+}
+.manifest p .x { color: var(--acid); }
+.manifest .w { display: inline-block; opacity: 0.12; transform: translateY(0.25em); transition: opacity 500ms var(--ease-out), transform 500ms var(--ease-out); }
+.manifest p.is-in .w { opacity: 1; transform: none; }
+.manifest .m-note { font-family: var(--font-text); font-weight: 400; text-transform: none; font-size: 1rem; color: var(--muted); letter-spacing: 0; line-height: 1.5; max-width: 34em; }
+
+/* ---------- ПРОГРАММА: две ленты навстречу ---------- */
+.program-band { position: relative; overflow: hidden; padding-block: 6px; border-block: 1px solid var(--line-soft); }
+.band-row { display: flex; width: max-content; will-change: transform; }
+.band-row span {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase; white-space: nowrap;
+  font-size: clamp(1.5rem, 5.5vw, 3rem); line-height: 1.3; padding-inline: 0.5em; color: var(--text);
+}
+.band-row span.x { color: var(--acid); padding-inline: 0.15em; }
+.band-row.is-alt span { color: var(--muted); font-weight: 500; font-size: clamp(1.15rem, 4vw, 2rem); }
+@media (prefers-reduced-motion: no-preference) {
+  .band-row { animation: band 46s linear infinite; }
+  .band-row.is-alt { animation-duration: 58s; animation-direction: reverse; }
+  .program-band:hover .band-row { animation-play-state: paused; }
+}
+@keyframes band { to { transform: translateX(-50%); } }
+.program-notes { display: grid; gap: 10px; margin-top: 28px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.program-notes div { padding: 16px; border: 1px solid var(--line-soft); border-radius: var(--radius-s); background: var(--bg-2); }
+.program-notes b { display: block; font-family: var(--font-display); text-transform: uppercase; font-size: 1rem; margin-bottom: 6px; }
+.program-notes p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+
+/* ---------- ФЕЙСКОНТРОЛЬ ---------- */
+.site-v3 .face-section { background: none; position: relative; }
+.site-v3 .face-panel { max-width: 520px; }
+.site-v3 .face-bubble {
+  transform: rotate(-2deg);
+  transition: transform 300ms var(--ease-out);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .site-v3 .face-result:not(.hidden) .face-bubble { animation: stamp 420ms var(--ease-out) both; }
+}
+/* Штамп: приходит чуть крупнее и садится на место — один раз, как печать */
+@keyframes stamp { from { opacity: 0; transform: rotate(-6deg) scale(1.12); } to { opacity: 1; transform: rotate(-2deg) scale(1); } }
+
+/* ---------- ФИНАЛЬНЫЙ ПРИЗЫВ ---------- */
+.cta-band { position: relative; overflow: hidden; padding-block: clamp(72px, 14vw, 140px); text-align: center; }
+.cta-band .cta-x { position: absolute; left: 50%; top: 50%; width: 120vmin; height: 120vmin; transform: translate(-50%, -50%); color: var(--acid); opacity: 0.1; pointer-events: none; }
+.cta-band .cta-x svg { width: 100%; height: 100%; }
+.cta-band .container { position: relative; z-index: 1; display: grid; justify-items: center; gap: 18px; }
+.cta-band h2 { font-size: clamp(2.4rem, 9vw, 6rem); }
+.cta-band .lead { text-align: center; margin: 0; }
+.cta-band .btn { padding: 18px 28px; font-size: 1rem; }
+
+/* ---------- ФУТЕР ---------- */
+.site-v3 .site-footer { border-top: 1px solid var(--line-soft); padding: 40px 0 calc(28px + env(safe-area-inset-bottom)); }
+.site-v3 .f-grid { display: grid; gap: 22px; grid-template-columns: 1fr; }
+.f-links { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.f-links a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 0.9rem; min-height: 44px; display: inline-flex; align-items: center; }
+.f-links a:hover { color: var(--acid); }
+@media (min-width: 761px) { .site-v3 .f-grid { grid-template-columns: 1.3fr 1fr auto; align-items: start; } }
+
+/* ---------- Страницы второго уровня ---------- */
+.page-hero { position: relative; overflow: hidden; padding: calc(var(--header-h) + clamp(48px, 10vw, 96px)) 0 clamp(32px, 6vw, 56px); }
+.page-hero h1 { font-size: clamp(2.6rem, 10vw, 6rem); line-height: 0.94; letter-spacing: -0.02em; text-transform: uppercase; margin: 12px 0 0; }
+.page-hero h1 .x { color: var(--acid); }
+.page-hero .hero-bgx { opacity: 0.07; }
+.page-body { padding-bottom: clamp(64px, 12vw, 120px); }
+.rule-cards { display: grid; gap: 14px; }
+.rule-card { padding: 22px; border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--line-soft); display: grid; gap: 10px; }
+.rule-card .rc-num { font-family: var(--font-display); font-weight: 700; font-size: clamp(2.6rem, 9vw, 4.4rem); line-height: 0.9; color: var(--acid); }
+.rule-card h3 { text-transform: uppercase; font-size: 1.2rem; margin: 0; }
+.rule-card p { margin: 0; color: var(--muted); line-height: 1.55; }
+.rule-card p b { color: var(--text); }
+@media (min-width: 761px) { .rule-cards { grid-template-columns: repeat(3, 1fr); } }
+.rule-note { margin-top: 28px; padding: 22px; border-radius: var(--radius); border: 1px dashed var(--line); color: var(--muted); line-height: 1.55; display: grid; gap: 14px; }
+.rule-note b { color: var(--text); }
+.rule-note .btn { justify-self: start; }
+
+/* FAQ: аккордеон с анимацией высоты (единственное место, где высота
+   оправдана: у раскрытия нет transform-эквивалента) */
+.site-v3 .faq { max-width: 760px; }
+.site-v3 .faq details { border-bottom: 1px solid var(--line-soft); }
+.site-v3 .faq summary {
+  list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 18px 0; font-family: var(--font-display); font-weight: 700; text-transform: uppercase; font-size: 1.05rem; line-height: 1.2;
+}
+.site-v3 .faq summary::-webkit-details-marker { display: none; }
+.site-v3 .faq summary::after {
+  content: '+'; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center; color: var(--acid); font-family: var(--font-text); font-weight: 400; font-size: 1.2rem;
+  transition: transform 220ms var(--ease-out), background 0.15s ease;
+}
+.site-v3 .faq details[open] summary::after { transform: rotate(45deg); background: rgba(229, 26, 32, 0.12); }
+.site-v3 .faq .faq-a { overflow: hidden; color: var(--muted); line-height: 1.6; padding-bottom: 20px; }
+.site-v3 .faq .faq-a b { color: var(--text); }
+
+/* Контакты */
+.site-v3 .contact-cards { display: grid; gap: 12px; }
+@media (min-width: 761px) { .site-v3 .contact-cards { grid-template-columns: repeat(3, 1fr); } }
+.city-block { margin-top: clamp(48px, 10vw, 88px); padding-top: clamp(40px, 8vw, 64px); border-top: 1px solid var(--line-soft); }
+
+/* ---------- Меньше движения / прозрачности / больше контраста ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .grain { animation: none; }
+  .reveal, .reveal-stagger > * { transition: opacity 300ms ease; transform: none; }
+  .manifest .w { transform: none; transition: opacity 300ms ease; }
+  .menu nav a { transform: none; transition: opacity 200ms ease; }
+  .hero-light, .hero-bgx, .hero-mark { transform: none !important; }
+  .reel-item { transform: none !important; }
+  .hero-v3 .hm-x, .hero-v3 .hm-pro, .hero-v3 .hm-ject, .hero-v3 .hi { animation: none; opacity: 1; transform: none; clip-path: none; }
+  .band-row { flex-wrap: wrap; width: auto; }
+  .band-row > span:nth-child(n + 15) { display: none; } /* без ленты хватит одного набора */
+  .night-card, .site-v3 .face-bubble { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .next-night, .menu, .site-v3 .site-header.is-solid { background: var(--bg-2); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .grain { display: none; }
+}
+@media (prefers-contrast: more) {
+  .next-night, .night-card, .rule-card, .program-notes div { border-color: var(--muted); }
+  .hero-tags span { border-color: var(--muted); }
+}

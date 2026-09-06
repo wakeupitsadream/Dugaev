@@ -88,6 +88,9 @@
   --font-display: 'Oswald', 'Arial Black', system-ui, sans-serif;
   --font-text: 'Manrope', 'Segoe UI', system-ui, sans-serif;
 
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --radius: 16px;
   --radius-s: 10px;
   --container: 1080px;
@@ -142,10 +145,11 @@ body::after {
   text-transform: uppercase; letter-spacing: 0.06em; text-decoration: none;
   border-radius: var(--radius-s); border: 1px solid transparent;
   padding: 15px 26px; min-height: 50px;
-  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  transition: transform 160ms var(--ease-out), box-shadow 0.25s ease, background 0.2s ease, border-color 0.2s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.btn:active { transform: translateY(1px) scale(0.99); }
+/* Ответ на нажатие: заметный масштаб, сильная кривая — интерфейс слышит палец */
+.btn:active { transform: scale(0.97); }
 .btn-acid { background: var(--acid); color: var(--ink); box-shadow: 0 0 32px var(--acid-glow); }
 .btn-acid:hover { box-shadow: 0 0 44px rgba(229, 26, 32, 0.3); }
 .btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
@@ -506,13 +510,13 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
   will-change: transform;
 }
 /* Полоска-ручка: подсказывает, что лист можно тянуть */
-.sheet::before { transition: background 0.15s ease, width 0.15s ease; }
-.sheet.is-dragging::before { background: var(--muted); width: 56px; }
+.sheet::before { transition: background 0.15s ease, transform 150ms var(--ease-out); }
+.sheet.is-dragging::before { background: var(--muted); transform: scaleX(1.27); }
 .sheet::before { content: ''; display: block; width: 44px; height: 4px; border-radius: 2px; background: var(--line); margin: 6px auto 14px; }
 .sheet-open .sheet { transform: none; }
 /* Пока лист тянут, подложка светлеет вместе с ним: движение заранее
    показывает, чем всё кончится (--sheet-progress ставит sheet-drag.js). */
-.sheet-open .sheet-backdrop { opacity: var(--sheet-progress, 1); pointer-events: auto; }
+.sheet-open .sheet-backdrop { opacity: 1; pointer-events: auto; }
 @media (min-width: 761px) {
   .sheet { inset-inline: auto; right: 0; top: 0; bottom: 0; width: 440px; max-height: none; border-radius: 0; border-left: 1px solid var(--line); transform: translateX(102%); touch-action: auto; }
   .sheet::before { display: none; }
@@ -531,14 +535,19 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
    с листом, а не отдельно от него: масштаб привязан к тому же прогрессу, что
    и подложка, поэтому фон «дышит» ровно на столько, на сколько тянут лист. */
 @media (max-width: 760px) {
+  /* Покой задаёт CSS; во время жеста sheet-drag.js пишет transform/opacity
+     прямо на эти узлы (никаких переменных на body — иначе каждый кадр жеста
+     пересчитывает стили всего документа). */
   body.sheet-open main {
-    transform: scale(calc(1 - 0.024 * var(--sheet-progress, 1)));
+    transform: scale(0.976);
     transform-origin: 50% 0;
-    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: transform 300ms var(--ease-out);
+    will-change: transform;
   }
   body.sheet-dragging main { transition: none; }
   body.sheet-open .site-header,
-  body.sheet-open .sticky-cta { opacity: calc(1 - 0.55 * var(--sheet-progress, 1)); }
+  body.sheet-open .sticky-cta { opacity: 0.45; transition: opacity 300ms var(--ease-out); }
+  body.sheet-dragging .site-header, body.sheet-dragging .sticky-cta { transition: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   body.sheet-open main { transform: none; }
@@ -727,6 +736,9 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 .tile .t-label { color: var(--muted); font-size: 0.8rem; }
 .tile .t-sub { color: var(--dim); font-size: 0.72rem; margin-top: 4px; }
 .walkin-form { display: grid; grid-template-columns: 1fr; gap: 10px; max-width: 520px; }
+/* Длинная волна в <select> не должна распирать колонку шире экрана */
+.walkin-form > * { min-width: 0; }
+.admin-select { max-width: 100%; min-width: 0; }
 .walkin-form input[type='text'] {
   width: 100%; background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--radius-s);
   color: var(--text); font-family: inherit; font-size: 1rem; padding: 12px 14px; outline: none;
@@ -1170,13 +1182,16 @@ body::before {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.12s !important;
     scroll-behavior: auto !important;
   }
   .rise { opacity: 1; transform: none; animation: none; }
-  .sheet { transition: opacity 0.12s ease; }
+  /* Шторка: вместо слайда — кроссфейд. Перемещение убираем, понятность оставляем */
+  .sheet {
+    transform: none !important; opacity: 0; visibility: hidden;
+    transition: opacity 200ms ease, visibility 0s linear 200ms;
+  }
+  .sheet-open .sheet { opacity: 1; visibility: visible; transition-delay: 0s; }
   .event-card:hover, .strip-item:hover img, .program-item:hover { transform: none; }
-  .btn:active { transform: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
   /* Прозрачность — украшение; читаемость важнее. Гасим стекло. */
@@ -1280,7 +1295,7 @@ h2 { line-height: 1.1; }
 }
 
 /* --- §11: полоса волны двигала layout-свойство width --- */
-.wave-bar i { transform-origin: left center; transition: transform 0.6s ease, width 0.6s ease; }
+.wave-bar i { width: 100%; transform-origin: left center; transition: transform 300ms var(--ease-out); }
 
 /* --- §14: контраст мелкого текста и белого на зелёном --- */
 :root { --dim: #7d7676; }

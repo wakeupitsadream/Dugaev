@@ -60,7 +60,7 @@ async function init() {
 function render(parsed, t) {
   if (!t) {
     // подпись валидна, деталей нет (первое открытие офлайн) — QR всё равно рабочий
-    $('t-name').textContent = 'Именной билет';
+    $('t-name').textContent = 'Именная проходка';
     $('t-meta').textContent = 'Детали подтянутся, когда появится интернет';
     return;
   }
@@ -73,7 +73,7 @@ function render(parsed, t) {
 
   const badges = [
     `<span class="badge badge-age ${t.event.ageRating < 18 ? 'age-16' : ''}">${ageLabel(t.event.ageRating)}</span>`,
-    `<span class="badge">${esc(t.waveName || 'билет')}</span>`,
+    `<span class="badge">${esc(t.waveName || 'проходка')}</span>`,
   ];
   if (t.event.ageRating < 18) {
     badges.push('<span class="badge">0% алкоголя</span>');
@@ -102,8 +102,8 @@ function bindActions(parsed, t) {
     share.hidden = false;
     share.onclick = () => {
       navigator.share({
-        title: 'Твой билет — PROJECT X',
-        text: t ? `Билет на ${t.event.title} для ${t.holderName}` : 'Твой билет PROJECT X',
+        title: 'Твоя проходка — PROJECT X',
+        text: t ? `Проходка на ${t.event.title} для ${t.holderName}` : 'Твоя проходка PROJECT X',
         url: location.href,
       }).catch(() => {});
     };

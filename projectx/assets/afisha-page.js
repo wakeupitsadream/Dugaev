@@ -52,10 +52,15 @@ function renderWall(events) {
       const r = el.getBoundingClientRect();
       const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
       const ny = ((e.clientY - r.top) / r.height) * 2 - 1;
-      el.style.transform = `perspective(700px) rotateX(${(-ny * 6).toFixed(2)}deg) rotateY(${(nx * 8).toFixed(2)}deg) translateY(-4px)`;
+      // hover — десятки раз в день: наклон едва заметный; нажатие — через --s
+      el.style.transform = `perspective(700px) rotateX(${(-ny * 3).toFixed(2)}deg) rotateY(${(nx * 4).toFixed(2)}deg) translateY(-2px) scale(var(--s, 1))`;
       el.style.setProperty('--gx', `${((nx + 1) * 50).toFixed(1)}%`);
       el.style.setProperty('--gy', `${((ny + 1) * 50).toFixed(1)}%`);
     });
-    el.addEventListener('pointerleave', () => { el.style.transform = ''; });
+    el.addEventListener('pointerleave', () => {
+      el.style.transform = '';
+      el.style.removeProperty('--gx');
+      el.style.removeProperty('--gy');
+    });
   });
 }

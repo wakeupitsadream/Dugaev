@@ -64,7 +64,10 @@ export function renderAfisha(gridId, list) {
     grid.innerHTML = `<p class="muted">Ближайшая ночь ещё не анонсирована — следи за <a class="acid" href="${esc(SITE.instagram)}" target="_blank" rel="noopener">Instagram*</a>.</p>`;
     return;
   }
-  grid.innerHTML = list.map(nightCard).join('');
+  const html = list.map(nightCard).join('');
+  if (grid.dataset.html === html) return; // ежеминутное обновление не должно моргать карточкой под курсором
+  grid.dataset.html = html;
+  grid.innerHTML = html;
 }
 
 // ---------- Лента афиш: постеры как объекты ----------
@@ -85,19 +88,28 @@ export function renderReel(reelId, items = GALLERY) {
 
   if (!reduced.matches) {
     let raf = 0;
+    // Центры карточек считаем от статичной раскладки один раз (и на resize):
+    // читать rect у уже наклонённой карточки — значит считать наклон от
+    // собственного результата и дёргать layout на каждой записи.
+    let centers = [];
+    let cw = 0;
+    const measure = () => {
+      cw = reel.clientWidth;
+      centers = cards.map((el) => el.offsetLeft + el.offsetWidth / 2);
+    };
     const tilt = () => {
       raf = 0;
-      const rr = reel.getBoundingClientRect();
-      const cx = rr.left + rr.width / 2;
-      cards.forEach((el) => {
-        const b = el.getBoundingClientRect();
-        const d = Math.max(-1, Math.min(1, ((b.left + b.width / 2 - cx) / rr.width) * 2));
+      const mid = reel.scrollLeft + cw / 2;
+      const ds = centers.map((c) => Math.max(-1, Math.min(1, ((c - mid) / cw) * 2)));
+      cards.forEach((el, i) => {
+        const d = ds[i];
         el.style.transform = `rotateY(${(-d * 16).toFixed(2)}deg) translate3d(0, 0, ${(-Math.abs(d) * 90).toFixed(1)}px)`;
         el.style.setProperty('--sheen', (0.3 + Math.abs(d) * 0.6).toFixed(2));
       });
     };
+    measure();
     reel.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(tilt); }, { passive: true });
-    window.addEventListener('resize', () => { if (!raf) raf = requestAnimationFrame(tilt); });
+    window.addEventListener('resize', () => { measure(); if (!raf) raf = requestAnimationFrame(tilt); });
     tilt();
     requestAnimationFrame(() => {
       const first = cards[0];
@@ -184,12 +196,16 @@ export function initNightScene(sectionId = 'night') {
 
   const seg = 1 / rules.length;
   let raf = 0;
+  let lastP = -1;
   const update = () => {
     raf = 0;
     const r = sec.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) return; // секция за экраном — нечего считать
     const total = r.height - window.innerHeight;
     if (total <= 0) return;
     const p = Math.min(1, Math.max(0, -r.top / total));
+    if (p === lastP) return;
+    lastP = p;
 
     x.style.transform = `rotate(${(p * 140).toFixed(2)}deg) scale(${(1 + p * 0.5).toFixed(3)})`;
     x.style.opacity = (0.12 + p * 0.12).toFixed(3);

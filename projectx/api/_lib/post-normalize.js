@@ -36,7 +36,7 @@ export function eventSlug(title, dateIso) {
 export const DEFAULT_WAVES = [
   { waveNo: 1, name: 'Ранняя волна', priceRub: 400, quota: 80 },
   { waveNo: 2, name: 'Вторая волна', priceRub: 600, quota: 120 },
-  { waveNo: 3, name: 'На входе', priceRub: 800, quota: 100 },
+  { waveNo: 3, name: 'Последняя волна', priceRub: 800, quota: 100 },
 ];
 
 const TZ_OFFSET = '+05:00'; // Оренбург/Магнитогорск

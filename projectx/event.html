@@ -7,19 +7,51 @@
   <meta name="description" content="Проходки на ночные вечеринки PROJECT X в Оренбурге. 18+ по паспорту, именной QR-проход, вход за секунды." />
   <meta name="theme-color" content="#070707" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <meta property="og:title" content="Проходки — PROJECT X · Оренбург" />
+  <meta property="og:description" content="Ночная вечеринка 18+. Проходка за минуту, вход по именному QR, адрес SECRET PLACE приходит в проходку перед стартом." />
+  <meta property="og:image" content="/assets/photos/poster-night-student.jpg" />
   <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/site.css" />
 </head>
-<body>
-  <header class="site-header">
+<body class="site-v3 is-sub">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="x-mark" viewBox="0 0 100 100"><path d="M13 5 L87 95 M87 5 L13 95" stroke="currentColor" stroke-width="21" fill="none" /></symbol>
+  </svg>
+
+  <!-- chrome:header -->
+  <header class="site-header" id="site-header">
     <div class="container">
-      <a class="logo" href="/">PRO<span class="lx">X</span>JECT</a>
+      <a class="logo" href="/" aria-label="PROJECT X — на главную">PRO<span class="lx">X</span>JECT</a>
       <nav class="top-nav" aria-label="Основная навигация">
-        <a href="/#afisha">Афиша</a>
-        <a href="/#faq">FAQ</a>
-        <a href="/#contacts">Контакты</a>
+        <a href="/afisha">Афиша</a>
+        <a href="/night">Ночь</a>
+        <a href="/fc">FC/DC</a>
+        <a href="/rules">Правила</a>
+        <a href="/faq">FAQ</a>
+        <a href="/contacts">Контакты</a>
       </nav>
+      <a class="btn btn-acid header-cta" id="header-buy" href="/afisha">Проходки</a>
+      <button class="burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="Меню"><span></span><span></span></button>
     </div>
   </header>
+
+  <!-- Полноэкранное меню (телефон). Шапка остаётся над ним: бургер складывается в крестик -->
+  <div class="menu" id="menu" role="dialog" aria-modal="true" aria-label="Меню" tabindex="-1" inert>
+    <nav>
+      <a href="/afisha">Афиша <small>ближайшие ночи и проходки</small></a>
+      <a href="/night">Ночь <small>три правила и как всё устроено</small></a>
+      <a href="/fc">FC/DC <small>дресс-код и что взять с собой</small></a>
+      <a href="/rules">Правила <small>чтобы не развернули на дверях</small></a>
+      <a href="/faq">FAQ <small>вопросы, которые задают все</small></a>
+      <a href="/contacts">Контакты <small>Instagram*, директ, свой город</small></a>
+    </nav>
+    <div class="menu-foot">
+      <a class="btn btn-acid btn-block" id="menu-buy" href="/afisha">Проходки</a>
+      <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">@project.x.prty — Instagram*</a>
+      <span>Оренбург · 18+ · FC/DC · двери 22:00 · старт 23:00</span>
+    </div>
+  </div>
+  <!-- /chrome:header -->
 
   <main class="event-hero section">
     <div class="container">
@@ -117,7 +149,7 @@
       </div>
       <button class="btn btn-acid btn-block" id="submit-order" type="button" style="margin-top: 14px;">Оплатить</button>
       <button class="btn btn-ghost btn-block hidden" id="submit-cancel" type="button" style="margin-top: 8px;">Отменить и оформить вручную</button>
-      <p class="form-note" style="margin-top: 10px;">Нажимая «Оплатить», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.</p>
+      <p class="form-note" id="submit-note" style="margin-top: 10px;">Нажимая кнопку, ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.</p>
     </div>
 
     <!-- Шаг: успех -->
@@ -125,7 +157,11 @@
       <h3>Проходки у тебя</h3>
       <div class="success-note">Оплата прошла. Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.</div>
       <div class="success-tickets" id="success-list"></div>
-      <p class="form-note">Совет: сохрани скриншот проходки — QR сработает даже без интернета на входе.</p>
+      <ol class="next-steps">
+        <li><b>Сохрани.</b> Открой проходку и сделай скриншот — QR сработает на входе даже без интернета. Ссылки остаются на этой странице.</li>
+        <li><b>Адрес.</b> SECRET PLACE появится прямо в проходке перед стартом — открой её вечером в день ночи.</li>
+        <li><b>На дверях.</b> Паспорт с собой, двери в 22:00. Друзьям — перешли их именные проходки.</li>
+      </ol>
       <button class="btn btn-ghost btn-block" id="success-close" type="button">Готово</button>
     </div>
 
@@ -149,12 +185,32 @@
     <button class="btn btn-acid" id="sticky-buy" type="button" disabled>Загружаем…</button>
   </div>
 
+  <!-- chrome:footer -->
   <footer class="site-footer">
     <div class="container f-grid">
-      <div class="f-note">PROJECT X · 18+ по паспорту · <a href="/privacy.html">политика конфиденциальности</a></div>
+      <div>
+        <a class="logo" href="/">PRO<span class="lx">X</span>JECT</a>
+        <p class="f-note" style="margin-top: 10px;">
+          Мероприятия 18+. Вход строго по документу, на дверях FC/DC — фейсконтроль и дресс-код.
+          Двери 22:00, старт 23:00, расходимся под утро.
+        </p>
+        <p class="f-note"><!-- ЗАГЛУШКА: реквизиты организатора -->ИП (реквизиты уточняются) · © 2026 PROJECT X · Оренбург</p>
+      </div>
+      <nav class="f-links" aria-label="Разделы">
+        <a href="/afisha">Афиша</a>
+        <a href="/night">Ночь</a>
+        <a href="/fc">FC/DC</a>
+        <a href="/rules">Правила</a>
+        <a href="/faq">FAQ</a>
+        <a href="/contacts">Контакты</a>
+        <a href="/privacy.html">Политика</a>
+        <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">Instagram*</a>
+      </nav>
       <div class="dev-sign">Дизайн и разработка — <a href="https://maxim-batutin.ru" target="_blank" rel="noopener">maxim-batutin.ru</a></div>
     </div>
+    <div class="container"><p class="f-note" style="margin-top: 18px;">* Instagram принадлежит Meta, признанной экстремистской организацией и запрещённой в РФ.</p></div>
   </footer>
+  <!-- /chrome:footer -->
 
   <script type="module" src="/assets/event-page.js"></script>
 </body>

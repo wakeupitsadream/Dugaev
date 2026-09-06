@@ -30,13 +30,16 @@ function initTimeline() {
   const update = () => {
     raf = 0;
     const r = tl.getBoundingClientRect();
+    // Ниже экрана — рано считать. Выше экрана считаем один последний раз:
+    // линия должна остаться заполненной, а не замереть на полпути.
+    if (r.top > window.innerHeight + 200) return;
+    if (r.bottom < -200 && fill.dataset.done) return;
+    if (r.bottom < -200) fill.dataset.done = '1';
     const mid = window.innerHeight * 0.55;
     const p = Math.min(1, Math.max(0, (mid - r.top) / r.height));
+    const tops = stops.map((s) => s.getBoundingClientRect().top); // сначала все чтения
     fill.style.transform = `scaleY(${p.toFixed(4)})`;
-    stops.forEach((s) => {
-      const sr = s.getBoundingClientRect();
-      s.classList.toggle('is-on', sr.top + 24 < mid);
-    });
+    stops.forEach((s, i) => s.classList.toggle('is-on', tops[i] + 24 < mid)); // потом записи
   };
   const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };
   window.addEventListener('scroll', schedule, { passive: true });

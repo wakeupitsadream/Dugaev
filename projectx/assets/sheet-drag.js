@@ -50,17 +50,35 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
     return spring.stop();
   };
 
-  // Прогресс перетаскивания уводит подложку: чем дальше лист, тем светлее фон —
+  // Прогресс жеста уводит подложку, отодвигает страницу и гасит шапку —
   // движение сообщает, куда всё идёт, ещё до того, как палец отпущен.
+  // Пишем прямо на узлы: переменная на body заставляла бы браузер
+  // пересчитывать стили всего документа на каждом кадре жеста.
+  const backdrop = document.getElementById('sheet-backdrop');
+  const main = document.querySelector('main');
+  const header = document.querySelector('.site-header');
+  const sticky = document.getElementById('sticky-cta');
   const setProgress = (y) => {
-    const p = Math.max(0, Math.min(1, y / height()));
-    document.body.style.setProperty('--sheet-progress', String(1 - p));
+    const p = 1 - Math.max(0, Math.min(1, y / height())); // 1 — открыт, 0 — закрыт
+    if (backdrop) backdrop.style.opacity = p.toFixed(3);
+    if (!mobile.matches) return;
+    if (main) main.style.transform = `scale(${(1 - 0.024 * p).toFixed(4)})`;
+    const dim = (1 - 0.55 * p).toFixed(3);
+    if (header) header.style.opacity = dim;
+    if (sticky) sticky.style.opacity = dim;
+  };
+  // В покое значения задаёт CSS (.sheet-open) — inline снимаем
+  const clearProgress = () => {
+    for (const el of [backdrop, main, header, sticky]) {
+      if (!el) continue;
+      el.style.opacity = '';
+      if (el === main) el.style.transform = '';
+    }
   };
   const markDragging = (on) => {
     sheet.classList.toggle('is-dragging', on);
     document.body.classList.toggle('sheet-dragging', on);
   };
-  const clearProgress = () => document.body.style.removeProperty('--sheet-progress');
 
   const finish = (y, velocity) => {
     const h = height();
@@ -92,8 +110,7 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
       },
       onRest: () => {
         sheet.style.transform = '';
-        if (dismiss) clearProgress();
-        else document.body.style.setProperty('--sheet-progress', '1');
+        clearProgress();
         if (dismiss) onClose();
         // класс снимаем кадром позже: иначе CSS-переход подхватит остаток пути
         requestAnimationFrame(() => markDragging(false));
@@ -236,7 +253,7 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
 
       if (!mobile.matches || reduced.matches) {
         sheet.style.transform = '';
-        document.body.style.setProperty('--sheet-progress', '1');
+        clearProgress();
         markDragging(false);
         return;
       }
@@ -253,7 +270,7 @@ export function makeSheetDraggable({ sheet, isOpen, onClose }) {
         },
         onRest: () => {
           sheet.style.transform = '';
-          document.body.style.setProperty('--sheet-progress', '1');
+          clearProgress();
           requestAnimationFrame(() => markDragging(false));
         },
       });

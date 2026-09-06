@@ -2,10 +2,48 @@
 // Одна и та же для главной и страниц второго уровня.
 const $ = (id) => document.getElementById(id);
 
+let closeMenuFn = () => {};
+export function closeMenu() { closeMenuFn(); }
+
 export function initChrome() {
   initHeader();
   initMenu();
   markCurrentNav();
+  initStickyCta();
+  addMyTickets();
+}
+
+// Липкая кнопка появляется снизу, когда карточка ближайшей ночи ушла с экрана
+// (на главной), а на остальных страницах — сразу. Приходит и уходит одним путём.
+function initStickyCta() {
+  const bar = $('sticky-cta');
+  if (!bar) return;
+  const card = $('next-event');
+  if (!card || !('IntersectionObserver' in window)) { bar.classList.add('is-on'); return; }
+  new IntersectionObserver((entries) => {
+    const visible = entries.some((en) => en.isIntersecting) && !card.hidden;
+    bar.classList.toggle('is-on', !visible);
+  }, { threshold: 0.15 }).observe(card);
+}
+
+// Купленные проходки лежат в localStorage этого браузера — даём к ним вход
+// из меню, чтобы перед ночью не искать ссылку в чатах.
+function addMyTickets() {
+  const nav = document.querySelector('#menu nav');
+  if (!nav) return;
+  let key = null;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('px_tickets_')) { key = k; break; }
+    }
+  } catch { return; }
+  if (!key) return;
+  const a = document.createElement('a');
+  a.href = `/e/${key.slice('px_tickets_'.length)}#saved-tickets`;
+  a.className = 'is-mine';
+  a.innerHTML = 'Мои проходки <small>ссылки на твои именные QR</small>';
+  nav.appendChild(a);
 }
 
 // Шапка прозрачна над сценой и становится стеклом, когда под ней контент
@@ -46,6 +84,7 @@ function initMenu() {
     menu.inert = true;
     btn.focus({ preventScroll: true });
   };
+  closeMenuFn = () => { if (menu.classList.contains('is-open')) close(); };
   btn.onclick = () => (menu.classList.contains('is-open') ? close() : open());
   menu.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => {
     // якорь на этой же странице: сначала закрыть, потом ехать

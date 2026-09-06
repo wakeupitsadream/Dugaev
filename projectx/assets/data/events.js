@@ -37,7 +37,7 @@ export const EVENTS = [
     waves: [
       { waveNo: 1, name: 'Ранняя волна', priceRub: 500, quota: 100 },
       { waveNo: 2, name: 'Вторая волна', priceRub: 700, quota: 150 },
-      { waveNo: 3, name: 'На входе', priceRub: 1000, quota: 150 },
+      { waveNo: 3, name: 'Последняя волна', priceRub: 1000, quota: 150 },
     ],
   },
 

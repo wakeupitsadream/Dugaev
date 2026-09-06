@@ -2,6 +2,7 @@
 // перерисовки), экран успеха держится флагом showingDone.
 import { SITE } from './data/config.js';
 import { makeSheetDraggable } from './sheet-drag.js';
+import { initChrome, closeMenu } from './chrome.js';
 import { springTo } from './spring.js';
 import { loadEvents, esc } from './events-load.js';
 import { waveStates, activeWave, totalSold } from './waves.js';
@@ -32,6 +33,7 @@ function slug() {
 }
 
 async function init() {
+  initChrome();
   const { events } = await loadEvents();
   const e = events.find((x) => x.id === slug());
   if (!e) {
@@ -41,6 +43,7 @@ async function init() {
   }
   store.event = e;
   store.wave = activeWave(e.waves);
+  restoreForm();
   renderEvent();
   renderWaves();
   bindSheet();
@@ -95,6 +98,18 @@ function renderEvent() {
 function renderWaves() {
   const e = store.event;
   if (!e) return;
+  if (e.status === 'past') {
+    // Ночь прошла: ни счётчика «уже идут», ни лестницы цен — только выход на афишу
+    $('ev-going').textContent = 'как это было';
+    $('ev-wp-rows').innerHTML = '<p class="muted" style="margin:0">Эта ночь уже прошла. Ближайшие — на афише.</p>';
+    store.wave = null;
+    for (const btn of [$('buy-open'), $('sticky-buy')]) {
+      btn.disabled = false;
+      btn.textContent = 'Смотреть афишу';
+      btn.onclick = () => { location.href = '/afisha'; };
+    }
+    return;
+  }
   const ws = waveStates(e.waves);
   const sold = totalSold(e.waves);
   const going = goingCount(e.id, Date.parse(e.startsAt), sold, Date.now());
@@ -111,7 +126,7 @@ function renderWaves() {
           <div class="wave-name">${esc(w.name)}<small class="wave-left">${note}</small></div>
           <div></div>
           <div class="wave-price">${w.priceRub} ₽</div>
-          <div class="wave-bar"><i style="width:${pct}%"></i></div>
+          <div class="wave-bar"><i style="transform:scaleX(${(pct / 100).toFixed(3)})"></i></div>
         </div>`;
     })
     .join('');
@@ -140,8 +155,10 @@ function bindSheet() {
     onClose: () => finishClose(),
   });
 
+  let viaHistory = false;
   const finishClose = () => {
     document.body.classList.remove('sheet-open');
+    if (history.state?.sheet && !viaHistory) history.back();
     unlockScroll();
     // Закрытый лист исчезает и для клавиатуры со скринридером: без этого он
     // остаётся в порядке обхода — человек «проваливается» в невидимую форму.
@@ -165,6 +182,7 @@ function bindSheet() {
     // Замер положения листа — до навешивания класса, иначе стиль уже «схлопнет»
     // трансформацию к нулю и пружине будет не с чего стартовать.
     drag.open(() => document.body.classList.add('sheet-open'));
+    if (!history.state?.sheet) history.pushState({ sheet: 1 }, '');
     // Фокус — на сам диалог, а не на первое поле: автофокус в текстовое поле
     // на телефоне мгновенно поднимает клавиатуру и закрывает половину листа.
     sheet.focus({ preventScroll: true });
@@ -181,6 +199,17 @@ function bindSheet() {
 
   $('buy-open').onclick = open;
   $('sticky-buy').onclick = open;
+  for (const id of ['header-buy', 'menu-buy']) {
+    const el = $(id);
+    if (!el) continue;
+    el.href = '#buy';
+    el.onclick = (ev) => { ev.preventDefault(); closeMenu(); open(); };
+  }
+  // Системная «назад» (Android, стрелка in-app браузера) закрывает лист, а не
+  // уводит со страницы: открытие кладёт запись в историю, popstate её снимает.
+  window.addEventListener('popstate', () => {
+    if (document.body.classList.contains('sheet-open')) { viaHistory = true; close(); viaHistory = false; }
+  });
   $('sheet-close').onclick = close;
   $('sheet-backdrop').onclick = close;
   $('success-close').onclick = close;
@@ -248,6 +277,8 @@ function swapPane(name) {
   heightSpring?.stop();
   const prevOverflow = sheet.style.overflowY;
   sheet.style.overflowY = 'hidden';
+  sheet.style.height = `${from}px`;      // без окна в один кадр на «естественной» высоте
+  sheet.classList.add('is-dragging');     // тяжёлое стекло на время роста уступает плотному фону
   heightSpring = springTo({
     from,
     to,
@@ -258,6 +289,7 @@ function swapPane(name) {
       sheet.style.height = '';
       sheet.style.overflowY = prevOverflow;
       heightSpring = null;
+      requestAnimationFrame(() => sheet.classList.remove('is-dragging'));
     },
   });
 }
@@ -280,12 +312,13 @@ function bindForm() {
     store.phone = stripRuPhone(e.target.value);
     e.target.value = formatRuPhoneDigits(store.phone);
     clearErr('phone');
+    persistForm();
   };
   $('f-phone').onblur = () => {
     // Начатый, но недобранный номер — уже ошибка: показываем сразу, а не на кнопке
     if (store.phone && !normalizePhone('+7' + store.phone)) showFieldErr($('f-phone'), $('err-phone'));
   };
-  $('f-tg').oninput = (e) => { store.tg = e.target.value; };
+  $('f-tg').oninput = (e) => { store.tg = e.target.value; persistForm(); };
   $('f-consent').onchange = (e) => {
     store.consent = e.target.checked;
     clearErr('consent');
@@ -293,6 +326,31 @@ function bindForm() {
   };
   $('submit-order').onclick = submitOrder;
 }
+
+// Форма живёт в sessionStorage: in-app браузер Instagram перезагружает страницу,
+// стоит отойти в чат за фамилией друга — набранное не должно пропасть.
+function formKey() { return `px_form_${store.event?.id}`; }
+function persistForm() {
+  try {
+    sessionStorage.setItem(formKey(), JSON.stringify({ qty: store.qty, attendees: store.attendees, phone: store.phone, tg: store.tg }));
+  } catch { /* приватный режим */ }
+}
+function restoreForm() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(formKey()) || 'null');
+    if (!saved) return;
+    store.qty = Math.min(10, Math.max(1, Number(saved.qty) || 1));
+    store.attendees = Array.isArray(saved.attendees) && saved.attendees.length
+      ? saved.attendees.slice(0, store.qty).map((a) => ({ name: String(a.name || ''), minor: Boolean(a.minor) }))
+      : [{ name: '', minor: false }];
+    while (store.attendees.length < store.qty) store.attendees.push({ name: '', minor: false });
+    store.phone = String(saved.phone || '');
+    store.tg = String(saved.tg || '');
+    $('f-phone').value = formatRuPhoneDigits(store.phone);
+    $('f-tg').value = store.tg;
+  } catch { /* нечитаемое — начинаем с чистой */ }
+}
+function forgetForm() { try { sessionStorage.removeItem(formKey()); } catch { /* ок */ } }
 
 function setQty(q) {
   const qty = Math.min(10, Math.max(1, q));
@@ -302,6 +360,7 @@ function setQty(q) {
   store.attendees.length = qty;
   renderAttendees();
   updateTotal();
+  persistForm();
 }
 
 // Одна строка гостя. Собирается разметкой, но заводится ровно один раз —
@@ -323,6 +382,7 @@ function attendeeRow(i, minorAllowed) {
   input.oninput = () => {
     if (store.attendees[i]) store.attendees[i].name = input.value;
     clearAttErr(i);
+    persistForm();
   };
   // Проверяем на уходе из поля, а не залпом на кнопке: человек узнаёт о
   // проблеме там, где может её сразу поправить. Пустое поле, до которого ещё
@@ -370,6 +430,8 @@ function updateTotal() {
       ? `Получить проходки · ${w.priceRub * store.qty} ₽ (демо)`
       : `Оплатить ${w.priceRub * store.qty} ₽`;
   $('submit-order').disabled = !w || store.sending;
+  const note = $('submit-note');
+  if (note && w) note.textContent = `Нажимая «${SITE.paymentDemo ? 'Получить проходки' : 'Оплатить'}», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.`;
   $('sh-title').textContent = store.event ? `Проходки · ${store.event.title}` : 'Проходки';
 }
 
@@ -549,6 +611,7 @@ function alertNote(text, kind = 'warn', action = null) {
 
 function showSuccess(j) {
   store.showingDone = true;
+  forgetForm();
   if (SITE.paymentDemo) {
     document.querySelector('#pane-success .success-note').textContent =
       'Демо-покупка прошла (деньги не списывались). Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.';

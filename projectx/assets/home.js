@@ -57,6 +57,8 @@ function renderNext() {
   $('ne-meta').innerHTML = `<b>${esc(e.venue || 'SECRET PLACE')}</b> · ${esc(fmtWhen(e.startsAt))} · ${esc(ageLabel(e.ageRating))}`;
   $('ne-link').textContent = price ? `Взять проходку · от ${price} ₽` : 'Подробнее';
   card.href = `/e/${e.id}`;
+  // Данные пришли позже лесенки входа — карточка не ждёт свою очередь
+  if (performance.now() > 700) card.style.animationDelay = '0ms';
   card.hidden = false;
 }
 
@@ -102,8 +104,14 @@ function startCountdown() {
 // прямая привязка к мыши выглядит механической, у пружины есть инерция.
 // На телефоне знак и свет отвечают на прокрутку (параллакс в три слоя).
 function initHeroMotion() {
-  if (reduced.matches) return;
   const hero = $('hero');
+  // Зерно мерцает только пока сцена на экране
+  if (hero && 'IntersectionObserver' in window) {
+    new IntersectionObserver((entries) => {
+      hero.classList.toggle('is-off', !entries.some((en) => en.isIntersecting));
+    }).observe(hero);
+  }
+  if (reduced.matches) return;
   const mark = $('hero-mark');
   const light = $('hero-light');
   const bgx = $('hero-bgx');

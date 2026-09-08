@@ -9,6 +9,7 @@ import { initChrome, observeReveal, wrapWords } from './chrome.js';
 import {
   reduced, finePointer, renderAfisha, renderReel, initNightScene, renderBands, initFaceControl, pointBuyLinks,
 } from './blocks.js';
+import { SITE } from './data/config.js';
 
 const $ = (id) => document.getElementById(id);
 const state = { events: [], nearest: null };
@@ -48,7 +49,19 @@ async function init() {
 function renderNext() {
   const e = state.nearest;
   const card = $('next-event');
-  if (!e) { card.hidden = true; return; }
+  if (!e) {
+    // Ночь не анонсирована: hero не молчит, а зовёт оставить контакт
+    const t = SITE.nextTeaser || {};
+    $('ne-day').textContent = '—';
+    $('ne-mon').textContent = '';
+    $('ne-title').textContent = t.when || 'Следующая ночь готовится';
+    $('ne-meta').textContent = t.note || 'Дата и площадка объявляются позже.';
+    $('ne-link').textContent = 'Позовите меня';
+    card.href = '#afisha';
+    card.hidden = false;
+    $('countdown').hidden = true;
+    return;
+  }
   const db = dateBox(e.startsAt);
   const price = fromPrice(e.waves);
   $('ne-day').textContent = db.day;
@@ -64,7 +77,12 @@ function renderNext() {
 
 function renderCta() {
   const e = state.nearest;
-  if (!e) return;
+  if (!e) {
+    $('cta-lead').textContent = 'Следующую ночь объявим здесь. Оставь контакт на афише — напишем первым, пока действует ранняя волна.';
+    $('cta-buy').textContent = 'Оставить контакт';
+    $('cta-buy').href = '#afisha';
+    return;
+  }
   const price = fromPrice(e.waves);
   const db = dateBox(e.startsAt);
   $('cta-lead').innerHTML =

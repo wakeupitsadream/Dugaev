@@ -2,6 +2,7 @@
 // отдаёт сид с детерминированной демо-симуляцией — гость ошибок не видит.
 import { EVENTS } from '../assets/data/events.js';
 import { demoWaves } from '../assets/waves.js';
+import { addressIsPublic, publicRevealAt } from '../assets/secret-place.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, onlyMethod } from './_lib/respond.js';
 
@@ -35,7 +36,12 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 's-maxage=30');
   ok(res, {
     degraded: true,
-    events: EVENTS.map((e) => ({ ...e, waves: demoWaves(e, Date.now()) })),
+    events: EVENTS.map((e) => ({
+      ...e,
+      address: addressIsPublic(e) ? e.address : null,
+      addressPublicAt: publicRevealAt(e.startsAt),
+      waves: demoWaves(e, Date.now()),
+    })),
   });
 }
 
@@ -46,7 +52,10 @@ function mapRow(r) {
     title: r.title,
     city: r.city,
     venue: r.venue,
-    address: r.address,
+    // SECRET PLACE: адрес уходит в публичную афишу только за сутки до ночи.
+    // Купившим он виден сразу — но через /api/ticket, по подписанному токену.
+    address: addressIsPublic({ startsAt: r.starts_at, status: r.status }) ? r.address : null,
+    addressPublicAt: publicRevealAt(r.starts_at),
     startsAt: toIso(r.starts_at),
     endsAt: toIso(r.ends_at),
     ageRating: Number(r.age_rating),

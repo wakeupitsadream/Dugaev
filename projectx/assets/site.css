@@ -500,6 +500,30 @@ body.menu-open { overflow: hidden; }
 .next-steps { margin: 16px 0 6px; padding-left: 20px; display: grid; gap: 8px; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 .next-steps b { color: var(--text); }
 
+/* ---------- Пустое состояние: следующая ночь готовится ---------- */
+.teaser {
+  display: grid; gap: 22px; padding: clamp(22px, 5vw, 34px); border-radius: var(--radius);
+  background: var(--bg-2); border: 1px solid var(--line-soft);
+}
+@media (min-width: 761px) { .teaser { grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: start; } }
+.teaser-when b {
+  display: block; font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: clamp(2rem, 7vw, 3.4rem); line-height: 1; margin: 10px 0 8px;
+}
+.teaser-when p { margin: 0; color: var(--muted); line-height: 1.55; }
+.teaser-form .tf-label {
+  display: block; font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: 0.9rem; margin-bottom: 10px;
+}
+.teaser-form .field { margin-bottom: 12px; }
+.teaser-form input[type='text'] {
+  width: 100%; padding: 14px 16px; min-height: 50px; border-radius: var(--radius-s);
+  background: var(--bg-3); border: 1px solid var(--line); color: var(--text); font: inherit;
+}
+.teaser-form input[type='text']:focus { border-color: var(--acid); }
+.teaser-done { color: var(--text); line-height: 1.55; }
+.teaser-done b { color: var(--acid); }
+
 /* ---------- Афиша: стена постеров ---------- */
 .wall-head { margin: clamp(48px, 10vw, 88px) 0 clamp(20px, 4vw, 32px); }
 .poster-wall { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }

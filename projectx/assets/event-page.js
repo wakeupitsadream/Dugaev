@@ -9,6 +9,7 @@ import { waveStates, activeWave, totalSold } from './waves.js';
 import { goingCount } from './social.js';
 import { plural, dateBox, fmtWhen, ageLabel, normalizePhone, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
 import { handlePayment } from './payment.js';
+import { addressIsPublic } from './secret-place.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -85,7 +86,9 @@ function renderEvent() {
   const rows = [
     ['Когда', fmtWhen(e.startsAt)],
     ['Где', `${e.venue} · ${SITE.cities[e.city] || e.city}`],
-    ['Адрес', e.address || 'придёт в проходке'],
+    ['Адрес', e.address
+      ? e.address
+      : `в проходке сразу после покупки${addressIsPublic(e) ? '' : ' · всем остальным за сутки до ночи'}`],
     ['Возраст', `${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`],
   ];
   rows.push(['Регламент', `двери ${SITE.doorsOpen} · старт ${SITE.showStart} · до утра`]);

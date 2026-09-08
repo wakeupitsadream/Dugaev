@@ -8,6 +8,7 @@ import { waveStates, fromPrice, totalSold } from './waves.js';
 import { goingCount } from './social.js';
 import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
 import { faceControl, shareText } from './facecontrol.js';
+import { addressIsPublic } from './secret-place.js';
 import { springTo, projectMomentum, velocityFrom } from './spring.js';
 
 const $ = (id) => document.getElementById(id);
@@ -45,7 +46,8 @@ export function nightCard(e) {
       <div class="nc-body">
         <div class="nc-title">${esc(e.title)}</div>
         <div class="nc-meta">
-          <span><b>${esc(e.venue || 'SECRET PLACE')}</b>${e.address ? ` · ${esc(e.address)}` : ' · адрес придёт в проходку'}</span>
+          <span><b>${esc(e.venue || 'SECRET PLACE')}</b>${e.address ? ` · ${esc(e.address)}` : ''}</span>
+          ${e.address ? '' : `<span class="nc-secret">Адрес — в проходке сразу после покупки${addressIsPublic(e) ? '' : ', остальным за сутки до ночи'}</span>`}
           <span>${esc(fmtWhen(e.startsAt))} · двери ${esc(SITE.doorsOpen)}</span>
           <span>уже идут <b>${going}</b></span>
         </div>
@@ -61,13 +63,92 @@ export function renderAfisha(gridId, list) {
   const grid = $(gridId);
   if (!grid) return;
   if (!list.length) {
-    grid.innerHTML = `<p class="muted">Ближайшая ночь ещё не анонсирована — следи за <a class="acid" href="${esc(SITE.instagram)}" target="_blank" rel="noopener">Instagram*</a>.</p>`;
+    // Между ночами сайт не должен превращаться в тупик: держим интригу
+    // тизером и превращаем интерес в контакт, а не в уход в Instagram.
+    renderNextTeaser(grid);
     return;
   }
   const html = list.map(nightCard).join('');
   if (grid.dataset.html === html) return; // ежеминутное обновление не должно моргать карточкой под курсором
   grid.dataset.html = html;
   grid.innerHTML = html;
+}
+
+// ---------- Пустое состояние: следующая ночь готовится ----------
+// Показывается там, где обычно карточки афиши. Форма шлёт заявку в тот же
+// /api/cityrequest (kind: notify) — новых serverless-функций не заводим.
+export function renderNextTeaser(host) {
+  const t = SITE.nextTeaser || {};
+  host.innerHTML = `
+    <div class="teaser">
+      <div class="teaser-when">
+        <span class="kicker">Следующая ночь</span>
+        <b>${esc(t.when || 'Готовится')}</b>
+        <p>${esc(t.note || 'Дата и площадка объявляются позже. Ранняя волна всегда дешевле.')}</p>
+      </div>
+      <form class="teaser-form" id="notify-form" novalidate>
+        <label class="tf-label" for="nf-contact">Напишем тебе первым</label>
+        <div class="field">
+          <input type="text" id="nf-contact" placeholder="@ник в Telegram или телефон" autocomplete="off" aria-label="Ник или телефон" />
+          <div class="err" role="alert" id="err-nf-contact">Оставь ник или телефон</div>
+        </div>
+        <div style="position: absolute; left: -9999px;" aria-hidden="true">
+          <input type="text" id="nf-website" tabindex="-1" autocomplete="off" />
+        </div>
+        <label class="check">
+          <input type="checkbox" id="nf-consent" />
+          <span>Согласен на обработку данных — <a href="/privacy.html" target="_blank" rel="noopener">политика</a></span>
+        </label>
+        <div class="err" role="alert" id="err-nf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
+        <button class="btn btn-acid btn-block" id="nf-send" type="submit">Позовите меня</button>
+        <p class="form-note" id="nf-note">Одно сообщение, когда откроется продажа. Без спама.</p>
+      </form>
+    </div>`;
+  bindNotifyForm();
+}
+
+function bindNotifyForm() {
+  const form = $('notify-form');
+  if (!form) return;
+  const bad = (id, is) => { $(`err-${id}`)?.classList.toggle('is-on', is); return is; };
+  $('nf-contact').oninput = () => bad('nf-contact', false);
+  $('nf-consent').onchange = (e) => { if (e.target.checked) bad('nf-consent', false); };
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const contact = $('nf-contact').value.trim();
+    const consent = $('nf-consent').checked;
+    let stop = false;
+    if (bad('nf-contact', contact.length < 2)) stop = true;
+    if (bad('nf-consent', !consent)) stop = true;
+    if (stop) return;
+    const btn = $('nf-send');
+    btn.disabled = true;
+    btn.textContent = 'Отправляем…';
+    let sent = false;
+    try {
+      const r = await fetch('/api/cityrequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'notify', contact, consent, website: $('nf-website').value }),
+      });
+      sent = r.ok;
+    } catch { /* деградация ниже */ }
+    btn.disabled = false;
+    if (sent) {
+      form.innerHTML = '<div class="teaser-done"><b>Записали.</b> Напишем, как только откроется продажа — ты узнаешь раньше афиши.</div>';
+      return;
+    }
+    // связь подвела — не врём про «принято», даём прямой канал
+    btn.textContent = 'Позовите меня';
+    const note = $('nf-note');
+    note.textContent = 'Связь подвела. Напиши в директ — добавим в список: ';
+    const a = document.createElement('a');
+    a.href = SITE.instagramDm;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'открыть директ';
+    note.append(a);
+  };
 }
 
 // ---------- Лента афиш: постеры как объекты ----------
@@ -294,6 +375,8 @@ export function pointBuyLinks(nearest) {
     const el = $(id);
     if (!el) continue;
     el.href = href;
-    if (id === 'sticky-buy' || id === 'menu-buy') el.textContent = price ? `Проходки от ${price} ₽` : 'Смотреть афишу';
+    if (id === 'sticky-buy' || id === 'menu-buy') {
+      el.textContent = price ? `Проходки от ${price} ₽` : 'Позовите меня на следующую';
+    }
   }
 }

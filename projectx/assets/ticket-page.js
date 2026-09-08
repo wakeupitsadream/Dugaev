@@ -71,6 +71,27 @@ function render(parsed, t) {
     // площадка = адрес: если адрес уже содержит venue, не дублируем
     `${t.event.address && t.event.address.includes(t.event.venue) ? esc(t.event.address) : `${esc(t.event.venue)}${t.event.address ? ' · ' + esc(t.event.address) : ''}`}`;
 
+  // SECRET PLACE: у владельца проходки адрес есть сразу — это и есть привилегия
+  // купившего. Показываем его отдельным блоком с картой, а не строкой в мета.
+  const place = $('t-place');
+  if (place) {
+    if (t.event.address) {
+      const q = encodeURIComponent(`${t.event.address}, ${SITE.cities[t.event.city] || t.event.city}`);
+      place.innerHTML =
+        `<div class="tp-kicker">Адрес — только у тебя</div>` +
+        `<div class="tp-addr">${esc(t.event.address)}</div>` +
+        `<div class="tp-links"><a href="https://yandex.ru/maps/?text=${q}" target="_blank" rel="noopener">Яндекс Карты</a>` +
+        `<a href="https://2gis.ru/search/${q}" target="_blank" rel="noopener">2ГИС</a></div>`;
+      place.hidden = false;
+    } else {
+      place.innerHTML =
+        `<div class="tp-kicker">SECRET PLACE</div>` +
+        `<div class="tp-addr">Адрес появится здесь</div>` +
+        `<div class="tp-note">Открой проходку в день ночи — адрес придёт в неё. Городу его объявим только за сутки до старта.</div>`;
+      place.hidden = false;
+    }
+  }
+
   const badges = [
     `<span class="badge badge-age ${t.event.ageRating < 18 ? 'age-16' : ''}">${ageLabel(t.event.ageRating)}</span>`,
     `<span class="badge">${esc(t.waveName || 'проходка')}</span>`,

@@ -217,25 +217,6 @@ body::after {
   background: repeating-linear-gradient(45deg, rgba(229, 26, 32,0.08) 0 14px, transparent 14px 30px);
   border-block: 1px solid rgba(229, 26, 32, 0.12);
 }
-.hero-city-chip {
-  display: inline-flex; gap: 8px; align-items: center;
-  font-family: var(--font-display); font-weight: 400; font-size: 0.7rem;
-  letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted);
-  margin-bottom: 18px;
-}
-.hero-city-chip::before { content: ''; width: 26px; height: 1px; background: var(--acid); }
-.hero-title {
-  font-size: clamp(2.6rem, 12.5vw, 7rem);
-  text-transform: uppercase; letter-spacing: -0.01em; line-height: 0.98;
-  margin-bottom: 18px;
-}
-.hero-title .row { display: block; }
-.hero-title .outline {
-  color: transparent;
-  -webkit-text-stroke: 2px var(--acid);
-}
-.hero-sub { max-width: 560px; color: var(--muted); font-size: 1.05rem; margin-bottom: 30px; }
-.hero-sub b { color: var(--text); }
 
 .next-event {
   display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
@@ -258,7 +239,6 @@ body::after {
 }
 
 .countdown { display: flex; gap: 14px; margin-bottom: 30px; }
-.cd-cell { text-align: center; min-width: 58px; }
 .cd-num { font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; color: var(--text); font-variant-numeric: tabular-nums; }
 .cd-label { font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
 
@@ -274,21 +254,7 @@ body::after {
   .rise-5 { animation-delay: 0.45s; }
   @keyframes rise { to { opacity: 1; transform: none; } }
 }
-
-/* ---------- Бегущая строка ---------- */
-.marquee {
-  overflow: hidden; white-space: nowrap; user-select: none;
-  border-block: 1px solid var(--line-soft);
-  padding-block: 12px;
-  background: var(--bg-2);
-}
 .marquee-track { display: inline-block; animation: marquee 28s linear infinite; }
-.marquee span {
-  font-family: var(--font-display); font-weight: 700; font-size: 0.8rem;
-  letter-spacing: 0.24em; text-transform: uppercase; color: var(--dim);
-  margin-right: 20px;
-}
-.marquee span.m-acid { color: var(--acid); }
 @keyframes marquee { to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; } }
 
@@ -325,28 +291,6 @@ body::after {
 
 /* ---------- Афиша ---------- */
 .afisha-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 20px; }
-.event-card {
-  position: relative; display: flex; flex-direction: column;
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
-  overflow: hidden; text-decoration: none;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.25s ease;
-}
-.event-card:hover { transform: translateY(-3px); border-color: rgba(229, 26, 32, 0.55); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5); }
-.ec-poster {
-  aspect-ratio: 3 / 2; position: relative; overflow: hidden;
-  background:
-    repeating-linear-gradient(-45deg, rgba(229, 26, 32, 0.06) 0 2px, transparent 2px 14px),
-    radial-gradient(80% 90% at 50% 110%, rgba(229, 26, 32, 0.16), transparent 70%),
-    var(--bg-3);
-  display: flex; align-items: flex-end; padding: 16px;
-}
-.ec-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.ec-poster .ec-word {
-  font-family: var(--font-display); font-weight: 900; font-size: 1.7rem; line-height: 1;
-  text-transform: uppercase; color: transparent; -webkit-text-stroke: 1.5px rgba(229, 26, 32, 0.8);
-  word-break: break-word;
-}
-.ec-poster.has-img .ec-word { display: none; }
 .ec-datebox {
   position: absolute; top: 14px; left: 14px;
   background: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-s);
@@ -365,8 +309,6 @@ body::after {
   font-family: var(--font-display); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--acid);
 }
-.event-card.is-past { opacity: 0.55; }
-.event-card.is-past:hover { transform: none; border-color: var(--line); box-shadow: none; }
 
 /* фильтр городов */
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -388,29 +330,6 @@ body::after {
 .step p { color: var(--muted); font-size: 0.92rem; margin: 0; }
 .steps-note { color: var(--dim); font-size: 0.84rem; margin-top: 14px; }
 .steps-note b { color: var(--muted); }
-
-/* ---------- Галерея ---------- */
-.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
-.g-item {
-  aspect-ratio: 4 / 5; border-radius: var(--radius-s); overflow: hidden; position: relative;
-  background:
-    repeating-linear-gradient(135deg, rgba(229, 26, 32,0.04) 0 3px, transparent 3px 18px),
-    linear-gradient(200deg, var(--bg-3), var(--bg-2));
-  border: 1px solid var(--line);
-  display: flex; flex-direction: column; justify-content: flex-end; padding: 14px;
-  transition: transform 0.25s ease;
-}
-.g-item:nth-child(3n + 1) { transform: rotate(-1.6deg); }
-.g-item:nth-child(3n + 2) { transform: rotate(1.2deg) translateY(6px); }
-.g-item:nth-child(3n) { transform: rotate(-0.5deg); }
-.g-item:hover { transform: rotate(0) scale(1.03); z-index: 2; }
-.g-item img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.g-item .g-title { font-family: var(--font-display); font-weight: 700; font-size: 0.9rem; text-transform: uppercase; position: relative; }
-.g-item .g-note { color: var(--muted); font-size: 0.76rem; position: relative; }
-.g-item .g-glyph {
-  position: absolute; top: 12px; right: 12px;
-  font-family: var(--font-display); font-weight: 900; font-size: 0.85rem; color: rgba(229, 26, 32, 0.55);
-}
 
 /* ---------- FAQ ---------- */
 .faq { max-width: 760px; }
@@ -789,41 +708,6 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 .hero-bg > * { z-index: 0; }
 .hero .container { position: relative; z-index: 2; }
 
-/* правила входа: с 14 лет / без алкоголя / домой до темноты */
-.hero-rules {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-  font-family: var(--font-display); font-weight: 700; font-size: 0.78rem;
-  letter-spacing: 0.1em; text-transform: uppercase;
-  margin-bottom: 18px;
-}
-.hero-rules span { background: var(--acid); color: var(--ink); padding: 6px 10px; border-radius: 6px; }
-.hero-rules i { color: var(--acid); font-style: normal; font-weight: 400; }
-
-/* заголовки с аутлайн-словом */
-.h-outline { color: transparent; -webkit-text-stroke: 1.5px var(--acid); }
-
-/* 01 манифест */
-.manifesto p {
-  font-size: clamp(1.15rem, 3.4vw, 1.6rem); font-weight: 600; line-height: 1.5;
-  max-width: 760px; margin-bottom: 24px;
-}
-.manifesto em { font-style: normal; color: var(--acid); }
-
-/* 04 шоу-программа */
-.program-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 14px; }
-.program-item {
-  position: relative; background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 18px 16px 16px;
-  transition: border-color 0.2s ease, transform 0.2s ease;
-}
-.program-item:hover { border-color: rgba(229, 26, 32, 0.45); transform: translateY(-2px); }
-.program-item .p-num {
-  font-family: var(--font-display); font-weight: 900; font-size: 0.8rem;
-  color: var(--acid); letter-spacing: 0.1em;
-}
-.program-item h3 { margin: 6px 0 6px; font-size: 0.98rem; text-transform: uppercase; }
-.program-item p { color: var(--muted); font-size: 0.88rem; margin: 0; }
-
 /* 05 фотолента «тяни вбок» */
 .strip {
   display: flex; gap: 14px; overflow-x: auto; padding: 4px 20px 18px;
@@ -831,24 +715,12 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
   scrollbar-width: none;
 }
 .strip::-webkit-scrollbar { display: none; }
-.strip-item {
-  position: relative; flex: 0 0 auto; margin: 0;
-  width: min(78vw, 340px); aspect-ratio: 4 / 5;
-  border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
-  scroll-snap-align: center; background: var(--bg-3);
-}
-.strip-item:nth-child(even) { transform: rotate(0.8deg); }
-.strip-item:nth-child(odd) { transform: rotate(-0.8deg); }
-.strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.35s ease; }
-.strip-item:hover img { transform: scale(1.04); }
-.strip-item figcaption { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .strip-tag {
   background: var(--acid); color: var(--ink); font-family: var(--font-display);
   font-weight: 700; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
   padding: 5px 10px; border-radius: 5px; transform: rotate(-1.5deg);
 }
 .strip-note { background: rgba(7, 7, 9, 0.75); color: var(--text); font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; }
-.strip-item.no-img img { display: none; }
 @media (min-width: 900px) { .strip { padding-inline: calc((100vw - var(--container)) / 2 + 20px); } }
 
 /* 06 фейсконтроль */
@@ -894,15 +766,6 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 }
 .city-form input[type='text']:focus { border-color: var(--acid); }
 .chip-ghost { opacity: 0.55; border-style: dashed; }
-
-/* 08 родителям */
-.parents-box {
-  max-width: 720px; background: var(--bg-2); border: 1px solid var(--line);
-  border-left: 4px solid var(--acid); border-radius: var(--radius);
-  padding: 24px 22px;
-}
-.parents-box p { font-size: 1rem; line-height: 1.65; }
-.parents-box mark { background: var(--warn); color: var(--ink); padding: 1px 6px; border-radius: 4px; font-weight: 700; }
 
 /* бейдж «0% алк» */
 .badge-dry { background: rgba(7, 7, 9, 0.8); color: var(--text); border-color: transparent; }
@@ -962,35 +825,6 @@ body::before {
   display: inline-block;
 }
 .logo .l2 { color: var(--acid); }
-/* Градиент кладём на .row: у .hero-title своего текста нет, и прозрачный
-   цвет с родителя просто гасил бы дочерние строки. */
-.hero-title { margin-bottom: 10px; filter: none; }
-.hero-title .row {
-  color: #fff;
-  text-shadow: 0 0 30px rgba(255, 255, 255, 0.25), 0 2px 0 rgba(0, 0, 0, 0.6);
-}
-.hero-title .row.outline {
-  color: var(--acid);
-  -webkit-text-stroke: 0;
-  text-shadow: 0 0 40px rgba(229, 26, 32, 0.55);
-}
-
-/* Мотив «X» за заголовком — тот самый знак бренда */
-.hero-x {
-  position: absolute;
-  right: -10%;
-  top: 50%;
-  transform: translateY(-50%) rotate(-6deg);
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: clamp(18rem, 70vw, 34rem);
-  line-height: 0.78;
-  color: rgba(229, 26, 32, 0.16);
-  text-shadow: 0 0 90px rgba(229, 26, 32, 0.35);
-  z-index: 0;
-  pointer-events: none;
-  user-select: none;
-}
 /* контент героя — поверх X-мотива */
 .hero > .container { position: relative; z-index: 1; }
 
@@ -1014,7 +848,6 @@ body::before {
 .ec-datebox b, .eh-datebox b { color: var(--acid); }
 .ec-datebox small, .eh-datebox small { color: #4a4a4a; }
 .strip-tag { background: var(--acid); color: #fff; }
-.marquee .m-acid { color: var(--acid); }
 
 /* На странице события слово-постер лежит в .eh-poster: базовое правило
    написано под .ec-poster, поэтому шрифт задаём здесь явно. */
@@ -1051,7 +884,6 @@ body::before {
   -webkit-text-stroke: 1.5px rgba(229, 26, 32, 0.5);
   pointer-events: none;
 }
-.strip-item.no-img figcaption { z-index: 1; }
 
 /* Обратный отсчёт в hero */
 .countdown {
@@ -1149,19 +981,6 @@ body::before {
   margin-inline: -0.05em;
 }
 .tc-head .tc-brand .lx { color: #fff; text-shadow: 0 0 12px rgba(255, 255, 255, 0.6); }
-
-/* ---------- Знак бренда в hero: настоящий логотип с афиш ---------- */
-.hero-logo {
-  display: block;
-  width: min(100%, 520px);
-  margin: -6px 0 4px -4px;
-  /* Логотип снят с чёрного постера: screen убирает его фон, а радиальная
-     маска растворяет края кадра, чтобы не читался прямоугольник. */
-  mix-blend-mode: screen;
-  filter: contrast(1.12) saturate(1.1) drop-shadow(0 0 46px rgba(229, 26, 32, 0.4));
-  -webkit-mask-image: radial-gradient(72% 62% at 50% 50%, #000 55%, transparent 100%);
-  mask-image: radial-gradient(72% 62% at 50% 50%, #000 55%, transparent 100%);
-}
 .hero-logo-sub {
   font-family: var(--font-display);
   font-size: clamp(0.9rem, 3.6vw, 1.3rem);
@@ -1298,7 +1117,7 @@ h2 { line-height: 1.1; }
 .wave-bar i { width: 100%; transform-origin: left center; transition: transform 300ms var(--ease-out); }
 
 /* --- §14: контраст мелкого текста и белого на зелёном --- */
-:root { --dim: #7d7676; }
+:root { --dim: #827f7f; } /* AA и на карточках: 4.79 на --bg-2, 4.52 на --bg-3 */
 .scan-stage .btn-ok, .btn-pass { color: #04240f; }
 
 /* --- §1/§3: занятая кнопка отвечает движением и не запирает ввод --- */

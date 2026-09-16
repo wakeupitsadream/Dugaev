@@ -49,21 +49,27 @@ function clampInt(v, lo, hi) {
 // джиттер — от 10-минутного ведра времени, НИКАКОГО Math.random.
 const RAMP_DAYS = 30; // продажи открываются за 30 дней до старта
 
-export function demoSold(eventId, waveNo, quota, startsAtMs, nowMs) {
+// maxFill — потолок заполнения (0..1): последняя волна ночи в симуляции
+// никогда не распродаётся, иначе сайт без базы показывал бы «всё продано»
+// и отправлял гостей в директ вместо брони.
+export function demoSold(eventId, waveNo, quota, startsAtMs, nowMs, maxFill = 1) {
   const saleStart = startsAtMs - RAMP_DAYS * 86400_000;
   const t = clamp((nowMs - saleStart) / (startsAtMs - saleStart), 0, 1);
   // волны заполняются каскадом: первая быстрее, следующая — со сдвигом
-  const fill = clamp(t * 1.65 - (waveNo - 1) * 0.62, 0, 1);
+  const fill = Math.min(maxFill, clamp(t * 1.65 - (waveNo - 1) * 0.62, 0, 1));
   const bucket = Math.floor(nowMs / 600_000); // 10 минут
   const jitter = hash(`${eventId}:${waveNo}:${bucket}`) % 3; // 0..2 билета «живости»
   return Math.min(quota, Math.round(quota * fill) + (fill > 0 && fill < 1 ? jitter : 0));
 }
 
+const LAST_WAVE_MAX_FILL = 0.35;
+
 export function demoWaves(event, nowMs) {
   const startsAtMs = Date.parse(event.startsAt);
+  const lastNo = Math.max(...event.waves.map((w) => Number(w.waveNo)));
   return event.waves.map((w) => ({
     ...w,
-    sold: demoSold(event.id, w.waveNo, w.quota, startsAtMs, nowMs),
+    sold: demoSold(event.id, w.waveNo, w.quota, startsAtMs, nowMs, Number(w.waveNo) === lastNo ? LAST_WAVE_MAX_FILL : 1),
   }));
 }
 

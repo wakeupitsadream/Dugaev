@@ -78,3 +78,14 @@ test('hash стабилен и различает строки', () => {
   assert.equal(hash('abc'), hash('abc'));
   assert.notEqual(hash('abc'), hash('abd'));
 });
+
+test('demoWaves: последняя волна ночи в симуляции никогда не распродана', () => {
+  const single = { id: 'px-260926', startsAt: '2026-09-26T22:00:00+05:00', waves: [W(1, 1000, 200)] };
+  const ws = demoWaves(single, Date.parse('2026-09-25T12:00:00+05:00')); // за сутки до старта
+  assert.ok(ws[0].sold < ws[0].quota, `sold=${ws[0].sold}`);
+  assert.ok(ws[0].sold <= Math.round(200 * 0.35) + 2);
+  const ladder = { id: 'x', startsAt: '2026-09-26T22:00:00+05:00', waves: [W(1, 500, 60), W(2, 700, 80), W(3, 900, 60)] };
+  const ls = demoWaves(ladder, Date.parse('2026-09-26T12:00:00+05:00'));
+  assert.equal(ls[0].sold, 60); // ранняя волна честно распродана
+  assert.ok(ls[2].sold < 60); // последняя — нет
+});

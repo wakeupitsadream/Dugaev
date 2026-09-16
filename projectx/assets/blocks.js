@@ -48,7 +48,7 @@ export function nightCard(e) {
         <div class="nc-meta">
           <span><b>${esc(e.venue || 'SECRET PLACE')}</b>${e.address ? ` · ${esc(e.address)}` : ''}</span>
           ${e.address ? '' : `<span class="nc-secret">Адрес — в проходке сразу после покупки${addressIsPublic(e) ? '' : ', остальным за сутки до ночи'}</span>`}
-          <span>${esc(fmtWhen(e.startsAt))} · двери ${esc(SITE.doorsOpen)}</span>
+          <span>${esc(fmtWhen(e.startsAt).replace(/·\s*\d{2}:\d{2}$/, '').trim())} · двери ${esc(SITE.doorsOpen)} · старт ${esc(SITE.showStart)}</span>
           <span>уже идут <b>${going}</b></span>
         </div>
         <div class="nc-foot">

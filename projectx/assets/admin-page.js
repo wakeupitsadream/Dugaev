@@ -624,10 +624,23 @@ async function runSelfTest() {
       }),
     });
     const ticket = order.j?.ok && order.j.tickets?.[0];
-    if (!row(Boolean(ticket), 'покупка проходит (заказ + билет)', ticket ? order.j.order_id : order.j?.message)) {
+    if (!row(Boolean(ticket), 'бронь проходит (заказ + билет)', ticket ? `${order.j.order_id}${order.j.pay_code ? ' · ' + order.j.pay_code : ''}` : order.j?.message)) {
       throw new Error('stop');
     }
     const token = ticket.url.replace('/t/', '');
+
+    // 2а. оплата переводом: бронь ждёт подтверждения, подтверждаем как владелец
+    if (order.j.payment?.status === 'pending') {
+      const v0 = await api(`/api/verify?token=${encodeURIComponent(token)}`);
+      row(v0.j?.status === 'reserved', 'до оплаты билет не проходит (reserved)', v0.j?.status);
+      const conf = await api('/api/walkin', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'confirm', order_id: order.j.order_id, provider: 'transfer', by: 'самотест' }),
+      });
+      if (!row(Boolean(conf.j?.ok), 'подтверждение оплаты активирует билет', conf.j?.ok ? conf.j.pay_code : conf.j?.message)) {
+        throw new Error('stop');
+      }
+    }
 
     // 3. билет читается
     const t = await api(`/api/ticket?token=${encodeURIComponent(token)}`);

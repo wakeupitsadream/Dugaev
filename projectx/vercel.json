@@ -4,15 +4,15 @@
   "rewrites": [
     {
       "source": "/e/:slug",
-      "destination": "/event.html"
+      "destination": "/event"
     },
     {
       "source": "/t/:token",
-      "destination": "/ticket.html"
+      "destination": "/ticket"
     },
     {
       "source": "/s/:token",
-      "destination": "/scan.html"
+      "destination": "/scan"
     }
   ],
   "headers": [

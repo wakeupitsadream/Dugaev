@@ -10,6 +10,7 @@ import { goingCount } from './social.js';
 import { plural, dateBox, fmtWhen, ageLabel, normalizePhone, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
 import { handlePayment } from './payment.js';
 import { addressIsPublic } from './secret-place.js';
+import { payBlockHtml, bindPayBlock } from './booking-ui.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,6 +48,7 @@ async function init() {
   restoreForm();
   renderEvent();
   renderWaves();
+  renderBuyPerks();
   bindSheet();
   bindForm();
   renderSavedTickets();
@@ -431,10 +433,15 @@ function updateTotal() {
     ? 'Проходок нет'
     : SITE.paymentDemo
       ? `Получить проходки · ${w.priceRub * store.qty} ₽ (демо)`
-      : `Оплатить ${w.priceRub * store.qty} ₽`;
+      : `Забронировать · ${w.priceRub * store.qty} ₽`;
   $('submit-order').disabled = !w || store.sending;
   const note = $('submit-note');
-  if (note && w) note.textContent = `Нажимая «${SITE.paymentDemo ? 'Получить проходки' : 'Оплатить'}», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.`;
+  if (note && w) {
+    note.textContent = SITE.paymentDemo
+      ? 'Нажимая «Получить проходки», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.'
+      : `Нажимая «Забронировать», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа. ` +
+        `Оплата — переводом по СБП, бронь держим ${SITE.holdHours || 3} часа.`;
+  }
   $('sh-title').textContent = store.event ? `Проходки · ${store.event.title}` : 'Проходки';
 }
 
@@ -615,9 +622,32 @@ function alertNote(text, kind = 'warn', action = null) {
 function showSuccess(j) {
   store.showingDone = true;
   forgetForm();
-  if (SITE.paymentDemo) {
-    document.querySelector('#pane-success .success-note').textContent =
-      'Демо-покупка прошла (деньги не списывались). Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.';
+  const pending = j.payment?.status === 'pending';
+  const steps = $('success-steps');
+  const payHost = $('success-pay');
+  if (pending) {
+    $('success-title').textContent = 'Бронь оформлена';
+    $('success-note').textContent =
+      `Места держим за тобой ${j.hold_minutes >= 120 ? `${Math.round(j.hold_minutes / 60)} часа` : `${j.hold_minutes} минут`}. ` +
+      'Переведи сумму по реквизитам ниже и нажми «Я перевёл» — проходки станут активными после подтверждения.';
+    const order = { id: j.order_id, payCode: j.pay_code, amountRub: j.amount_rub, qty: (j.tickets || []).length, expiresAt: j.expires_at, claimedAt: null };
+    payHost.innerHTML = payBlockHtml(order, j.bot);
+    bindPayBlock(order);
+    steps.innerHTML =
+      `<li><b>Переведи</b> сумму по СБП и укажи код брони в комментарии.</li>` +
+      `<li><b>Нажми «Я перевёл»</b> или открой бота в Telegram — проходки придут туда сразу после подтверждения.</li>` +
+      `<li><b>Проходки ниже</b> станут активными после подтверждения. Открой каждую и сохрани QR — ссылки остаются на этой странице.</li>` +
+      `<li><b>На дверях</b> паспорт с собой, двери в ${esc(SITE.doorsOpen)}. Друзьям — перешли их именные проходки.</li>`;
+  } else {
+    $('success-title').textContent = 'Проходки у тебя';
+    $('success-note').textContent = SITE.paymentDemo
+      ? 'Демо-покупка прошла (деньги не списывались). Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.'
+      : 'Оплата прошла. Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.';
+    payHost.innerHTML = '';
+    steps.innerHTML =
+      `<li><b>Сохрани.</b> Открой проходку и сделай скриншот — QR сработает на входе даже без интернета. Ссылки остаются на этой странице.</li>` +
+      `<li><b>Адрес.</b> Если ночь — SECRET PLACE, адрес уже в проходке.</li>` +
+      `<li><b>На дверях.</b> Паспорт с собой, двери в ${esc(SITE.doorsOpen)}. Друзьям — перешли их именные проходки.</li>`;
   }
   // Дубликат ссылок на случай, если лист закроют: единственный экземпляр
   // «моих проходок» на сайте не должен исчезать вместе со шторкой.
@@ -634,11 +664,32 @@ function showSuccess(j) {
       (t) => `
       <a href="${esc(t.url)}" target="_blank" rel="noopener">
         <span>${esc(t.holder_name)}</span>
-        <span class="st-open">открыть проходку</span>
+        <span class="st-open">${pending ? 'проходка · ждёт оплаты' : 'открыть проходку'}</span>
       </a>`
     )
     .join('');
   swapPane('success');
+}
+
+// Цена одна, поэтому за «взять заранее» работают другие доводы: гарантия
+// входа, своя очередь, розыгрыш. Плюс честный остаток мест, когда он мал.
+function renderBuyPerks() {
+  const perks = $('buy-perks');
+  if (perks) perks.innerHTML = (SITE.buyPerks || []).map((t) => `<li>${esc(t)}</li>`).join('');
+  const left = $('buy-left');
+  const e = store.event;
+  if (!left || !e || e.status !== 'onsale') return;
+  const waves = e.waves || [];
+  const total = waves.reduce((s, w) => s + Number(w.quota || 0), 0);
+  const remain = waves.reduce((s, w) => s + Math.max(0, Number(w.quota || 0) - Number(w.sold || 0)), 0);
+  if (total && remain <= Math.max(40, Math.round(total * 0.4))) {
+    left.innerHTML = remain > 0
+      ? `Осталось <b>${remain}</b> ${plural(remain, 'проходка', 'проходки', 'проходок')} из ${total}`
+      : 'Проходки закончились — на входе только при наличии мест';
+    left.hidden = false;
+  } else {
+    left.hidden = true;
+  }
 }
 
 // Проходки, купленные на этой странице, остаются доступными и после закрытия

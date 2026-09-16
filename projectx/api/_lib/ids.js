@@ -28,3 +28,11 @@ export function ticketId() {
 export function orderId() {
   return 'ord_' + encodeBase32(randomBytes(6));
 }
+
+// Код брони для комментария к переводу: «PX-7F3K». Четыре знака того же
+// алфавита (без i, l, o, u), заглавными — гость диктует его и печатает
+// в банк-приложении, путаницы быть не должно. Уникальность держит индекс
+// orders_pay_code_idx; коллизия → повтор попытки (как с id билета).
+export function payCode() {
+  return 'PX-' + encodeBase32(randomBytes(3)).slice(0, 4).toUpperCase();
+}

@@ -5,7 +5,8 @@
 // GET  /api/event-upsert            → список событий ВКЛЮЧАЯ черновики
 //   (обычная /api/events их прячет — иначе черновик пропадал бы навсегда)
 // POST /api/event-upsert  body: { id?, title, date, timeStart, timeEnd,
-//   ageRating, venue, address?, descr?, status, waves: [{waveNo,name,priceRub,quota}] }
+//   ageRating, venue, address?, descr?, status, secret?,
+//   waves: [{waveNo,name,priceRub,quota,public?}] }
 //
 // Инварианты: цену/квоту читает и пишет только сервер; id существующего
 // события не меняется (иначе оборвутся выданные QR); квота не опускается
@@ -49,6 +50,8 @@ export default async function handler(req, res) {
           ageRating: Number(r.age_rating),
           status: r.status,
           descr: r.descr,
+          secret: Boolean(r.secret),
+          capacity: r.capacity == null ? null : Number(r.capacity),
           waves: typeof r.waves === 'string' ? JSON.parse(r.waves) : r.waves,
         })),
       });
@@ -84,11 +87,11 @@ export default async function handler(req, res) {
   try {
     await sql.query(EVENT_UPSERT_SQL, [
       e.id, e.brand, e.title, e.city, e.venue, e.address, e.startsAt, e.endsAt,
-      e.ageRating, e.status, null, e.descr, null,
+      e.ageRating, e.status, null, e.descr, null, e.secret,
     ]);
     const saved = [];
     for (const w of waves) {
-      const r = rowsOf(await sql.query(WAVE_UPSERT_SQL, [e.id, w.waveNo, w.name, w.priceRub, w.quota]));
+      const r = rowsOf(await sql.query(WAVE_UPSERT_SQL, [e.id, w.waveNo, w.name, w.priceRub, w.quota, w.public]));
       const row = r[0];
       if (row) saved.push({ waveNo: Number(row.wave_no), quota: Number(row.quota), sold: Number(row.sold) });
     }

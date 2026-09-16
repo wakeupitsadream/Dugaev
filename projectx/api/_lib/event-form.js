@@ -94,7 +94,9 @@ export function parseEventForm(body, ctx = {}) {
       // не ошибка: квоту поднимаем до проданного, но владелец должен знать
       warnings.push(`«${name}»: уже продано ${sold} — квота поднята до ${sold}`);
     }
-    waves.push({ waveNo, name, priceRub, quota: Math.max(quota, sold) });
+    // скрытая волна (гостевой список): на сайте её нет, продаёт только касса
+    const isPublic = w?.public === undefined || w?.public === null ? true : Boolean(w.public);
+    waves.push({ waveNo, name, priceRub, quota: Math.max(quota, sold), public: isPublic });
   });
   if (new Set(waves.map((w) => w.waveNo)).size !== waves.length) {
     errors.push({ field: 'waves', message: 'Номера волн повторяются' });
@@ -137,6 +139,8 @@ export function parseEventForm(body, ctx = {}) {
       ageRating,
       status,
       descr,
+      // SECRET PLACE: адрес публике только за сутки до ночи; по умолчанию адрес открыт
+      secret: Boolean(b.secret),
     },
     waves,
     prune: doomed.map((w) => Number(w.waveNo)),

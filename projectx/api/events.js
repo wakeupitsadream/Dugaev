@@ -12,13 +12,13 @@ export default async function handler(req, res) {
   if (hasDb()) {
     try {
       const rows = await withTimeout(db().query(
-        `SELECT e.id, e.brand, e.title, e.city, e.venue, e.address,
+        `SELECT e.id, e.brand, e.title, e.city, e.venue, e.address, e.secret, e.capacity,
                 e.starts_at, e.ends_at, e.age_rating, e.status, e.poster_url, e.descr, e.lineup,
                 coalesce(
                   json_agg(json_build_object(
                     'waveNo', w.wave_no, 'name', w.name,
                     'priceRub', w.price_rub, 'quota', w.quota, 'sold', w.sold
-                  ) ORDER BY w.wave_no) FILTER (WHERE w.id IS NOT NULL),
+                  ) ORDER BY w.wave_no) FILTER (WHERE w.id IS NOT NULL AND w.public),
                   '[]'
                 ) AS waves
          FROM events e
@@ -38,9 +38,9 @@ export default async function handler(req, res) {
     degraded: true,
     events: EVENTS.map((e) => ({
       ...e,
-      address: addressIsPublic(e) ? e.address : null,
-      addressPublicAt: publicRevealAt(e.startsAt),
-      waves: demoWaves(e, Date.now()),
+      address: !e.secret || addressIsPublic(e) ? e.address : null,
+      addressPublicAt: e.secret ? publicRevealAt(e.startsAt) : null,
+      waves: demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, Date.now()),
     })),
   });
 }
@@ -52,10 +52,13 @@ function mapRow(r) {
     title: r.title,
     city: r.city,
     venue: r.venue,
-    // SECRET PLACE: адрес уходит в публичную афишу только за сутки до ночи.
-    // Купившим он виден сразу — но через /api/ticket, по подписанному токену.
-    address: addressIsPublic({ startsAt: r.starts_at, status: r.status }) ? r.address : null,
-    addressPublicAt: publicRevealAt(r.starts_at),
+    // SECRET PLACE (флаг secret у ночи): адрес уходит в публичную афишу только
+    // за сутки до старта. Купившим он виден сразу — через /api/ticket по
+    // подписанному токену. Открытая ночь показывает адрес всем и сразу.
+    address: !r.secret || addressIsPublic({ startsAt: r.starts_at, status: r.status }) ? r.address : null,
+    addressPublicAt: r.secret ? publicRevealAt(r.starts_at) : null,
+    secret: Boolean(r.secret),
+    capacity: r.capacity == null ? null : Number(r.capacity),
     startsAt: toIso(r.starts_at),
     endsAt: toIso(r.ends_at),
     ageRating: Number(r.age_rating),

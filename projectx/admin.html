@@ -27,6 +27,7 @@
         <input type="text" id="gate-name" placeholder="Твоё имя" autocomplete="off" />
         <button class="btn btn-acid btn-block" id="gate-go" type="button">Войти</button>
         <p class="form-note" id="gate-err" style="color: var(--danger); display: none; margin-top: 10px;">Ключ не подошёл</p>
+        <p class="form-note" style="margin-top: 12px;">Ключ двери сюда не подходит — он открывает только сканер на входе.</p>
       </div>
 
       <!-- Дашборд -->
@@ -34,7 +35,7 @@
         <!-- Выбор ивента -->
         <div class="admin-toolbar no-print">
           <select class="admin-select" id="ev-select" aria-label="Выбор вечеринки"></select>
-          <button class="btn btn-ghost" id="btn-offline" type="button">Скачать офлайн-список</button>
+          <button class="btn btn-ghost" id="btn-offline" type="button">Список гостей и офлайн-копия</button>
           <button class="btn btn-ghost" id="btn-print" type="button">Версия для печати</button>
           <button class="btn btn-ghost" id="btn-logout" type="button">Выйти</button>
           <span class="muted" id="offline-note" style="font-size: 0.82rem;"></span>
@@ -42,6 +43,23 @@
 
         <!-- Ключевые цифры -->
         <div class="tiles" id="tiles"></div>
+
+        <!-- Брони, ожидающие подтверждения оплаты -->
+        <div class="admin-panel no-print" id="pending-panel">
+          <div class="ap-kicker">Оплата переводом</div>
+          <h3>Ожидают подтверждения</h3>
+          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
+            Гость забронировал и переводит по СБП с кодом брони в комментарии. Увидел перевод в банке —
+            нажми «Подтвердить»: проходки станут активными, бот пришлёт их гостю. Нет перевода —
+            бронь сгорит сама через 3 часа (в день ночи — через час) или отмени её вручную.
+          </p>
+          <div class="pending-list" id="pending-list"><p class="muted">Пока никто не ждёт</p></div>
+          <div class="pending-confirm">
+            <input type="text" id="pc-code" placeholder="Код брони, напр. PX-7F3K" autocomplete="off" />
+            <button class="btn btn-ghost" id="pc-confirm" type="button">Подтвердить по коду</button>
+            <span class="muted" id="pc-note" style="font-size: 0.84rem;"></span>
+          </div>
+        </div>
 
         <!-- Касса -->
         <div class="admin-panel no-print" id="walkin-panel">
@@ -122,6 +140,10 @@
                 <input type="text" id="ee-address" placeholder="Оренбург, ул. ..." autocomplete="off" />
               </div>
             </div>
+            <label class="check" style="margin: 4px 0 12px;">
+              <input type="checkbox" id="ee-secret" />
+              <span>SECRET PLACE: адрес публике только за сутки до ночи (купившим — сразу в проходке)</span>
+            </label>
             <div class="field">
               <label for="ee-descr">Описание для афиши</label>
               <textarea id="ee-descr" rows="3" placeholder="Два диджея, шоу-свет, лазеры и танцпол до утра."></textarea>
@@ -155,6 +177,25 @@
           <h3>Волны</h3>
           <div style="overflow-x: auto;">
             <table class="admin-table" id="waves-table"></table>
+          </div>
+        </div>
+
+        <!-- Источники продаж -->
+        <div class="admin-panel no-print" id="sources-panel">
+          <div class="ap-kicker">Откуда гости</div>
+          <h3>Продажи по источникам</h3>
+          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
+            Метка ставится ссылкой вида <code>/e/ночь?src=метка</code>: у каждого промоутера, общаги и паблика — своя.
+            Так видно, что продаёт. QR-постер с меткой можно скачать здесь же.
+          </p>
+          <div style="overflow-x: auto;">
+            <table class="admin-table" id="sources-table"></table>
+          </div>
+          <div class="sources-tools">
+            <input type="text" id="src-tag" placeholder="метка, напр. promo-lev или obshaga-ogu-3" autocomplete="off" />
+            <button class="btn btn-ghost" id="src-copy" type="button">Скопировать ссылку</button>
+            <button class="btn btn-acid" id="src-qr" type="button">Скачать QR-постер</button>
+            <span class="muted" id="src-note" style="font-size: 0.84rem;"></span>
           </div>
         </div>
 
@@ -195,7 +236,10 @@
         <!-- Печатный список гостей -->
         <div class="admin-panel" id="print-list" hidden>
           <h3>Список гостей</h3>
-          <table class="admin-table" id="guests-table"></table>
+          <p class="muted no-print" style="font-size: 0.86rem; margin: 4px 0 10px;">
+            Переоформить — сменить имя, QR останется тем же. Аннулировать — проходка перестанет проходить вход, место вернётся в продажу.
+          </p>
+          <div style="overflow-x: auto;"><table class="admin-table" id="guests-table"></table></div>
         </div>
 
         <p class="form-note no-print" id="db-missing" style="display: none;">

@@ -5,6 +5,7 @@ import { parseToken, formatTicketCode, fmtTicketWhen, fmtTime, ageLabel } from '
 import { qrSvg } from './qr.js';
 import { esc } from './events-load.js';
 import { SITE } from './data/config.js';
+import { payBlockHtml, bindPayBlock } from './booking-ui.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -45,7 +46,7 @@ async function init() {
       return;
     }
     if (j && j.ok && j.ticket) {
-      data = j.ticket;
+      data = { ...j.ticket, bot: j.bot || null };
       try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch { /* private mode */ }
     }
   } catch { /* офлайн — идём в кэш */ }
@@ -55,6 +56,32 @@ async function init() {
   }
   render(parsed, data);
   bindActions(parsed, data);
+  // Бронь ждёт подтверждения: опрашиваем статус, чтобы проходка «ожила»
+  // сама, без перезагрузки — гость держит экран открытым у входа.
+  if (data?.status === 'reserved') pollStatus(parsed, token, cacheKey);
+}
+
+function pollStatus(parsed, token, cacheKey) {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped || document.hidden) return schedule();
+    try {
+      const r = await fetch(`/api/ticket?token=${encodeURIComponent(token)}`);
+      const j = await r.json().catch(() => null);
+      if (j?.ok && j.ticket && j.ticket.status !== 'reserved') {
+        stopped = true;
+        const data = { ...j.ticket, bot: j.bot || null };
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch { /* ignore */ }
+        render(parsed, data);
+        bindActions(parsed, data);
+        return;
+      }
+    } catch { /* сеть мигнула — попробуем ещё */ }
+    schedule();
+  };
+  const schedule = () => { if (!stopped) setTimeout(tick, 15_000); };
+  schedule();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !stopped) tick(); });
 }
 
 function render(parsed, t) {
@@ -71,6 +98,32 @@ function render(parsed, t) {
     // площадка = адрес: если адрес уже содержит venue, не дублируем
     `${t.event.address && t.event.address.includes(t.event.venue) ? esc(t.event.address) : `${esc(t.event.venue)}${t.event.address ? ' · ' + esc(t.event.address) : ''}`}`;
 
+  const card = $('ticket-card');
+  const reserved = t.status === 'reserved';
+  const dead = t.status === 'expired' || t.status === 'cancelled';
+  card.classList.toggle('is-reserved', reserved);
+  card.classList.toggle('is-dead', dead);
+
+  // Бронь ещё не оплачена: реквизиты и «Я перевёл» прямо в проходке.
+  // QR уже есть — на входе по нему примут оплату наличными.
+  const pay = $('t-pay');
+  if (pay) {
+    if (reserved && t.order) {
+      pay.innerHTML = payBlockHtml(t.order, t.bot || null);
+      pay.hidden = false;
+      bindPayBlock(t.order, { onClaimed: (at) => { t.order.claimedAt = at; } });
+    } else if (dead) {
+      pay.innerHTML =
+        `<div class="pay-box"><div class="pay-kicker">${t.status === 'cancelled' ? 'Бронь отменена' : 'Бронь сгорела'}</div>` +
+        `<p class="pay-note">Оплата не была подтверждена вовремя, места вернулись в продажу. Если ты переводил деньги — напиши нам в директ со скрином.</p>` +
+        `<a class="btn btn-acid btn-block" href="/e/${esc(t.event.id)}">Забронировать заново</a></div>`;
+      pay.hidden = false;
+    } else {
+      pay.hidden = true;
+      pay.innerHTML = '';
+    }
+  }
+
   // SECRET PLACE: у владельца проходки адрес есть сразу — это и есть привилегия
   // купившего. Показываем его отдельным блоком с картой, а не строкой в мета.
   const place = $('t-place');
@@ -83,12 +136,20 @@ function render(parsed, t) {
         `<div class="tp-links"><a href="https://yandex.ru/maps/?text=${q}" target="_blank" rel="noopener">Яндекс Карты</a>` +
         `<a href="https://2gis.ru/search/${q}" target="_blank" rel="noopener">2ГИС</a></div>`;
       place.hidden = false;
-    } else {
+    } else if (reserved && t.event.secret) {
+      place.innerHTML =
+        `<div class="tp-kicker">SECRET PLACE</div>` +
+        `<div class="tp-addr">Адрес откроется после оплаты</div>` +
+        `<div class="tp-note">Как только подтвердим перевод, адрес появится прямо здесь — раньше, чем его узнает город.</div>`;
+      place.hidden = false;
+    } else if (t.event.secret) {
       place.innerHTML =
         `<div class="tp-kicker">SECRET PLACE</div>` +
         `<div class="tp-addr">Адрес появится здесь</div>` +
         `<div class="tp-note">Открой проходку в день ночи — адрес придёт в неё. Городу его объявим только за сутки до старта.</div>`;
       place.hidden = false;
+    } else {
+      place.hidden = true;
     }
   }
 
@@ -105,10 +166,20 @@ function render(parsed, t) {
   $('t-badges').innerHTML = badges.join('');
 
   const strip = $('t-strip');
+  strip.classList.remove('hidden', 'revoked', 'used', 'reserved', 'expired');
+  strip.classList.add('hidden');
   if (t.status === 'revoked' || t.status === 'refunded') {
-    strip.textContent = 'Проходка отозвана — напиши нам, если это ошибка';
+    strip.textContent = t.status === 'refunded' ? 'Проходка возвращена — вход по ней не сработает' : 'Проходка отозвана — напиши нам, если это ошибка';
     strip.classList.remove('hidden');
     strip.classList.add('revoked');
+  } else if (reserved) {
+    strip.textContent = t.order?.claimedAt ? 'Ждём подтверждение оплаты' : 'Ожидает оплаты — QR пока не активен';
+    strip.classList.remove('hidden');
+    strip.classList.add('reserved');
+  } else if (dead) {
+    strip.textContent = t.status === 'cancelled' ? 'Бронь отменена' : 'Бронь сгорела — места вернулись в продажу';
+    strip.classList.remove('hidden');
+    strip.classList.add('expired');
   } else if (t.checkedInAt) {
     strip.textContent = `Использован в ${fmtTime(t.checkedInAt)} — повторный вход по нему не сработает`;
     strip.classList.remove('hidden');

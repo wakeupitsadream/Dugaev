@@ -4,6 +4,7 @@
 import { plural, fmtWhen, fmtTime } from './ticket-format.js';
 import { esc } from './events-load.js';
 import { activeWave } from './waves.js';
+import { qrSvg } from './qr.js';
 
 const $ = (id) => document.getElementById(id);
 const rub = (v) => (Number(v) === 0 ? 'фри' : `${v} ₽`);
@@ -84,6 +85,8 @@ async function boot() {
   bindService(); // кнопки сервиса доступны и до инициализации БД
   bindWalkin();
   bindEventEditor();
+  bindPending();
+  bindSources();
 
   if (!j || !j.ok) {
     $('db-missing').style.display = 'block';
@@ -129,14 +132,18 @@ async function refresh() {
   const checked = j.checked_in ?? 0;
   const conv = sold > 0 ? Math.round((checked / sold) * 100) : 0;
   const prov = Object.fromEntries((j.by_provider || []).map((p) => [p.provider, p]));
-  const onlineRub = prov.stub?.rub ?? 0;
+  const onlineN = (prov.transfer?.n ?? 0) + (prov.stub?.n ?? 0);
+  const onlineRub = (prov.transfer?.rub ?? 0) + (prov.stub?.rub ?? 0);
   const doorRub = prov.door?.rub ?? 0;
+  const pending = j.pending || [];
+  const pendingN = pending.reduce((s, o) => s + o.qty, 0);
+  const pendingRub = j.pending_rub ?? pending.reduce((s, o) => s + o.amount_rub, 0);
   $('tiles').innerHTML = [
-    { n: sold, label: 'проходок продано', sub: `онлайн ${prov.stub?.n ?? 0} · касса ${prov.door?.n ?? 0}` },
-    { n: `${(j.revenue_rub ?? 0).toLocaleString('ru-RU')} ₽`, label: 'выручка', sub: `онлайн ${onlineRub.toLocaleString('ru-RU')} ₽ · касса ${doorRub.toLocaleString('ru-RU')} ₽` },
-    { n: checked, label: 'вошло на тусовку', sub: sold ? `${conv}% от проданных` : '' },
-    { n: leftTotal, label: 'осталось мест', sub: '' },
-    { n: j.minors ?? 0, label: 'браслетов (несоверш.)', sub: '' },
+    { n: sold, label: 'проходок оплачено', sub: `переводом ${onlineN} · на входе ${prov.door?.n ?? 0}` },
+    { n: `${(j.revenue_rub ?? 0).toLocaleString('ru-RU')} ₽`, label: 'выручка', sub: `переводом ${onlineRub.toLocaleString('ru-RU')} ₽ · на входе ${doorRub.toLocaleString('ru-RU')} ₽` },
+    { n: pendingN, label: 'ждут оплаты', sub: pendingN ? `${pending.length} ${plural(pending.length, 'бронь', 'брони', 'броней')} · ${pendingRub.toLocaleString('ru-RU')} ₽` : 'все брони закрыты' },
+    { n: checked, label: 'вошло на тусовку', sub: sold ? `${conv}% от оплаченных` : '' },
+    { n: leftTotal, label: 'осталось мест', sub: j.capacity ? `вместимость ${j.capacity}` : '' },
   ]
     .map((t) => `<div class="tile"><div class="t-num">${esc(String(t.n))}</div><div class="t-label">${esc(t.label)}</div>${t.sub ? `<div class="t-sub">${esc(t.sub)}</div>` : ''}</div>`)
     .join('');
@@ -160,7 +167,7 @@ async function refresh() {
     (j.by_wave || [])
       .map((w) => {
         const pct = Math.round((Number(w.sold) / Number(w.quota)) * 100);
-        return `<tr><td>${esc(w.name)}</td><td class="num">${rub(w.price_rub)}</td>
+        return `<tr><td>${esc(w.name)}${w.public === false ? ' <span class="muted">(скрытая)</span>' : ''}</td><td class="num">${rub(w.price_rub)}</td>
                 <td class="num">${w.sold} / ${w.quota}</td>
                 <td class="num">${Math.max(0, Number(w.quota) - Number(w.sold))}</td>
                 <td class="bar-cell"><i style="width:${Math.max(2, pct)}%; ${pct >= 100 ? 'background: var(--dim);' : ''}"></i></td></tr>`;
@@ -168,6 +175,8 @@ async function refresh() {
       .join('');
 
   renderWalkinWaves();
+  renderPending(pending);
+  renderSources(j.sources || []);
 
   const curve = j.checkin_curve || [];
   $('curve-section').hidden = curve.length === 0;
@@ -225,18 +234,229 @@ async function downloadOfflineList() {
   }
 }
 
+const STATUS_RU = { active: '', reserved: 'ждёт оплаты', expired: 'бронь сгорела', cancelled: 'отменена', revoked: 'аннулирована', refunded: 'возврат' };
+
 function renderGuestsTable(tickets) {
   $('print-list').hidden = false;
   $('guests-table').innerHTML =
-    `<tr><th>Гость</th><th>Проходка</th><th>Возраст</th><th>Статус</th><th>Вошёл</th></tr>` +
+    `<tr><th>Гость</th><th>Проходка</th><th>Статус</th><th>Вошёл</th><th class="no-print"></th></tr>` +
     tickets
-      .map(
-        (t) => `<tr><td>${esc(t.holder_name)}</td><td>${esc(t.id.toUpperCase())}</td>
-                <td>${t.age_cat === 'minor' ? 'браслет' : '18+'}</td>
-                <td>${t.status === 'active' ? '' : esc(t.status)}</td>
-                <td>${t.checked_in_at ? esc(fmtTime(t.checked_in_at)) : ''}</td></tr>`
-      )
+      .map((t) => {
+        const editable = (t.status === 'active' || t.status === 'reserved') && !t.checked_in_at;
+        const acts = editable
+          ? `<button class="act-link" data-act="rename" data-id="${esc(t.id)}" data-name="${esc(t.holder_name)}" type="button">переоформить</button>` +
+            `<button class="act-link danger" data-act="void" data-id="${esc(t.id)}" data-name="${esc(t.holder_name)}" type="button">аннулировать</button>`
+          : '';
+        return `<tr><td>${esc(t.holder_name)}</td><td>${esc(t.id.toUpperCase())}</td>
+                <td>${esc(STATUS_RU[t.status] ?? t.status)}</td>
+                <td>${t.checked_in_at ? esc(fmtTime(t.checked_in_at)) : ''}</td>
+                <td class="no-print">${acts}</td></tr>`;
+      })
       .join('');
+  $('guests-table').querySelectorAll('.act-link').forEach((b) => { b.onclick = () => guestAction(b.dataset.act, b.dataset.id, b.dataset.name); });
+}
+
+// Переоформление и аннулирование — через кассу (/api/walkin), только владелец
+async function guestAction(act, id, name) {
+  let body;
+  if (act === 'rename') {
+    const nn = window.prompt(`Новое имя для проходки ${id.toUpperCase()} (сейчас: ${name})`, name);
+    if (!nn || nn.trim().length < 2) return;
+    body = { action: 'rename', ticket_id: id, name: nn.trim() };
+  } else {
+    if (!window.confirm(`Аннулировать проходку ${name}? Вход по ней перестанет работать, место вернётся в продажу.`)) return;
+    const refunded = window.confirm('Деньги за неё возвращены? ОК — отметить как возврат, Отмена — просто аннулировать.');
+    const note = window.prompt('Причина (необязательно)', '') || '';
+    body = { action: 'void', ticket_id: id, status: refunded ? 'refunded' : 'revoked', note };
+  }
+  let j = null;
+  try {
+    const r = await fetch('/api/walkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers() },
+      body: JSON.stringify({ ...body, by: state.name }),
+    });
+    j = await r.json().catch(() => null);
+  } catch { /* ниже */ }
+  if (!j?.ok) {
+    window.alert(j?.message || 'Не получилось — проверь сеть');
+    return;
+  }
+  await downloadOfflineList();
+  refresh();
+}
+
+// ---------- Ожидающие оплаты ----------
+function renderPending(list) {
+  const host = $('pending-list');
+  if (!host) return;
+  if (!list.length) {
+    host.innerHTML = '<p class="muted">Пока никто не ждёт</p>';
+    return;
+  }
+  const now = Date.now();
+  host.innerHTML = list
+    .map((o) => {
+      const left = o.expires_at ? Math.max(0, Math.round((Date.parse(o.expires_at) - now) / 60000)) : null;
+      const names = (o.tickets || []).map((t) => t.holder_name).join(', ');
+      return `<div class="pending-row ${o.claimed_at ? 'is-claimed' : ''}" data-id="${esc(o.id)}">
+        <div class="pr-code">${esc(o.pay_code || '—')}</div>
+        <div class="pr-main">
+          <b>${esc(o.buyer_name)}</b> · ${esc(o.buyer_phone)}${o.buyer_tg ? ` · @${esc(o.buyer_tg)}` : ''}${o.tg ? ' · в боте' : ''}
+          <small>${o.qty} × ${o.amount_rub / o.qty} ₽ = <b>${o.amount_rub} ₽</b> · ${esc(names)}</small>
+          <small>${o.claimed_at
+            ? `<span class="pr-claimed">нажал «Я перевёл»</span> ${esc(fmtTime(o.claimed_at))} — проверь банк`
+            : left === null ? '' : left > 0 ? `сгорит через ${left} мин` : 'срок вышел, сгорит при следующем обновлении'}</small>
+        </div>
+        <div class="pr-acts">
+          <button class="btn btn-acid btn-sm" data-act="confirm" type="button">Подтвердить</button>
+          <button class="btn btn-ghost btn-sm" data-act="cancel" type="button">Отменить</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+  host.querySelectorAll('.pending-row').forEach((row) => {
+    row.querySelectorAll('button').forEach((b) => {
+      b.onclick = () => pendingAction(b.dataset.act, row.dataset.id, row);
+    });
+  });
+}
+
+async function pendingAction(act, orderId, row) {
+  if (act === 'cancel' && !window.confirm('Отменить бронь? Места вернутся в продажу, гостю в боте придёт сообщение.')) return;
+  row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+  let j = null;
+  try {
+    const r = await fetch('/api/walkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers() },
+      body: JSON.stringify(act === 'confirm'
+        ? { action: 'confirm', order_id: orderId, provider: 'transfer', by: state.name }
+        : { action: 'cancel', order_id: orderId, by: state.name }),
+    });
+    j = await r.json().catch(() => null);
+  } catch { /* ниже */ }
+  if (!j?.ok) {
+    row.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    window.alert(j?.message || 'Не получилось — проверь сеть');
+  }
+  refresh();
+}
+
+function bindPending() {
+  const btn = $('pc-confirm');
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = '1';
+  btn.onclick = async () => {
+    const code = $('pc-code').value.trim();
+    const note = $('pc-note');
+    if (!code) { $('pc-code').focus(); return; }
+    btn.disabled = true;
+    note.textContent = 'Подтверждаю…';
+    let j = null;
+    try {
+      const r = await fetch('/api/walkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify({ action: 'confirm', pay_code: code, provider: 'transfer', by: state.name }),
+      });
+      j = await r.json().catch(() => null);
+    } catch { /* ниже */ }
+    btn.disabled = false;
+    if (j?.ok) {
+      note.textContent = `Подтверждено: ${j.pay_code} · ${j.amount_rub} ₽`;
+      $('pc-code').value = '';
+      refresh();
+    } else {
+      note.textContent = j?.message || 'Не получилось — проверь сеть';
+    }
+  };
+  $('pc-code').onkeydown = (e) => { if (e.key === 'Enter') btn.click(); };
+}
+
+// ---------- Источники продаж и QR-постеры ----------
+function renderSources(list) {
+  const table = $('sources-table');
+  if (!table) return;
+  if (!list.length) {
+    table.innerHTML = '<tr><td class="muted">Продаж пока нет</td></tr>';
+    return;
+  }
+  const max = Math.max(1, ...list.map((r) => r.paid));
+  table.innerHTML =
+    `<tr><th>Источник</th><th class="num">Оплачено</th><th class="num">Ждут</th><th class="num">Выручка</th><th style="width: 34%;"></th></tr>` +
+    list
+      .map((r) => `<tr><td>${esc(r.src)}</td><td class="num">${r.paid}</td><td class="num">${r.pending}</td>
+        <td class="num">${r.rub.toLocaleString('ru-RU')} ₽</td>
+        <td class="bar-cell"><i style="width:${Math.max(2, Math.round((r.paid / max) * 100))}%"></i></td></tr>`)
+      .join('');
+}
+
+function srcLink() {
+  const tag = $('src-tag').value.trim().toLowerCase().replace(/[^a-z0-9а-яё_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 32);
+  if (!tag || !state.current) return null;
+  return { tag, url: `${location.origin}/e/${encodeURIComponent(state.current)}?src=${encodeURIComponent(tag)}` };
+}
+
+function bindSources() {
+  const copy = $('src-copy');
+  const qr = $('src-qr');
+  if (!copy || copy.dataset.bound) return;
+  copy.dataset.bound = '1';
+  copy.onclick = async () => {
+    const l = srcLink();
+    if (!l) { $('src-tag').focus(); return; }
+    try { await navigator.clipboard.writeText(l.url); $('src-note').textContent = `Скопировано: ${l.url}`; }
+    catch { $('src-note').textContent = l.url; }
+  };
+  qr.onclick = () => {
+    const l = srcLink();
+    if (!l) { $('src-tag').focus(); return; }
+    downloadPoster(l);
+  };
+}
+
+// PNG-постер: крупный QR на страницу ночи с меткой, подпись бренда.
+// Печатается на A4/A5 и клеится в общаге — сканы с него считаются в источниках.
+function downloadPoster({ tag, url }) {
+  const svg = qrSvg(url, { ecc: 'M', margin: 2 });
+  const holder = document.createElement('div');
+  holder.innerHTML = svg;
+  const svgEl = holder.querySelector('svg');
+  const vb = svgEl.viewBox.baseVal;
+  const scale = 16;
+  const pad = 120;
+  const canvas = document.createElement('canvas');
+  canvas.width = vb.width * scale + pad * 2;
+  canvas.height = vb.height * scale + pad * 2 + 260;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const img = new Image();
+  const blobUrl = URL.createObjectURL(new Blob([svgEl.outerHTML], { type: 'image/svg+xml' }));
+  img.onload = () => {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, pad, pad + 120, vb.width * scale, vb.height * scale);
+    ctx.fillStyle = '#0a0a0c';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 72px sans-serif';
+    ctx.fillText('PROJECT X', canvas.width / 2, 110);
+    ctx.font = '36px sans-serif';
+    const ev = state.events.find((e) => e.id === state.current);
+    ctx.fillText(ev ? `${ev.title} · ${fmtWhen(toIso(ev.starts_at))}` : state.current, canvas.width / 2, canvas.height - 130);
+    ctx.font = 'bold 40px sans-serif';
+    ctx.fillText('Сканируй — проходка за минуту', canvas.width / 2, canvas.height - 70);
+    ctx.font = '26px sans-serif';
+    ctx.fillStyle = '#777';
+    ctx.fillText(tag, canvas.width / 2, canvas.height - 28);
+    URL.revokeObjectURL(blobUrl);
+    const a = document.createElement('a');
+    a.download = `projectx-poster-${tag}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    $('src-note').textContent = `Постер с меткой «${tag}» скачан`;
+  };
+  img.src = blobUrl;
 }
 
 async function printList() {
@@ -252,13 +472,15 @@ function renderWalkinWaves() {
   const options = (state.lastStats.by_wave || [])
     .map((w) => {
       const left = Math.max(0, Number(w.quota) - Number(w.sold));
-      return { no: Number(w.wave_no), label: `${w.name} · ${rub(w.price_rub)} · осталось ${left}`, left };
+      const hidden = w.public === false;
+      return { no: Number(w.wave_no), label: `${w.name} · ${rub(w.price_rub)} · осталось ${left}${hidden ? ' · скрытая' : ''}`, left, hidden };
     });
   sel.innerHTML = options
     .map((o) => `<option value="${o.no}" ${o.left === 0 ? 'disabled' : ''}>${esc(o.label)}</option>`)
     .join('');
-  // по умолчанию — последняя доступная волна (обычно «на входе»)
-  const avail = options.filter((o) => o.left > 0);
+  // по умолчанию — последняя доступная ПУБЛИЧНАЯ волна (обычно «на входе»);
+  // скрытый гостевой список выбирают руками
+  const avail = options.filter((o) => o.left > 0 && !o.hidden);
   sel.value = prev && options.some((o) => String(o.no) === prev && o.left > 0) ? prev : String(avail.at(-1)?.no ?? '');
 }
 
@@ -444,9 +666,9 @@ async function runSelfTest() {
 // Сервер (api/event-upsert.js) — единственный источник правды: он же
 // валидирует цены/квоты и не даёт удалить проданную волну.
 const EMPTY_EVENT = () => ({
-  id: '', title: '', date: '', timeStart: '23:00', timeEnd: '06:00',
-  ageRating: 18, status: 'onsale', venue: '', address: '', descr: '',
-  waves: [{ waveNo: 1, name: 'Ранняя волна', priceRub: 400, quota: 80, sold: 0 }],
+  id: '', title: '', date: '', timeStart: '22:00', timeEnd: '06:00',
+  ageRating: 18, status: 'onsale', venue: '', address: '', descr: '', secret: false,
+  waves: [{ waveNo: 1, name: 'Проходка', priceRub: 1000, quota: 200, sold: 0, public: true }],
 });
 
 function bindEventEditor() {
@@ -465,7 +687,7 @@ function bindEventEditor() {
   };
   $('ee-wave-add').onclick = () => {
     const next = Math.max(0, ...state.editorWaves.map((w) => w.waveNo)) + 1;
-    state.editorWaves.push({ waveNo: next, name: `Волна ${next}`, priceRub: 0, quota: 50, sold: 0 });
+    state.editorWaves.push({ waveNo: next, name: `Волна ${next}`, priceRub: 0, quota: 50, sold: 0, public: true });
     renderEditorWaves();
   };
   $('ee-save').onclick = saveEvent;
@@ -484,8 +706,8 @@ function toEditor(ev) {
   return {
     id: ev.id, title: ev.title, date: st.date, timeStart: st.time, timeEnd: en.time,
     ageRating: Number(ev.ageRating), status: ev.status, venue: ev.venue || '',
-    address: ev.address || '', descr: ev.descr || '',
-    waves: (ev.waves || []).map((w) => ({ ...w, sold: Number(w.sold) || 0 })),
+    address: ev.address || '', descr: ev.descr || '', secret: Boolean(ev.secret),
+    waves: (ev.waves || []).map((w) => ({ ...w, sold: Number(w.sold) || 0, public: w.public !== false })),
   };
 }
 
@@ -520,8 +742,8 @@ function editorSnapshot() {
   return JSON.stringify([
     $('ee-id').value, $('ee-title').value, $('ee-date').value, $('ee-start').value,
     $('ee-end').value, $('ee-age').value, $('ee-status').value, $('ee-venue').value,
-    $('ee-address').value, $('ee-descr').value,
-    (state.editorWaves || []).map((w) => [w.waveNo, w.name, w.priceRub, w.quota]),
+    $('ee-address').value, $('ee-descr').value, $('ee-secret')?.checked,
+    (state.editorWaves || []).map((w) => [w.waveNo, w.name, w.priceRub, w.quota, w.public]),
   ]);
 }
 
@@ -546,9 +768,10 @@ function fillEditor(ev) {
   $('ee-venue').value = ev.venue || '';
   $('ee-address').value = ev.address || '';
   $('ee-descr').value = ev.descr || '';
+  if ($('ee-secret')) $('ee-secret').checked = Boolean(ev.secret);
   state.editorWaves = (ev.waves || []).map((w) => ({
     waveNo: Number(w.waveNo), name: w.name, priceRub: Number(w.priceRub),
-    quota: Number(w.quota), sold: Number(w.sold) || 0,
+    quota: Number(w.quota), sold: Number(w.sold) || 0, public: w.public !== false,
   }));
   renderEditorWaves();
   $('ee-note').textContent = ev.id ? `Правишь: ${ev.id}` : 'Новое событие';
@@ -565,14 +788,19 @@ function renderEditorWaves() {
         <input type="number" data-f="quota" value="${w.quota}" min="1" max="5000" aria-label="Квота" />
         <button type="button" data-act="del" ${w.sold > 0 ? 'disabled title="Есть продажи — удалить нельзя"' : 'title="Удалить волну"'}>×</button>
         ${w.sold > 0 ? `<span class="ef-sold">продано ${w.sold}</span>` : ''}
+        <label class="check"><input type="checkbox" data-f="public" ${w.public !== false ? 'checked' : ''} /><span>видна на сайте (сними для гостевого списка — продаёт только касса)</span></label>
       </div>`
     )
     .join('');
   $('ee-waves').querySelectorAll('.ef-wave').forEach((row) => {
     const i = Number(row.dataset.i);
     row.querySelectorAll('input').forEach((inp) => {
+      const f = inp.dataset.f;
+      if (f === 'public') {
+        inp.onchange = () => { state.editorWaves[i].public = inp.checked; };
+        return;
+      }
       inp.oninput = () => {
-        const f = inp.dataset.f;
         state.editorWaves[i][f] = f === 'name' ? inp.value : Number(inp.value);
         inp.classList.remove('ee-bad');
       };
@@ -602,8 +830,9 @@ async function saveEvent() {
     venue: $('ee-venue').value.trim(),
     address: $('ee-address').value.trim(),
     descr: $('ee-descr').value.trim(),
+    secret: Boolean($('ee-secret')?.checked),
     waves: state.editorWaves.map((w) => ({
-      waveNo: w.waveNo, name: w.name, priceRub: w.priceRub, quota: w.quota,
+      waveNo: w.waveNo, name: w.name, priceRub: w.priceRub, quota: w.quota, public: w.public !== false,
     })),
   };
   try {

@@ -1,10 +1,12 @@
 // Верификация билета на входе. Два режима:
 //  - без админ-ключа: только sig_valid + название ивента (гостевая заставка);
-//  - с X-Admin-Key: полный статус + запись попытки в scan_log.
-// Ручной поиск по голому id (?id=...&manual=1) — только с админ-ключом.
+//  - с ключом двери или админ-ключом: полный статус + запись попытки в scan_log.
+// Ручной поиск по голому id (?id=...&manual=1) — только с ключом.
+// v6: билет брони ('reserved') отдаётся со сведениями о заказе — дверь
+// принимает оплату на месте (/api/walkin action=confirm) и впускает.
 // БД лежит → sig_valid без статуса (янтарный режим на клиенте).
 import { verifyToken, ticketSecrets } from './_lib/sign.js';
-import { isAdmin } from './_lib/auth.js';
+import { isDoor, staffName } from './_lib/auth.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 
@@ -12,7 +14,7 @@ export default async function handler(req, res) {
   noStore(res);
   if (!onlyMethod(req, res, 'GET')) return;
 
-  const admin = isAdmin(req);
+  const admin = isDoor(req);
   // ключ прислали, но он неверный — явный отказ (scan-страница перезапросит PIN);
   // гость ключ не шлёт вовсе и попадает в гостевую ветку
   if (req.headers['x-admin-key'] && !admin) {
@@ -63,8 +65,10 @@ export default async function handler(req, res) {
 
   try {
     const rows = await withTimeout(db().query(
-      `SELECT t.id, t.holder_name, t.age_cat, t.status, t.checked_in_at, t.checked_by,
-              e.title, e.starts_at, e.age_rating, w.name AS wave_name
+      `SELECT t.id, t.holder_name, t.age_cat, t.status, t.checked_in_at, t.checked_by, t.note,
+              e.title, e.starts_at, e.age_rating, w.name AS wave_name,
+              o.id AS order_id, o.status AS order_status, o.pay_code, o.amount_rub, o.qty,
+              o.expires_at, o.claimed_at, o.buyer_phone
        FROM tickets t
        JOIN events e ON e.id = t.event_id
        JOIN orders o ON o.id = t.order_id
@@ -78,7 +82,7 @@ export default async function handler(req, res) {
       return ok(res, { sig_valid: true, found: false, status: 'not_found' });
     }
     let status = 'active';
-    if (r.status === 'revoked' || r.status === 'refunded') status = r.status;
+    if (['revoked', 'refunded', 'reserved', 'expired', 'cancelled'].includes(r.status)) status = r.status;
     else if (r.checked_in_at) status = 'checked_in';
     await logScan(id, status === 'active' ? 'ok_preview' : status, adminName(req));
     return ok(res, {
@@ -90,6 +94,17 @@ export default async function handler(req, res) {
       checked_in_at: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
       checked_by: r.checked_by,
       wave_name: r.wave_name,
+      note: r.note || null,
+      // бронь: дверь видит, сколько и за что принять на месте
+      order: {
+        id: r.order_id,
+        status: r.order_status,
+        pay_code: r.pay_code,
+        amount_rub: Number(r.amount_rub),
+        qty: Number(r.qty),
+        expires_at: r.expires_at ? new Date(r.expires_at).toISOString() : null,
+        claimed_at: r.claimed_at ? new Date(r.claimed_at).toISOString() : null,
+      },
       event: {
         title: r.title,
         startsAt: new Date(r.starts_at).toISOString(),
@@ -102,14 +117,7 @@ export default async function handler(req, res) {
   }
 }
 
-function adminName(req) {
-  const raw = String(req.headers['x-admin-name'] || '');
-  try {
-    return decodeURIComponent(raw).slice(0, 64) || null;
-  } catch {
-    return raw.slice(0, 64) || null;
-  }
-}
+const adminName = (req) => staffName(req);
 
 async function logScan(ticketId, result, by) {
   if (!hasDb()) return;

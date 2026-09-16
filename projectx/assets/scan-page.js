@@ -2,7 +2,9 @@
 // Админ с PIN — полноэкранный светофор:
 //   зелёный «ПРОПУСТИТЬ» → кнопка «Впустить» (атомарный чек-ин);
 //   жёлтый «НАДЕТЬ БРАСЛЕТ» — несовершеннолетний на 16+;
-//   красный «УЖЕ ИСПОЛЬЗОВАН/ПОДДЕЛКА/ОТОЗВАН»;
+//   красный «УЖЕ ИСПОЛЬЗОВАН/ПОДДЕЛКА/ОТОЗВАН/БРОНЬ СГОРЕЛА»;
+//   янтарный «НЕ ОПЛАЧЕНО» — бронь без перевода: дверь принимает деньги
+//   на месте и впускает одной кнопкой (v6);
 //   янтарный — БД недоступна: подпись подлинная, впуск под запись (outbox)
 //   + офлайн-список из admin.html (localStorage).
 import { parseToken, formatTicketCode, normalizeManualId, fmtTime, plural } from './ticket-format.js';
@@ -65,7 +67,7 @@ function renderPin() {
     <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
     <p class="scan-sub" style="margin: 10px 0 18px;">Режим сотрудника</p>
     <div class="pin-panel">
-      <input type="password" id="pin-key" placeholder="Ключ администратора" autocomplete="off" />
+      <input type="password" id="pin-key" placeholder="Ключ двери или админа" autocomplete="off" />
       <input type="text" id="pin-name" placeholder="Твоё имя (видно в отчётах)" autocomplete="off" value="${esc(state.name)}" />
     </div>
   `);
@@ -76,7 +78,7 @@ function renderPin() {
     const name = $('pin-name').value.trim();
     if (!key) {
       $('pin-key').focus();
-      return pinHint('Введи ключ администратора — без него дверь не открыть.');
+      return pinHint('Введи ключ двери — без него сканер не работает.');
     }
     state.key = key;
     state.name = name || 'админ';
@@ -123,6 +125,8 @@ async function verifyAndRender() {
   if (j.status === 'not_found') return renderNotFound();
   if (j.status === 'checked_in') return renderRepeat(j);
   if (j.status === 'revoked' || j.status === 'refunded') return renderRevoked(j);
+  if (j.status === 'reserved') return renderReserved(j);
+  if (j.status === 'expired' || j.status === 'cancelled') return renderExpired(j);
   renderActive(j);
 }
 
@@ -190,6 +194,69 @@ function renderRevoked(j) {
     <div class="scan-verdict">Отозван</div>
     <div class="scan-name">${esc(j.holder_name || '')}</div>
     <p class="scan-sub">Проходка отозвана или возвращена. Не пускать.</p>
+  `);
+  foot(scanNextBtn());
+  bindScanNext();
+  beep('bad');
+}
+
+// Бронь без оплаты: гость не перевёл (или перевод ещё не подтверждён).
+// Дверь принимает наличные и впускает одной кнопкой — заказ становится
+// оплаченным «на входе», остальные проходки этой брони тоже активируются.
+function renderReserved(j) {
+  const o = j.order || {};
+  const n = Number(o.qty || 1);
+  const claimed = Boolean(o.claimed_at);
+  stage('amber', `
+    <div class="scan-verdict">Не оплачено</div>
+    <div class="scan-name">${esc(j.holder_name || '')}</div>
+    <p class="scan-sub">Бронь <b>${esc(o.pay_code || '')}</b>: ${o.amount_rub} ₽ за ${n} ${plural(n, 'проходку', 'проходки', 'проходок')}.
+    ${claimed ? 'Гость нажал «Я перевёл», но перевод ещё не подтверждён — проверь у админа или возьми наличными.' : 'Перевода не было — возьми наличными и впусти.'}</p>
+    ${state.token ? `<div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>` : ''}
+  `);
+  foot(`<button class="btn btn-ok btn-block" id="do-confirm" type="button">Принять ${o.amount_rub} ₽ и впустить</button>
+        ${scanNextBtn()}`);
+  $('do-confirm').onclick = () => doConfirmAtDoor(o);
+  bindScanNext();
+  beep('warn');
+  vibrate([50, 40]);
+}
+
+async function doConfirmAtDoor(o) {
+  const btn = $('do-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Отмечаю…';
+  let j = null;
+  let status = 0;
+  try {
+    const r = await fetch('/api/walkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({
+        action: 'confirm', order_id: o.id, provider: 'door', ticket_id: state.token?.id || null, by: state.name,
+      }),
+    });
+    status = r.status;
+    j = await r.json().catch(() => null);
+  } catch { /* ниже */ }
+  if (j?.ok) {
+    const extra = Number(o.qty || 1) > 1 ? ` · ещё ${Number(o.qty) - 1} из этой брони активны` : '';
+    stageLockOk('Оплачено и впущен', `${o.amount_rub} ₽ принято · выдай браслет${extra}`);
+    return;
+  }
+  if (status === 403) return badKey();
+  if (j?.error === 'not_pending' && j.status === 'paid') return verifyAndRender(); // админ подтвердил параллельно
+  if (j?.error === 'not_pending') return renderExpired({ holder_name: '', status: j.status });
+  btn.disabled = false;
+  btn.textContent = `Принять ${o.amount_rub} ₽ и впустить`;
+  pinHint(j?.message || 'Не получилось — проверь сеть и попробуй ещё раз');
+}
+
+function renderExpired(j) {
+  stage('danger', `
+    <div class="scan-verdict">${j.status === 'cancelled' ? 'Бронь отменена' : 'Бронь сгорела'}</div>
+    <div class="scan-name">${esc(j.holder_name || '')}</div>
+    <p class="scan-sub">Оплата не подтверждена вовремя, места вернулись в продажу. Хочет зайти — оформи как нового гостя через кассу в панели (телефон админа).</p>
   `);
   foot(scanNextBtn());
   bindScanNext();
@@ -291,12 +358,14 @@ async function doCheckin() {
   } catch { /* сеть упала между verify и чек-ином */ }
 
   if (j?.ok && j.first) {
-    stageLockOk('Впущен', `${j.holder_name}${j.age_cat === 'minor' ? ' · браслет надет?' : ''} · ${fmtTime(j.checked_in_at)}`);
+    stageLockOk('Впущен', `${j.holder_name} · ${fmtTime(j.checked_in_at)} · выдай браслет`);
     return;
   }
   if (j?.ok && j.first === false) return renderRepeat({ holder_name: j.holder_name, checked_in_at: j.checked_in_at, checked_by: j.checked_by });
   if (status === 403) return badKey();
   if (j?.error === 'revoked') return renderRevoked({ holder_name: '' });
+  if (j?.error === 'unpaid') return renderReserved({ holder_name: j.holder_name, order: j.order });
+  if (j?.error === 'expired') return renderExpired({ holder_name: j.holder_name, status: j.status });
   // 503 или сеть — уходим в запись
   saveOutbox(enqueue(loadOutbox(), { ticketId: state.token.id, by: state.name, at: new Date().toISOString() }));
   markOfflineUsed(state.token.id);
@@ -359,6 +428,8 @@ async function manualLookup() {
   if (j.status === 'not_found') return renderNotFound();
   if (j.status === 'checked_in') return renderRepeat(j);
   if (j.status === 'revoked' || j.status === 'refunded') return renderRevoked(j);
+  if (j.status === 'reserved') return renderReserved(j);
+  if (j.status === 'expired' || j.status === 'cancelled') return renderExpired(j);
   // active: чек-ин по голому id (доверенный режим админа)
   renderActive(j);
   $('do-checkin').onclick = async () => {

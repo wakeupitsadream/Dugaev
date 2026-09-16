@@ -35,23 +35,26 @@ export default async function handler(req, res) {
 
     for (const e of EVENTS) {
       await sql.query(
-        `INSERT INTO events (id, brand, title, city, venue, address, starts_at, ends_at, age_rating, status, poster_url, descr, lineup)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+        `INSERT INTO events (id, brand, title, city, venue, address, starts_at, ends_at, age_rating, status, poster_url, descr, lineup, secret, capacity)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15)
          ON CONFLICT (id) DO UPDATE SET
            brand=EXCLUDED.brand, title=EXCLUDED.title, city=EXCLUDED.city,
            venue=EXCLUDED.venue, address=EXCLUDED.address, starts_at=EXCLUDED.starts_at,
            ends_at=EXCLUDED.ends_at, age_rating=EXCLUDED.age_rating, status=EXCLUDED.status,
-           poster_url=EXCLUDED.poster_url, descr=EXCLUDED.descr, lineup=EXCLUDED.lineup`,
+           poster_url=EXCLUDED.poster_url, descr=EXCLUDED.descr, lineup=EXCLUDED.lineup,
+           secret=EXCLUDED.secret, capacity=EXCLUDED.capacity`,
         [e.id, e.brand, e.title, e.city, e.venue, e.address || null, e.startsAt, e.endsAt || null,
-         e.ageRating, e.status, e.posterUrl || null, e.descr || null, JSON.stringify(e.lineup || [])]
+         e.ageRating, e.status, e.posterUrl || null, e.descr || null, JSON.stringify(e.lineup || []),
+         Boolean(e.secret), e.capacity || null]
       );
       for (const w of e.waves) {
         await sql.query(
-          `INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota)
-           VALUES ($1,$2,$3,$4,$5)
+          `INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota, public)
+           VALUES ($1,$2,$3,$4,$5,$6)
            ON CONFLICT (event_id, wave_no) DO UPDATE SET
-             name=EXCLUDED.name, price_rub=EXCLUDED.price_rub, quota=EXCLUDED.quota`,
-          [e.id, w.waveNo, w.name, w.priceRub, w.quota]
+             name=EXCLUDED.name, price_rub=EXCLUDED.price_rub, quota=EXCLUDED.quota,
+             public=EXCLUDED.public`,
+          [e.id, w.waveNo, w.name, w.priceRub, w.quota, w.public !== false]
         );
       }
       if (demoSold && e.status === 'onsale') {

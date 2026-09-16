@@ -81,7 +81,9 @@
 
           <div style="margin-top: 22px;">
             <button class="btn btn-acid btn-block" id="buy-open" type="button" disabled>Загружаем…</button>
-            <p class="form-note" style="margin-top: 10px;">Оплата онлайн · именной QR каждому гостю · вход за секунды</p>
+            <p class="buy-left" id="buy-left" hidden></p>
+            <ul class="buy-perks" id="buy-perks"></ul>
+            <p class="form-note" style="margin-top: 12px;">Бронь за минуту · оплата переводом по СБП · именной QR каждому гостю</p>
           </div>
         </div>
       </div>
@@ -147,21 +149,18 @@
         <span class="ot-label" id="ot-label">1 проходка</span>
         <span class="ot-sum" id="ot-sum">— ₽</span>
       </div>
-      <button class="btn btn-acid btn-block" id="submit-order" type="button" style="margin-top: 14px;">Оплатить</button>
+      <button class="btn btn-acid btn-block" id="submit-order" type="button" style="margin-top: 14px;">Забронировать</button>
       <button class="btn btn-ghost btn-block hidden" id="submit-cancel" type="button" style="margin-top: 8px;">Отменить и оформить вручную</button>
       <p class="form-note" id="submit-note" style="margin-top: 10px;">Нажимая кнопку, ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.</p>
     </div>
 
-    <!-- Шаг: успех -->
+    <!-- Шаг: успех — бронь (оплата переводом) или готовые проходки (демо) -->
     <div id="pane-success" class="hidden">
-      <h3>Проходки у тебя</h3>
-      <div class="success-note">Оплата прошла. Каждому гостю — свой именной QR: открой проходку и отправь её владельцу.</div>
+      <h3 id="success-title">Бронь оформлена</h3>
+      <div class="success-note" id="success-note">Места держим за тобой. Переведи сумму по реквизитам ниже — и проходки станут активными после подтверждения.</div>
+      <div id="success-pay"></div>
       <div class="success-tickets" id="success-list"></div>
-      <ol class="next-steps">
-        <li><b>Сохрани.</b> Открой проходку и сделай скриншот — QR сработает на входе даже без интернета. Ссылки остаются на этой странице.</li>
-        <li><b>Адрес.</b> SECRET PLACE появится прямо в проходке перед стартом — открой её вечером в день ночи.</li>
-        <li><b>На дверях.</b> Паспорт с собой, двери в 22:00. Друзьям — перешли их именные проходки.</li>
-      </ol>
+      <ol class="next-steps" id="success-steps"></ol>
       <button class="btn btn-ghost btn-block" id="success-close" type="button">Готово</button>
     </div>
 

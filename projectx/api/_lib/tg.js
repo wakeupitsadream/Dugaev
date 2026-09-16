@@ -4,6 +4,11 @@ export function tgConfigured() {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN);
 }
 
+// Имя бота для deep-link «Получить в Telegram» (без @). Публично, не секрет.
+export function tgBotUsername() {
+  return String(process.env.TELEGRAM_BOT_USERNAME || '').replace(/^@/, '') || null;
+}
+
 export async function tgApi(method, payload, timeoutMs = 4000) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return null;

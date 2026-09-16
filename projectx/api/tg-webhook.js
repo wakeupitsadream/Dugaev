@@ -1,16 +1,24 @@
-// Вебхук Telegram: пост в канале → анализ → черновик события в БД →
-// подтверждение владельцем одной кнопкой → событие на сайте (без редеплоя).
-// Настройка: бот добавлен админом канала, setWebhook с secret_token
-// (см. BRIEF.md, раздел «Автообновление из канала»).
+// Вебхук Telegram — один бот на две роли.
+//  1) Гость: открыл бота по ссылке с экрана брони (/start ord_…) → чат
+//     привязан к заказу; бот показывает реквизиты перевода, принимает
+//     «Я перевёл», после подтверждения присылает проходки. /tickets —
+//     все проходки этого чата.
+//  2) Владелец (TELEGRAM_CHAT_ID): уведомления о бронях с кнопками
+//     «Подтвердить / Не пришло»; пост в канале → анализ → черновик события
+//     → публикация одной кнопкой (конвейер афиши, спящий без канала).
+// Настройка: setWebhook с secret_token (см. BRIEF.md).
 //
 // handleUpdate экспортирован отдельно и принимает зависимости —
-// тесты гоняют его на PGlite с фейковым экстрактором.
+// тесты гоняют его на PGlite с фейковым экстрактором и без сети.
 import { timingSafeEqual } from 'node:crypto';
 import { db, hasDb } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { notifyOwner, tgApi } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
+import { isOrderId, transferText, ticketLinks, siteOrigin } from './_lib/booking.js';
+import { CONFIRM_SQL } from './_lib/queries.js';
+import { SITE } from '../assets/data/config.js';
 
 export default async function handler(req, res) {
   noStore(res);
@@ -35,6 +43,7 @@ export default async function handler(req, res) {
       tg: tgApi,
       autoPublish: process.env.AUTO_PUBLISH === '1',
       nowMs: Date.now(),
+      origin: siteOrigin(req),
     });
   } catch (e) {
     console.error('tg-webhook failed:', e);
@@ -44,6 +53,7 @@ export default async function handler(req, res) {
 
 export async function handleUpdate(update, deps) {
   if (update.callback_query) return handleCallback(update.callback_query, deps);
+  if (update.message) return handleMessage(update.message, deps);
   const post = update.channel_post;
   if (!post) return { done: 'ignored' };
 
@@ -164,20 +174,215 @@ export async function handleUpdate(update, deps) {
   return { done: 'draft_created', slug, status };
 }
 
+const rowsOf = (r) => (r && r.rows) || r || [];
+const fmtWhen = (iso) =>
+  new Date(iso).toLocaleString('ru-RU', {
+    timeZone: SITE.tz || 'Asia/Yekaterinburg', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+  });
+const plural = (n, one, few, many) => {
+  const a = Math.abs(n) % 100; const b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+};
+const originOf = (deps) => String(deps.origin || process.env.SITE_ORIGIN || 'https://projectx-party.vercel.app').replace(/\/+$/, '');
+
+// ---------- гость: личные сообщения боту ----------
+async function handleMessage(msg, deps) {
+  const chatId = msg.chat?.id;
+  const text = String(msg.text || '').trim();
+  if (!chatId || (msg.chat.type && msg.chat.type !== 'private')) return { done: 'ignored' };
+  const send = (t, markup) => deps.tg('sendMessage', {
+    chat_id: chatId, text: t, disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}),
+  });
+  if (!deps.sql) {
+    await send('Бот пока не подключён к базе — проходки и адрес смотри на сайте.');
+    return { done: 'no_db' };
+  }
+
+  const start = /^\/start(?:@\w+)?(?:\s+(\S+))?$/i.exec(text);
+  if (start) {
+    const payload = start[1] || '';
+    if (isOrderId(payload)) {
+      const o = await loadOrder(deps.sql, payload);
+      if (!o) {
+        await send('Не нашли бронь по этой ссылке. Открой бота ещё раз по кнопке «Получить в Telegram» на странице брони.');
+        return { done: 'start_unknown' };
+      }
+      await deps.sql.query(
+        `INSERT INTO tg_links (chat_id, order_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [chatId, o.id]
+      );
+      await deps.sql.query(`UPDATE orders SET tg_chat_id = $1 WHERE id = $2`, [chatId, o.id]);
+      await sendOrderStatus(o, chatId, deps);
+      return { done: 'linked', order: o.id };
+    }
+    await send(
+      `Привет! Это бот PROJECT X.\n\nОткрой его по кнопке «Получить в Telegram» на странице брони — ` +
+        `и проходки придут сюда, как только оплата подтвердится. Команда /tickets покажет твои проходки.`
+    );
+    return { done: 'start' };
+  }
+
+  if (/^\/tickets|проходк|билет/i.test(text)) {
+    const rows = rowsOf(await deps.sql.query(
+      `SELECT o.id FROM tg_links l JOIN orders o ON o.id = l.order_id
+       WHERE l.chat_id = $1 ORDER BY o.created_at DESC LIMIT 5`,
+      [chatId]
+    ));
+    if (!rows.length) {
+      await send('Проходок пока нет. Забронируй на сайте и открой бота по кнопке «Получить в Telegram».');
+      return { done: 'tickets_none' };
+    }
+    for (const r of rows) {
+      const o = await loadOrder(deps.sql, r.id);
+      if (o) await sendOrderStatus(o, chatId, deps);
+    }
+    return { done: 'tickets', n: rows.length };
+  }
+
+  await send('Я понимаю только /tickets — покажу твои проходки. Вопросы по ночи — в директ @project.x.prty.');
+  return { done: 'unknown' };
+}
+
+async function loadOrder(sql, oid) {
+  const rows = rowsOf(await sql.query(
+    `SELECT o.id, o.status, o.pay_code, o.amount_rub, o.qty, o.expires_at, o.claimed_at, o.tg_chat_id,
+            e.id AS event_id, e.title, e.starts_at, e.venue, e.address, e.secret
+     FROM orders o JOIN events e ON e.id = o.event_id WHERE o.id = $1`,
+    [oid]
+  ));
+  return rows[0] || null;
+}
+
+// Что сейчас с бронью — одно сообщение под текущий статус
+async function sendOrderStatus(o, chatId, deps) {
+  const send = (t, markup) => deps.tg('sendMessage', {
+    chat_id: chatId, text: t, disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}),
+  });
+  const origin = originOf(deps);
+  const n = Number(o.qty);
+  const what = `${n} ${plural(n, 'проходка', 'проходки', 'проходок')} на ${o.title} · ${fmtWhen(o.starts_at)}`;
+
+  if (o.status === 'pending') {
+    const waiting = o.claimed_at
+      ? `\n\nТы уже нажал «Я перевёл» — ждём, пока владелец увидит перевод. Подтверждение придёт сюда.`
+      : `\n\nБронь действует до ${fmtWhen(o.expires_at)}. Как переведёшь — нажми кнопку.`;
+    await send(
+      `🕒 Бронь ${o.pay_code}: ${what}\n\n${transferText(Number(o.amount_rub), o.pay_code)}${waiting}`,
+      o.claimed_at ? undefined : { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${o.id}` }]] }
+    );
+    return;
+  }
+  if (o.status === 'paid') {
+    const tickets = rowsOf(await deps.sql.query(
+      `SELECT id, holder_name FROM tickets WHERE order_id = $1 AND status = 'active' ORDER BY id`, [o.id]
+    ));
+    const links = ticketLinks(tickets, origin).map((t) => `• ${t.holder_name}: ${t.url}`);
+    const addr = o.address && !o.secret ? `\n\nАдрес: ${o.venue}, ${o.address}` : '';
+    await send(`✅ Оплачено: ${what}\n\n${links.join('\n') || 'Проходки уже использованы или отозваны.'}${addr}`);
+    return;
+  }
+  await send(
+    `Бронь ${o.pay_code || o.id} ${o.status === 'cancelled' ? 'отменена' : 'сгорела'}. ` +
+      `Забронировать заново: ${origin}/e/${o.event_id}`
+  );
+}
+
+// ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, text });
-  // кнопки жмёт только владелец (его chat_id из env)
+  const m = /^(pub|skip|cancel|pay|nopay|claim):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  if (!m || !deps.sql) {
+    await answer('Не получилось');
+    return { done: 'callback_bad' };
+  }
+  const [, action, arg] = m;
+
+  // «Я перевёл» жмёт гость — из чата, привязанного к этой брони
+  if (action === 'claim') {
+    const chatId = cb.from?.id;
+    const linked = rowsOf(await deps.sql.query(
+      `SELECT 1 FROM tg_links WHERE chat_id = $1 AND order_id = $2`, [chatId, arg]
+    )).length > 0;
+    if (!linked) {
+      await answer('Недоступно');
+      return { done: 'claim_denied' };
+    }
+    const o = rowsOf(await deps.sql.query(
+      `UPDATE orders SET claimed_at = COALESCE(claimed_at, now())
+       WHERE id = $1 AND status = 'pending'
+       RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone`,
+      [arg]
+    ))[0];
+    if (!o) {
+      await answer('Бронь уже обработана');
+      return { done: 'claim_noop' };
+    }
+    await deps.notify(
+      `💸 Гость сообщил о переводе (из бота)\n${o.pay_code} · ${o.amount_rub} ₽ · ${o.qty} шт.\n` +
+        `${o.buyer_name}, ${o.buyer_phone}\n\nПроверь поступление в банке и подтверди:`,
+      {
+        inline_keyboard: [[
+          { text: `✅ Подтвердить ${o.pay_code}`, callback_data: `pay:${o.id}` },
+          { text: '✖ Не пришло', callback_data: `nopay:${o.id}` },
+        ]],
+      }
+    );
+    await answer('Передали владельцу');
+    await deps.tg('sendMessage', {
+      chat_id: chatId,
+      text: 'Спасибо! Как только владелец увидит перевод, проходки придут сюда. Обычно это несколько минут.',
+    });
+    return { done: 'claimed', order: o.id };
+  }
+
+  // остальные кнопки жмёт только владелец (его chat_id из env)
   const ownerChat = String(process.env.TELEGRAM_CHAT_ID || '');
   if (ownerChat && String(cb.from?.id) !== ownerChat && String(cb.message?.chat?.id) !== ownerChat) {
     await answer('Недоступно');
     return { done: 'callback_denied' };
   }
-  const m = /^(pub|skip|cancel):([\w-]{1,64})$/.exec(String(cb.data || ''));
-  if (!m || !deps.sql) {
-    await answer('Не получилось');
-    return { done: 'callback_bad' };
+  const slug = arg;
+
+  if (action === 'pay') {
+    const o = rowsOf(await deps.sql.query(CONFIRM_SQL, [slug, 'Telegram', 'transfer']))[0];
+    if (!o) {
+      await answer('Бронь уже обработана');
+      return { done: 'pay_noop', order: slug };
+    }
+    await dropButtons(cb, deps);
+    const tickets = (typeof o.tickets === 'string' ? JSON.parse(o.tickets) : o.tickets) || [];
+    if (o.tg_chat_id) {
+      const links = ticketLinks(tickets, originOf(deps)).map((t) => `• ${t.holder_name}: ${t.url}`);
+      await deps.tg('sendMessage', {
+        chat_id: o.tg_chat_id,
+        disable_web_page_preview: true,
+        text: `✅ Оплата подтверждена — проходки у тебя.\n\n${links.join('\n')}\n\n` +
+          `Открой каждую, сделай скриншот QR и перешли друзьям их именные. На входе — паспорт, двери в ${SITE.doorsOpen || '22:00'}.`,
+      });
+    }
+    await answer(`Подтверждено: ${o.pay_code || slug}`);
+    return { done: 'paid', order: slug, delivered: Boolean(o.tg_chat_id) };
   }
-  const [, action, slug] = m;
+  if (action === 'nopay') {
+    const o = rowsOf(await deps.sql.query(
+      `UPDATE orders SET claimed_at = NULL WHERE id = $1 AND status = 'pending' RETURNING tg_chat_id, pay_code`,
+      [slug]
+    ))[0];
+    await dropButtons(cb, deps);
+    if (o?.tg_chat_id) {
+      await deps.tg('sendMessage', {
+        chat_id: o.tg_chat_id,
+        text: `Перевод по брони ${o.pay_code} пока не нашли. Проверь сумму и код в комментарии — и нажми «Я перевёл» ещё раз, когда деньги уйдут.`,
+        reply_markup: { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${slug}` }]] },
+      });
+    }
+    await answer(o ? 'Гостю сообщили' : 'Бронь уже обработана');
+    return { done: o ? 'nopay' : 'nopay_noop', order: slug };
+  }
+
   if (action === 'pub') {
     const rows = await deps.sql.query(
       `UPDATE events SET status = 'onsale' WHERE id = $1 AND status = 'draft' RETURNING id`,
@@ -205,4 +410,14 @@ async function handleCallback(cb, deps) {
   await deps.sql.query(`UPDATE events SET status = 'cancelled' WHERE id = $1`, [slug]);
   await answer('Снято с продажи');
   return { done: 'cancelled', slug };
+}
+
+// Кнопки под уведомлением убираем после нажатия — второй тап ничего не сделает
+async function dropButtons(cb, deps) {
+  if (!cb.message?.chat?.id || !cb.message?.message_id) return;
+  try {
+    await deps.tg('editMessageReplyMarkup', {
+      chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] },
+    });
+  } catch { /* не критично */ }
 }

@@ -1153,3 +1153,54 @@ h2 { line-height: 1.1; }
 }
 @keyframes btn-busy { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .btn.is-busy::after { animation: none; opacity: 0.5; } }
+
+
+/* ---------- v6: бронь с оплатой переводом ---------- */
+.pay-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin: 14px 0; display: grid; gap: 10px; }
+.pay-box .pay-kicker { font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.72rem; color: var(--acid); }
+.pay-box.is-claimed .pay-kicker { color: var(--amber); }
+.pay-box .pay-sum { font-family: var(--font-display); font-weight: 900; font-size: 2rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.pay-rows { display: grid; gap: 6px; margin-top: 4px; }
+.pay-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; border-bottom: 1px dashed var(--line); padding: 8px 0; font-size: 0.92rem; }
+.pay-row span { color: var(--muted); }
+.pay-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.pay-code { font-family: var(--font-display); font-size: 1.15rem; letter-spacing: 0.08em; color: var(--acid); }
+.pay-note { color: var(--muted); font-size: 0.84rem; line-height: 1.45; margin: 0; }
+.pay-note b { color: var(--text); }
+.pay-status { background: var(--amber-bg); border: 1px solid rgba(255, 138, 0, 0.4); border-radius: var(--radius-s); padding: 12px 14px; font-size: 0.9rem; }
+.pay-box .btn { margin: 0; }
+.ticket-status-strip.reserved { background: var(--amber-bg); color: var(--amber); }
+.ticket-status-strip.expired { background: var(--danger-bg); color: var(--danger); }
+.ticket-card.is-reserved .tc-qr-zone { opacity: 0.35; filter: grayscale(1); }
+.ticket-card.is-dead .tc-qr-zone { opacity: 0.15; filter: grayscale(1); }
+.ticket-card .tc-pay { padding: 0 22px 8px; }
+.ticket-card .tc-pay .pay-box { margin: 0 0 12px; }
+.buy-perks { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+.buy-perks li { position: relative; padding-left: 18px; color: var(--muted); font-size: 0.9rem; line-height: 1.4; }
+.buy-perks li::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 8px; height: 8px; background: var(--acid); transform: rotate(45deg); }
+.buy-left { margin-top: 12px; font-size: 0.9rem; color: var(--muted); }
+.buy-left b { color: var(--acid); font-variant-numeric: tabular-nums; }
+
+/* админка: ожидающие оплаты и действия по гостям */
+.pending-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px 14px; align-items: center; background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: var(--radius-s); padding: 12px 14px; }
+.pending-row.is-claimed { border-color: rgba(255, 138, 0, 0.55); }
+.pending-row .pr-code { font-family: var(--font-display); font-size: 1.05rem; letter-spacing: 0.06em; color: var(--acid); }
+.pending-row .pr-main { font-size: 0.9rem; line-height: 1.4; min-width: 0; }
+.pending-row .pr-main small { color: var(--muted); display: block; }
+.pending-row .pr-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pending-row .pr-claimed { display: inline-block; background: var(--amber-bg); color: var(--amber); border-radius: 999px; padding: 2px 8px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.pending-list { display: grid; gap: 10px; }
+.pending-confirm { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.pending-confirm input { flex: 1 1 160px; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; font: inherit; text-transform: uppercase; letter-spacing: 0.08em; }
+.pending-confirm input:focus { outline: none; border-color: var(--acid); }
+.act-link { background: none; border: 0; color: var(--acid); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+.act-link.danger { color: var(--danger); }
+.act-link + .act-link { margin-left: 10px; }
+.sources-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.sources-tools input { flex: 1 1 200px; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; font: inherit; }
+.sources-tools input:focus { outline: none; border-color: var(--acid); }
+.ef-wave label.check { grid-column: 1 / -1; margin: 0; font-size: 0.82rem; }
+@media (max-width: 560px) {
+  .pending-row { grid-template-columns: 1fr; }
+  .pending-row .pr-acts { justify-content: flex-start; }
+}

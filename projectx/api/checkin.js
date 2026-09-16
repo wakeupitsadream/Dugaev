@@ -2,7 +2,7 @@
 // сканеров невозможна. Поддерживает офлайн-очередь: body.at — время нажатия
 // «Впустить под запись» на устройстве админа (для досинхронизации).
 import { verifyToken, ticketSecrets } from './_lib/sign.js';
-import { isAdmin } from './_lib/auth.js';
+import { isDoor } from './_lib/auth.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { normalizeManualId } from '../assets/ticket-format.js';
@@ -11,7 +11,7 @@ import { CHECKIN_SQL } from './_lib/queries.js';
 export default async function handler(req, res) {
   noStore(res);
   if (!onlyMethod(req, res, 'POST')) return;
-  if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен админ-ключ');
+  if (!isDoor(req)) return fail(res, 403, 'forbidden', 'Нужен ключ двери или админ-ключ');
 
   const b = req.body || {};
   const by = String(b.by || '').slice(0, 64) || null;
@@ -50,13 +50,31 @@ export default async function handler(req, res) {
 
     // не обновилось: уже использован / отозван / не существует
     const prev = await sql.query(
-      `SELECT holder_name, status, checked_in_at, checked_by FROM tickets WHERE id = $1`,
+      `SELECT t.holder_name, t.status, t.checked_in_at, t.checked_by,
+              o.id AS order_id, o.pay_code, o.amount_rub, o.qty, o.claimed_at
+       FROM tickets t JOIN orders o ON o.id = t.order_id WHERE t.id = $1`,
       [id]
     );
     const p = (prev.rows || prev)[0];
     if (!p) {
       await logScan(sql, id, 'not_found', by);
       return fail(res, 404, 'not_found', 'Билет не найден');
+    }
+    if (p.status === 'reserved') {
+      // бронь без оплаты: дверь принимает деньги и подтверждает (walkin confirm)
+      await logScan(sql, id, 'unpaid', by);
+      return fail(res, 409, 'unpaid', 'Бронь не оплачена — прими оплату на входе', {
+        status: 'reserved',
+        holder_name: p.holder_name,
+        order: {
+          id: p.order_id, pay_code: p.pay_code, amount_rub: Number(p.amount_rub), qty: Number(p.qty),
+          claimed_at: p.claimed_at ? new Date(p.claimed_at).toISOString() : null,
+        },
+      });
+    }
+    if (p.status === 'expired' || p.status === 'cancelled') {
+      await logScan(sql, id, p.status, by);
+      return fail(res, 409, 'expired', 'Бронь сгорела — оформи гостя заново через кассу', { status: p.status, holder_name: p.holder_name });
     }
     if (p.status !== 'active') {
       await logScan(sql, id, p.status, by);

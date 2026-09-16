@@ -3,7 +3,9 @@
 // Инварианты, на которых держится система:
 //  - price_waves.sold списывается атомарным UPDATE ... WHERE sold+qty<=quota;
 //  - tickets.checked_in_at ставится ровно один раз атомарным UPDATE;
-//  - цена всегда берётся из БД, никогда из тела запроса клиента.
+//  - цена всегда берётся из БД, никогда из тела запроса клиента;
+//  - бронь переводом: orders 'pending' + tickets 'reserved' → подтверждение
+//    владельцем делает их 'paid'/'active', сгорание возвращает квоту.
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS events (
     id          text PRIMARY KEY,
@@ -80,5 +82,29 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS tg_updates (
     update_id  bigint PRIMARY KEY,
     at         timestamptz NOT NULL DEFAULT now()
+  )`,
+
+  // ---- v6: бронь с оплатой переводом (без платёжного шлюза) ----
+  // Заказ живёт как 'pending' до подтверждения владельцем, его билеты —
+  // 'reserved' (QR есть, но вход не пройдёт). Не подтверждён в срок —
+  // 'expired', квота возвращается. Все ALTER идемпотентны: /api/seed можно
+  // гонять сколько угодно.
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS secret boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE price_waves ADD COLUMN IF NOT EXISTS public boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay_code text`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS claimed_at timestamptz`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_by text`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS tg_chat_id bigint`,
+  `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS note text`,
+  `CREATE INDEX IF NOT EXISTS orders_pending_idx ON orders (status, expires_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS orders_pay_code_idx ON orders (pay_code) WHERE pay_code IS NOT NULL`,
+
+  // Связка «чат Telegram ↔ заказ»: бот присылает проходки и адрес тому,
+  // кто открыл его по ссылке с экрана брони.
+  `CREATE TABLE IF NOT EXISTS tg_links (
+    chat_id    bigint NOT NULL,
+    order_id   text NOT NULL REFERENCES orders(id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (chat_id, order_id)
   )`,
 ];

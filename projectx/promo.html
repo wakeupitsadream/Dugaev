@@ -3,12 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Афиша — PROJECT X Оренбург</title>
-  <meta name="description" content="Ближайшие ночи PROJECT X в Оренбурге и архив афиш: даты, площадки, волны цен. Проходка онлайн, вход по именному QR." />
-  <meta property="og:title" content="Афиша PROJECT X · Оренбург" />
-  <meta property="og:image" content="/assets/photos/og-260926.jpg" />
+  <title>Промоутерам — PROJECT X Оренбург</title>
+  <meta name="description" content="Личная ссылка промоутера PROJECT X: метка источника, QR-код, тексты для сторис и материалы ночи." />
   <meta name="theme-color" content="#070707" />
-  <link rel="canonical" href="https://proxject.ru/afisha" />
+  <link rel="canonical" href="https://proxject.ru/promo" />
+  <meta name="robots" content="noindex, nofollow" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/assets/styles.css" />
   <link rel="stylesheet" href="/assets/site.css" />
@@ -55,34 +54,60 @@
 
   <main>
     <section class="page-hero">
-      <div class="hero-bgx" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
       <div class="container">
-        <div class="kicker">Афиша · <span id="afisha-count">загружаем</span></div>
-        <h1>Ближайшие <span class="x">ночи</span></h1>
-        <p class="lead">Первые 50 проходок — по 1000 ₽, дальше 1500 ₽: бронь на сайте, перевод по СБП, именной QR на входе. На входе продаём только при наличии мест, а с проходкой — отдельная очередь.</p>
+        <div class="kicker">Промоутерам</div>
+        <h1>Твоя ссылка <span class="x">на ночь</span></h1>
+        <p class="lead">Впиши имя или ник и получи личную ссылку с QR. Каждая проходка по ней засчитывается тебе: мы видим это в панели по источникам.</p>
       </div>
     </section>
 
     <section class="page-body">
       <div class="container">
-        <div class="afisha-grid reveal" id="afisha-grid"></div>
-
-        <div class="wall-head reveal">
-          <div class="kicker">Как это было</div>
-          <h2>Стена <span class="x">афиш</span></h2>
-          <p class="lead">Каждая ночь — свой постер. Нажми на прошедшую ночь, чтобы посмотреть, как всё было.</p>
+        <div class="promo-gen reveal">
+          <label class="promo-label" for="pr-name">Имя или ник — латиницей или по-русски</label>
+          <div class="promo-row">
+            <input id="pr-name" type="text" maxlength="32" placeholder="например, lev" autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button class="btn btn-acid" id="pr-make" type="button">Сделать ссылку</button>
+          </div>
+          <p class="promo-err" id="pr-err" role="alert">Впиши хотя бы две буквы или цифры</p>
+          <div class="promo-out" id="pr-out" hidden>
+            <div class="promo-link">
+              <code id="pr-link"></code>
+              <button class="btn btn-ghost" id="pr-copy" type="button">Скопировать</button>
+            </div>
+            <div class="promo-qr-row">
+              <div class="promo-qr" id="pr-qr" aria-label="QR-код твоей ссылки"></div>
+              <div class="promo-qr-note">
+                <p>QR ведёт на ту же ссылку. Ставь его в сторис, на постер или показывай с экрана.</p>
+                <a class="btn btn-ghost" id="pr-qr-dl" href="#" download="proxject-qr.svg">Скачать QR</a>
+                <a class="btn btn-ghost" id="pr-open" href="#" target="_blank" rel="noopener">Открыть ссылку</a>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="poster-wall reveal-stagger" id="poster-wall"></div>
-      </div>
-    </section>
 
-    <section class="cta-band">
-      <div class="cta-x" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
-      <div class="container reveal">
-        <div class="kicker">Не пропусти</div>
-        <h2>Афиши выходят <span class="x">в Instagram*</span></h2>
-        <p class="lead">Анонсы, акции и афтер-муви — сначала там. Для SECRET PLACE адрес открываем за сутки; у купивших он уже в проходке.</p>
-        <a class="btn btn-ghost" href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">@project.x.prty</a>
+        <div class="section-head reveal" style="margin-top: 48px;">
+          <div class="kicker">Тексты</div>
+          <h2>Что писать <span class="x">в сторис и в личку</span></h2>
+        </div>
+        <div class="promo-texts reveal" id="pr-texts"><p class="muted">Сначала сделай ссылку — тексты соберутся с ней.</p></div>
+
+        <div class="section-head reveal" style="margin-top: 48px;">
+          <div class="kicker">Материалы</div>
+          <h2>Афиша <span class="x">и видео</span></h2>
+        </div>
+        <div class="promo-materials reveal">
+          <a class="promo-file" href="/assets/photos/poster-260926.jpg" download>Афиша ночи · JPG 1024×1280</a>
+          <a class="promo-file" href="/assets/photos/og-260926.jpg" download>Горизонтальный баннер · JPG 1200×630</a>
+          <a class="promo-file" href="/assets/video/aftermovie.mp4" download>Афтемуви со звуком · MP4, 34 с</a>
+          <a class="promo-file" href="/assets/video/party-loop.mp4" download>Короткий луп без звука · MP4, 12 с</a>
+        </div>
+
+        <div class="promo-rules reveal" id="pr-rules" hidden>
+          <div class="kicker">Условия</div>
+          <p id="pr-reward"></p>
+          <a class="btn btn-ghost" id="pr-contact" href="#" target="_blank" rel="noopener">Написать организаторам</a>
+        </div>
       </div>
     </section>
   </main>
@@ -115,9 +140,9 @@
   <!-- /chrome:footer -->
 
   <div class="sticky-cta" id="sticky-cta">
-    <a class="btn btn-acid" id="sticky-buy" href="#afisha-grid">Проходки</a>
+    <a class="btn btn-acid" id="sticky-buy" href="/afisha">Проходки</a>
   </div>
 
-  <script type="module" src="/assets/afisha-page.js"></script>
+  <script type="module" src="/assets/promo-page.js"></script>
 </body>
 </html>

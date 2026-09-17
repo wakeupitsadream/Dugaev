@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin.html
+Disallow: /scan.html
+Disallow: /promo
+Disallow: /t/
+Disallow: /s/
+Sitemap: https://proxject.ru/sitemap.xml

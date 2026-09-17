@@ -186,7 +186,7 @@ const plural = (n, one, few, many) => {
   if (b === 1) return one;
   return many;
 };
-const originOf = (deps) => String(deps.origin || process.env.SITE_ORIGIN || 'https://projectx-party.vercel.app').replace(/\/+$/, '');
+const originOf = (deps) => String(deps.origin || process.env.SITE_ORIGIN || 'https://proxject.ru').replace(/\/+$/, '');
 
 // ---------- гость: личные сообщения боту ----------
 async function handleMessage(msg, deps) {

@@ -3,7 +3,8 @@
 import { SITE } from './data/config.js';
 import { SHOW_PROGRAM } from './data/events.js';
 import { makeSheetDraggable } from './sheet-drag.js';
-import { initChrome, closeMenu } from './chrome.js';
+import { initChrome, closeMenu, trafficSource } from './chrome.js';
+import { track } from './metrika.js';
 import { springTo } from './spring.js';
 import { loadEvents, esc } from './events-load.js';
 import { waveStates, activeWave, totalSold } from './waves.js';
@@ -220,6 +221,7 @@ function bindSheet() {
   };
 
   $('buy-open').onclick = open;
+  for (const id of ['buy-open', 'sticky-buy']) $(id).addEventListener('click', () => track('booking_open'), { passive: true });
   $('sticky-buy').onclick = open;
   for (const id of ['header-buy', 'menu-buy']) {
     const el = $(id);
@@ -522,7 +524,7 @@ async function submitOrder() {
     attendees: store.attendees.map((a) => ({ name: a.name.trim(), minor: a.minor })),
     consent: store.consent,
     website: $('f-website').value, // honeypot
-    utm: { src: new URLSearchParams(location.search).get('src') || 'site' },
+    utm: { src: trafficSource() },
   };
 
   let resp = null;
@@ -638,6 +640,7 @@ function alertNote(text, kind = 'warn', action = null) {
 
 function showSuccess(j) {
   store.showingDone = true;
+  track('booking_done', { amount: Number(j.amount_rub) || 0, qty: Array.isArray(j.tickets) ? j.tickets.length : 0 });
   forgetForm();
   const pending = j.payment?.status === 'pending';
   const steps = $('success-steps');
@@ -738,6 +741,7 @@ function renderSavedTickets() {
 }
 
 function showFallback() {
+  track('booking_fallback');
   const e = store.event;
   const names = store.attendees.map((a) => a.name.trim()).filter(Boolean).join(', ');
   const text =

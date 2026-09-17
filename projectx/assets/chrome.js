@@ -1,11 +1,15 @@
 // Общая обвязка витрины: шапка, меню на телефоне, появление блоков по скроллу.
 // Одна и та же для главной и страниц второго уровня.
+import { initMetrika } from './metrika.js';
+
 const $ = (id) => document.getElementById(id);
 
 let closeMenuFn = () => {};
 export function closeMenu() { closeMenuFn(); }
 
 export function initChrome() {
+  rememberSource();
+  initMetrika();
   initHeader();
   initMenu();
   markCurrentNav();
@@ -143,4 +147,22 @@ export function wrapWords(el) {
     });
   };
   walk(el);
+}
+
+// ---------- Источник перехода ----------
+// Промоутерская ссылка может вести на главную, а бронь делается на странице
+// ночи: метку ?src= запоминаем на сессию, чтобы продажа засчиталась источнику.
+function rememberSource() {
+  try {
+    const src = new URLSearchParams(location.search).get('src');
+    if (src) sessionStorage.setItem('px_src', src.slice(0, 32));
+  } catch { /* приватный режим без sessionStorage */ }
+}
+
+export function trafficSource() {
+  try {
+    return new URLSearchParams(location.search).get('src') || sessionStorage.getItem('px_src') || 'site';
+  } catch {
+    return 'site';
+  }
 }

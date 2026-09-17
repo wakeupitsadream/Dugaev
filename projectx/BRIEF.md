@@ -1,7 +1,7 @@
 # BRIEF — PROJECT X: сайт с проходками, QR-входом и афишей из админки
 
 Рабочий документ для встречи с организатором.
-Демо: **https://projectx-party.vercel.app** — показывать с телефона.
+Демо: **https://proxject.ru** — показывать с телефона.
 Код живёт в папке `projectx/` общего репозитория (Vercel-проект с Root
 Directory = `projectx`); прод обновляется с ветки `main`. Отдельный продукт
 со своей БД и своими env — с TRAP HOUSE и ECHO ничего не пересекается.
@@ -139,6 +139,14 @@ VANULA и другие), площадки CLUB CTUDИЯ (Алтайская 5/1)
 желании добавляются в описание ночи из панели. Без базы симуляция продаж
 показывает только первую волну и не выше 40 из 50.
 
+Добавлено 18.09.2026: домен **proxject.ru** (основной без www; www —
+редирект), `SITE.siteUrl`; страница **/promo** — личная ссылка промоутера с
+меткой `?src=`, QR и тексты для сторис (метка запоминается на сессию, поэтому
+ссылка может вести и на главную; продажи видны в панели по источникам);
+**Яндекс.Метрика** по `SITE.metrikaId` с целями `booking_open`,
+`booking_done` (сумма, количество), `booking_fallback`; `robots.txt` и
+`sitemap.xml`; canonical на страницах.
+
 1. **Название ночи и афиша** — на сайте с 17.09 (сид и `poster-260926.jpg`).
    Имена диджеев — в панель («События»), как только известны.
 2. ★ **Реквизиты СБП** (номер, банк, как показывается получатель) —
@@ -193,7 +201,7 @@ Env-переменные (Vercel → projectx-party → Settings → Environment
 свой) · `ADMIN_KEY` (панель и всё) · **`DOOR_KEY`** (ключ двери: только
 сканер, чек-ин, касса на входе) · `PAYMENT_MODE` (`transfer` по умолчанию —
 бронь с переводом; `demo` — только для демо-стенда) · `SITE_ORIGIN`
-(`https://projectx-party.vercel.app` — для ссылок в сообщениях бота) ·
+(`https://proxject.ru` — для ссылок в сообщениях бота) ·
 для бота: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` (без @),
 `TELEGRAM_CHAT_ID` (chat_id владельца — туда идут брони и кнопки
 «Подтвердить / Не пришло»), `TG_WEBHOOK_SECRET` (случайная строка для
@@ -203,7 +211,7 @@ setWebhook) · опционально `POLZA_API_KEY` (спящий конвей
 **Бот (после того как токен лежит в Vercel):**
 ```
 curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook" \
-  -d "url=https://projectx-party.vercel.app/api/tg-webhook" \
+  -d "url=https://proxject.ru/api/tg-webhook" \
   -d "secret_token=<TG_WEBHOOK_SECRET>"
 ```
 Проверка: открыть `https://t.me/<имя бота>?start=<order_id>` с экрана брони —

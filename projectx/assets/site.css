@@ -744,3 +744,38 @@ a.poster:active { --s: 0.98; transform: scale(var(--s)); }
 .evp-item { padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
 .evp-item h3 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 6px; }
 .evp-item p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
+
+/* ---------- Промоутерам (/promo) ---------- */
+.promo-gen { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-2); }
+.promo-label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; }
+.promo-row { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 560px) { .promo-row { grid-template-columns: minmax(0, 1fr) auto; } }
+.promo-row input {
+  width: 100%; min-height: 48px; padding: 12px 14px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.promo-row input:focus-visible { outline: 2px solid var(--acid); outline-offset: 1px; }
+.promo-err { display: none; margin: 8px 0 0; color: var(--acid); font-size: 0.9rem; }
+.promo-err.is-on { display: block; }
+.promo-out { margin-top: 18px; display: grid; gap: 16px; }
+.promo-link { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); align-items: center; }
+@media (min-width: 560px) { .promo-link { grid-template-columns: minmax(0, 1fr) auto; } }
+.promo-link code {
+  display: block; padding: 12px 14px; border-radius: 10px; background: var(--bg);
+  border: 1px dashed var(--line); font-size: 0.95rem; word-break: break-all;
+}
+.promo-qr-row { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: center; }
+@media (min-width: 560px) { .promo-qr-row { grid-template-columns: 220px minmax(0, 1fr); } }
+.promo-qr { width: 220px; max-width: 100%; padding: 10px; background: #fff; border-radius: 12px; }
+.promo-qr svg { width: 100%; height: auto; display: block; }
+.promo-qr-note { display: grid; gap: 10px; justify-items: start; }
+.promo-qr-note p { margin: 0; color: var(--muted); }
+.promo-texts { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+.promo-text { padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); display: grid; gap: 10px; align-content: start; justify-items: start; }
+.promo-text h3 { margin: 0; font-size: 1.05rem; text-transform: uppercase; }
+.promo-text p { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.45; word-break: break-word; }
+.promo-materials { display: grid; gap: 10px; }
+.promo-file { display: block; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); text-decoration: none; }
+.promo-file:hover, .promo-file:focus-visible { border-color: var(--acid); }
+.promo-rules { margin-top: 48px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 10px; justify-items: start; }
+.promo-rules p { margin: 0; }

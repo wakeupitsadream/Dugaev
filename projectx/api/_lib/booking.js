@@ -56,7 +56,7 @@ export function ticketLinks(tickets, origin) {
 export function siteOrigin(req) {
   const env = process.env.SITE_ORIGIN;
   if (env) return env.replace(/\/+$/, '');
-  const host = String(req?.headers?.host || 'projectx-party.vercel.app');
+  const host = String(req?.headers?.host || 'proxject.ru');
   return `${/^(localhost|127\.)/.test(host) ? 'http' : 'https'}://${host}`;
 }
 

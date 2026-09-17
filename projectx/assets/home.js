@@ -8,6 +8,7 @@ import { springTo } from './spring.js';
 import { initChrome, observeReveal, wrapWords } from './chrome.js';
 import {
   reduced, finePointer, renderAfisha, renderReel, initNightScene, renderBands, initFaceControl, pointBuyLinks,
+  mountAftermovie,
 } from './blocks.js';
 import { SITE } from './data/config.js';
 
@@ -20,6 +21,7 @@ async function init() {
   initChrome();
   renderBands();
   renderReel('reel');
+  mountAftermovie('aftermovie-host');
   initManifest();
   initFaceControl();
   initHeroMotion();
@@ -87,7 +89,8 @@ function renderCta() {
   const db = dateBox(e.startsAt);
   $('cta-lead').innerHTML =
     `<b>${db.day} ${esc(db.mon)}</b> · ${esc(e.venue || 'SECRET PLACE')}${price ? ` · от <b>${price} ₽</b>` : ''}. ` +
-    'Проходка берётся за минуту, вход — по именному QR. Адрес придёт в проходку перед стартом.';
+    'Проходка берётся за минуту, вход — по именному QR. ' +
+    (e.address && !e.secret ? `Адрес — ${esc(e.address)}.` : 'Адрес придёт в проходку перед стартом.');
   $('cta-buy').textContent = price ? `Взять проходку · ${price} ₽` : 'Подробнее о ночи';
 }
 
@@ -117,16 +120,37 @@ function startCountdown() {
   cdTimer = setInterval(tick, 1000);
 }
 
+// ---------- Видео за сценой ----------
+// Немой луп с прошлых ночей (12 с, ~1 МБ) под виньеткой. При reduced-motion
+// и «экономии трафика» не грузим вовсе — остаётся кадр-постер. Появляется
+// плавно с первого сыгранного кадра, чтобы не мигать чёрным.
+function initHeroVideo() {
+  const wrap = $('hero-video');
+  const v = wrap && wrap.querySelector('video');
+  if (!v) return null;
+  const saveData = Boolean(navigator.connection && navigator.connection.saveData);
+  if (reduced.matches || saveData) { wrap.classList.add('is-static'); return null; }
+  v.addEventListener('playing', () => wrap.classList.add('is-ready'), { once: true });
+  v.addEventListener('error', () => wrap.classList.add('is-static'), { once: true });
+  v.preload = 'auto';
+  const play = () => { v.play().catch(() => {}); };
+  play();
+  return { setVisible: (on) => (on ? play() : v.pause()) };
+}
+
 // ---------- Живой знак в hero ----------
 // Курсор наклоняет знак и уводит свет — через пружину, а не напрямую:
 // прямая привязка к мыши выглядит механической, у пружины есть инерция.
 // На телефоне знак и свет отвечают на прокрутку (параллакс в три слоя).
 function initHeroMotion() {
   const hero = $('hero');
-  // Зерно мерцает только пока сцена на экране
+  const video = initHeroVideo();
+  // Зерно мерцает и видео крутится только пока сцена на экране
   if (hero && 'IntersectionObserver' in window) {
     new IntersectionObserver((entries) => {
-      hero.classList.toggle('is-off', !entries.some((en) => en.isIntersecting));
+      const on = entries.some((en) => en.isIntersecting);
+      hero.classList.toggle('is-off', !on);
+      if (video) video.setVisible(on);
     }).observe(hero);
   }
   if (reduced.matches) return;

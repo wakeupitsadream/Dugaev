@@ -2,7 +2,7 @@
 // лента афиш, сцена «три правила», ленты программы, фейсконтроль.
 // Каждая функция берёт свои элементы по id и молчит, если их нет на странице.
 import { SITE } from './data/config.js';
-import { GALLERY, SHOW_PROGRAM } from './data/events.js';
+import { GALLERY, SHOW_PROGRAM, AFTERMOVIE } from './data/events.js';
 import { esc } from './events-load.js';
 import { waveStates, fromPrice, totalSold } from './waves.js';
 import { goingCount } from './social.js';
@@ -371,7 +371,7 @@ export function initFaceControl() {
 export function pointBuyLinks(nearest) {
   const price = nearest ? fromPrice(nearest.waves) : null;
   const href = nearest ? `/e/${nearest.id}` : '/afisha';
-  for (const id of ['header-buy', 'menu-buy', 'sticky-buy', 'cta-buy']) {
+  for (const id of ['header-buy', 'menu-buy', 'sticky-buy', 'cta-buy', 'am-buy']) {
     const el = $(id);
     if (!el) continue;
     el.href = href;
@@ -379,4 +379,46 @@ export function pointBuyLinks(nearest) {
       el.textContent = price ? `Проходки от ${price} ₽` : 'Позовите меня на следующую';
     }
   }
+}
+
+// ---------- Афтемуви: видео с прошлых ночей ----------
+// Со звуком, поэтому только по клику: preload=none — 4,5 МБ никто не грузит,
+// пока не попросил. Кнопка своя (постер без браузерных контролов), после
+// старта отдаём родные контролы; по окончании — снова постер и кнопка.
+export function mountAftermovie(hostId) {
+  const host = $(hostId);
+  if (!host) return;
+  host.innerHTML = `
+    <div class="am-grid">
+      <figure class="am-phone">
+        <video class="am-video" preload="none" playsinline poster="${esc(AFTERMOVIE.poster)}" aria-label="Афтемуви PROJECT X">
+          <source src="${esc(AFTERMOVIE.src)}" type="video/mp4" />
+          ${AFTERMOVIE.srcWebm ? `<source src="${esc(AFTERMOVIE.srcWebm)}" type="video/webm" />` : ''}
+        </video>
+        <button class="am-play" type="button" aria-label="Смотреть афтемуви со звуком">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" /></svg>
+          <span>${esc(AFTERMOVIE.duration)}</span>
+        </button>
+        <figcaption class="am-cap">${esc(AFTERMOVIE.caption)}</figcaption>
+      </figure>
+      <div class="am-text">
+        <div class="kicker">Афтемуви</div>
+        <h2>Как это <span class="x">было</span></h2>
+        <p class="lead">${esc(AFTERMOVIE.text)}</p>
+        <a class="btn btn-acid" id="am-buy" href="/afisha">Взять проходку</a>
+      </div>
+    </div>`;
+  const v = host.querySelector('video');
+  const btn = host.querySelector('.am-play');
+  btn.addEventListener('click', () => {
+    host.classList.add('is-playing');
+    v.controls = true;
+    v.muted = false;
+    v.play().catch(() => { host.classList.remove('is-playing'); v.controls = false; });
+  });
+  v.addEventListener('ended', () => {
+    host.classList.remove('is-playing');
+    v.controls = false;
+    v.currentTime = 0;
+  });
 }

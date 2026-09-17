@@ -1,13 +1,14 @@
 // Страница ивента + чекаут. Состояние формы живёт в store (переживает
 // перерисовки), экран успеха держится флагом showingDone.
 import { SITE } from './data/config.js';
+import { SHOW_PROGRAM } from './data/events.js';
 import { makeSheetDraggable } from './sheet-drag.js';
 import { initChrome, closeMenu } from './chrome.js';
 import { springTo } from './spring.js';
 import { loadEvents, esc } from './events-load.js';
 import { waveStates, activeWave, totalSold } from './waves.js';
 import { goingCount } from './social.js';
-import { plural, dateBox, fmtWhen, ageLabel, normalizePhone, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
+import { plural, dateBox, fmtWhen, fmtTime, ageLabel, normalizePhone, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
 import { handlePayment } from './payment.js';
 import { addressIsPublic } from './secret-place.js';
 import { payBlockHtml, bindPayBlock } from './booking-ui.js';
@@ -93,11 +94,27 @@ function renderEvent() {
       : `в проходке сразу после покупки${addressIsPublic(e) ? '' : ' · всем остальным за сутки до ночи'}`],
     ['Возраст', `${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`],
   ];
-  rows.push(['Регламент', `двери ${SITE.doorsOpen} · старт ${SITE.showStart} · до утра`]);
+  // Финиш — из endsAt ночи (26.09 — до 04:00); без него — «до утра»
+  const finish = e.endsAt ? `до ${fmtTime(e.endsAt)}` : 'до утра';
+  rows.push(['Регламент', `двери ${SITE.doorsOpen} · старт ${SITE.showStart} · ${finish}`]);
   $('eh-meta').innerHTML = rows
     .map(([k, v]) => `<div class="eh-meta-item"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`)
     .join('');
   $('event-root').hidden = false;
+  renderProgram(e);
+}
+
+// ---------- Что внутри ----------
+// Программа ночи из сида (SHOW_PROGRAM): комнаты, игровая, диджеи. Только
+// для ночи в продаже — у архива свой текст в descr.
+function renderProgram(e) {
+  const box = $('ev-program');
+  if (!box) return;
+  if (e.status === 'past' || !SHOW_PROGRAM.length) { box.hidden = true; return; }
+  $('ev-program-grid').innerHTML = SHOW_PROGRAM
+    .map((p) => `<article class="evp-item"><h3>${esc(p.title)}</h3><p>${esc(p.text)}</p></article>`)
+    .join('');
+  box.hidden = false;
 }
 
 function renderWaves() {

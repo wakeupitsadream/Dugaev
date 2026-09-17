@@ -2,7 +2,7 @@
 // (таймлайн, который заполняется по мере прокрутки), резиденты.
 import { loadEvents, upcoming } from './events-load.js';
 import { initChrome, observeReveal } from './chrome.js';
-import { initNightScene, renderBands, pointBuyLinks, reduced } from './blocks.js';
+import { initNightScene, renderBands, pointBuyLinks, reduced, mountAftermovie } from './blocks.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -13,6 +13,7 @@ async function init() {
   initNightScene('night');
   renderBands();
   initTimeline();
+  mountAftermovie('aftermovie-host');
   observeReveal();
   const { events } = await loadEvents();
   pointBuyLinks(upcoming(events)[0] || null);

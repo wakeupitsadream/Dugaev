@@ -79,13 +79,19 @@ test('hash стабилен и различает строки', () => {
   assert.notEqual(hash('abc'), hash('abd'));
 });
 
-test('demoWaves: последняя волна ночи в симуляции никогда не распродана', () => {
-  const single = { id: 'px-260926', startsAt: '2026-09-26T22:00:00+05:00', waves: [W(1, 1000, 200)] };
-  const ws = demoWaves(single, Date.parse('2026-09-25T12:00:00+05:00')); // за сутки до старта
-  assert.ok(ws[0].sold < ws[0].quota, `sold=${ws[0].sold}`);
-  assert.ok(ws[0].sold <= Math.round(200 * 0.35) + 2);
+test('demoWaves: симуляция продаёт только первую публичную волну и не доводит её до конца', () => {
+  const night = {
+    id: 'px-260926', startsAt: '2026-09-26T22:00:00+05:00',
+    waves: [W(1, 1000, 50), W(2, 1500, 150), { ...W(9, 0, 10), public: false }],
+  };
+  for (const at of ['2026-09-10T12:00:00+05:00', '2026-09-25T12:00:00+05:00', '2026-09-26T21:00:00+05:00']) {
+    const ws = demoWaves(night, Date.parse(at));
+    assert.ok(ws[0].sold > 0 && ws[0].sold <= 40, `${at}: sold=${ws[0].sold}`); // потолок 80 % от 50, джиттер внутри
+    assert.equal(ws[1].sold, 0); // вторая волна ждёт настоящих продаж
+    assert.equal(ws[2].sold, 0); // гостевой список не симулируем
+  }
   const ladder = { id: 'x', startsAt: '2026-09-26T22:00:00+05:00', waves: [W(1, 500, 60), W(2, 700, 80), W(3, 900, 60)] };
   const ls = demoWaves(ladder, Date.parse('2026-09-26T12:00:00+05:00'));
-  assert.equal(ls[0].sold, 60); // ранняя волна честно распродана
-  assert.ok(ls[2].sold < 60); // последняя — нет
+  assert.ok(ls[0].sold > 0 && ls[0].sold <= 48, `sold=${ls[0].sold}`); // первая — живая, но не распродана
+  assert.deepEqual([ls[1].sold, ls[2].sold], [0, 0]);
 });

@@ -679,3 +679,68 @@ a.poster:active { --s: 0.98; transform: scale(var(--s)); }
   .next-night, .night-card, .rule-card, .program-notes div { border-color: var(--muted); }
   .hero-tags span { border-color: var(--muted); }
 }
+
+/* ---------- v7: видео ----------
+   Hero: немой луп за сценой, слой 0 (под большим X и светом). Приглушён
+   и накрыт градиентом, чтобы знак и текст остались главными. Появляется
+   только с первого сыгранного кадра (is-ready); при reduced-motion и
+   save-data — статичный кадр-постер (is-static). */
+.hero-video { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.hero-video video {
+  width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block;
+  opacity: 0; transition: opacity 900ms ease; filter: saturate(1.15) contrast(1.05);
+}
+.hero-video.is-ready video { opacity: 0.42; }
+/* На широком экране портретный кадр растянут в ~2,7 раза — держим его тише */
+@media (min-width: 900px) { .hero-video.is-ready video { opacity: 0.34; } }
+.hero-video.is-static video { opacity: 0.3; transition: none; }
+.hero-video::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(7, 7, 7, 0.6), rgba(7, 7, 7, 0.15) 40%, rgba(7, 7, 7, 0.78) 100%);
+}
+
+/* Афтемуви: «телефон» 9:16 и текст рядом; на узком экране — столбиком */
+.am-section { padding-top: 0; }
+.am-grid { display: grid; gap: clamp(22px, 5vw, 48px); align-items: center; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 820px) { .am-grid { grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); } }
+.am-phone {
+  position: relative; margin: 0; width: min(100%, 360px); aspect-ratio: 9 / 16; justify-self: center;
+  border-radius: 22px; overflow: hidden; background: var(--bg-3);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--line);
+}
+.am-video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+.am-play {
+  position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; cursor: pointer;
+  display: grid; place-content: center; justify-items: center; gap: 12px; color: #fff;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.55));
+}
+.am-play svg {
+  width: 84px; height: 84px; padding: 20px; box-sizing: border-box; border-radius: 50%;
+  background: var(--acid); color: var(--ink); box-shadow: 0 0 40px var(--acid-glow);
+  transition: transform 160ms var(--ease-out);
+}
+.am-play:hover svg, .am-play:focus-visible svg { transform: scale(1.06); }
+.am-play:active svg { transform: scale(0.96); transition-duration: 80ms; }
+.am-play span { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.08em; font-size: 0.9rem; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8); }
+.am-cap {
+  position: absolute; left: 14px; right: 14px; top: 14px; font-size: 0.7rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+.is-playing .am-play, .is-playing .am-cap { display: none; }
+.am-text h2 { font-size: clamp(2.2rem, 7vw, 4.4rem); }
+.am-text .lead { margin: 0 0 22px; }
+@media (prefers-reduced-motion: reduce) {
+  .hero-video video { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .hero-video { display: none; }
+}
+
+/* Что внутри (страница ночи): программа из сида карточками */
+.ev-program { margin-top: clamp(40px, 8vw, 72px); }
+.ev-program .section-head { margin-bottom: 18px; }
+.ev-program h2 { font-size: clamp(1.8rem, 6vw, 3rem); margin: 0; }
+.ev-program-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+.evp-item { padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+.evp-item h3 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 6px; }
+.evp-item p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }

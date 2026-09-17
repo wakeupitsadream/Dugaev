@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>PROJECT X Оренбург — студенческие вечеринки 18+, проходки онлайн</title>
   <meta name="description" content="PROJECT X — ну очень стильные ночные вечеринки 18+ в Оренбурге: FC/DC на дверях, двери 22:00, старт 23:00. Площадка SECRET PLACE — адрес приходит в проходке. Проходка онлайн, вход по именному QR." />
-  <meta property="og:title" content="PROJECT X · Оренбург — вечеринка, о которой даже не мечтали" />
-  <meta property="og:description" content="18+, FC/DC, двери 22:00 / старт 23:00. Место — SECRET PLACE, адрес приходит в проходке. Проходки онлайн, вход по именному QR." />
+  <meta property="og:title" content="PROJECT X · 26.09 · арт-локация «Режиссёр» · Оренбург" />
+  <meta property="og:description" content="18+, FC/DC. Двери 22:00, старт 23:00, до 04:00. Первые 50 проходок — 1000 ₽, дальше 1500 ₽. Бронь на сайте, вход по именному QR." />
   <meta property="og:site_name" content="PROJECT X Оренбург" />
   <meta property="og:locale" content="ru_RU" />
   <meta property="og:type" content="website" />
-  <meta property="og:image" content="/assets/photos/poster-night-student.jpg" />
+  <meta property="og:image" content="/assets/photos/og-260926.jpg" />
   <meta name="theme-color" content="#070707" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="preload" href="/assets/fonts/oswald-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin />
@@ -62,6 +62,12 @@
   <main>
     <!-- HERO: чёрная сцена, живой знак -->
     <section class="hero-v3" id="hero">
+      <div class="hero-video" id="hero-video" aria-hidden="true">
+        <video muted loop playsinline disablepictureinpicture disableremoteplayback preload="none" poster="/assets/video/party-loop.jpg" tabindex="-1">
+          <source src="/assets/video/party-loop.mp4" type="video/mp4" />
+          <source src="/assets/video/party-loop.webm" type="video/webm" />
+        </video>
+      </div>
       <div class="hero-bgx" id="hero-bgx" aria-hidden="true"><svg><use href="#x-mark" /></svg></div>
       <div class="hero-light" id="hero-light" aria-hidden="true"></div>
       <div class="hero-vignette" aria-hidden="true"></div>
@@ -82,7 +88,7 @@
         <div class="hero-tags hi hi-3" id="hero-facts" aria-label="Формат">
           <span class="is-acid">18+ по паспорту</span>
           <span>FC/DC</span>
-          <span>проходка 1000 ₽</span>
+          <span>первые 50 — 1000 ₽</span>
           <span>двери 22:00</span>
         </div>
       </div>
@@ -140,13 +146,18 @@
 
         <div class="reel-wrap reveal">
           <div class="reel-head">
-            <h3>Как это было</h3>
+            <h3>Прошлые ночи</h3>
             <span id="reel-hint">тяни вбок</span>
           </div>
           <div class="reel" id="reel" aria-label="Афиши прошедших ночей"></div>
           <a class="more-link" href="/afisha">Вся афиша и стена постеров <span class="x">→</span></a>
         </div>
       </div>
+    </section>
+
+    <!-- АФТЕМУВИ: видео с прошлых ночей, со звуком по клику -->
+    <section class="section am-section" id="aftermovie">
+      <div class="container reveal" id="aftermovie-host"></div>
     </section>
 
     <!-- МАНИФЕСТ -->
@@ -215,7 +226,7 @@
       <div class="container reveal">
         <div class="kicker">Ближайшая ночь</div>
         <h2>Взять <span class="x">проходку</span></h2>
-        <p class="lead" id="cta-lead">Проходка берётся за минуту: бронь на сайте, перевод по СБП, именной QR на входе. Проходка — 1000 ₽.</p>
+        <p class="lead" id="cta-lead">Проходка берётся за минуту: бронь на сайте, перевод по СБП, именной QR на входе. Первые 50 проходок — по 1000 ₽, дальше 1500 ₽.</p>
         <a class="btn btn-acid" id="cta-buy" href="#afisha">Смотреть афишу</a>
       </div>
     </section>

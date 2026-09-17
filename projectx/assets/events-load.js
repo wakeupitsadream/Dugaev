@@ -19,7 +19,8 @@ export async function loadEvents(nowMs = Date.now()) {
     /* деградация без ошибок */
   }
   return {
-    events: EVENTS.map((e) => ({ ...e, waves: demoWaves(e, nowMs) })),
+    // Скрытые волны (гостевой список) публике не показываем — как в /api/events
+    events: EVENTS.map((e) => ({ ...e, waves: demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, nowMs) })),
     live: false,
   };
 }

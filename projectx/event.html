@@ -8,8 +8,8 @@
   <meta name="theme-color" content="#070707" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
   <meta property="og:title" content="Проходки — PROJECT X · Оренбург" />
-  <meta property="og:description" content="Ночная вечеринка 18+. Проходка за минуту, вход по именному QR, адрес SECRET PLACE приходит в проходку перед стартом." />
-  <meta property="og:image" content="/assets/photos/poster-night-student.jpg" />
+  <meta property="og:description" content="Ночная вечеринка 18+. Первые 50 проходок — 1000 ₽, дальше 1500 ₽. Бронь за минуту, вход по именному QR." />
+  <meta property="og:image" content="/assets/photos/og-260926.jpg" />
   <link rel="stylesheet" href="/assets/styles.css" />
   <link rel="stylesheet" href="/assets/site.css" />
 </head>
@@ -87,6 +87,15 @@
           </div>
         </div>
       </div>
+
+      <!-- Что внутри: программа ночи (SHOW_PROGRAM), только для ночи в продаже -->
+      <section class="ev-program" id="ev-program" hidden aria-label="Что внутри">
+        <div class="section-head">
+          <div class="kicker">Что внутри</div>
+          <h2>Ночь <span class="x">по частям</span></h2>
+        </div>
+        <div class="ev-program-grid" id="ev-program-grid"></div>
+      </section>
 
       <div id="event-missing" hidden>
         <h1 class="eh-title">Вечеринка не найдена</h1>

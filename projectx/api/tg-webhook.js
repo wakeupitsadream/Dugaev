@@ -728,7 +728,7 @@ async function sendSummary(chatId, deps, d, repricedFrom = null) {
       `${d.qty} × ${fmtRub(d.priceRub)} ₽ = <b>${fmtRub(amount)} ₽</b>\n` +
       `${d.qty === 1 ? 'Гость' : 'Гости'}: ${d.names.map(escHtml).join(', ')}\nТелефон: ${escHtml(d.phone)}\n\n` +
       `Нажимая «Забронировать», подтверждаешь: всем гостям есть 18 (на входе — паспорт), ` +
-      `<a href="${origin}/rules">правила ночи</a> прочитаны, на <a href="${origin}/privacy">обработку данных</a> согласен.`,
+      `<a href="${origin}/rules">правила ночи</a> прочитаны, на <a href="${origin}/privacy#consent">обработку данных</a> согласен.`,
     {
       inline_keyboard: [
         [{ text: `✅ Забронировать за ${fmtRub(amount)} ₽`, callback_data: 'book:go' }],

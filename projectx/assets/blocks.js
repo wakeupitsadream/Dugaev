@@ -97,7 +97,7 @@ export function renderNextTeaser(host) {
         </div>
         <label class="check">
           <input type="checkbox" id="nf-consent" />
-          <span>Согласен на обработку данных — <a href="/privacy.html" target="_blank" rel="noopener">политика</a></span>
+          <span>Согласен на обработку данных — <a href="/privacy#consent" target="_blank" rel="noopener">политика</a></span>
         </label>
         <div class="err" role="alert" id="err-nf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
         <button class="btn btn-acid btn-block" id="nf-send" type="submit">Позовите меня</button>

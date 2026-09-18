@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PAGES = ['index.html', 'afisha.html', 'night.html', 'fc.html', 'rules.html', 'faq.html', 'contacts.html', 'event.html'];
+const PAGES = ['index.html', 'afisha.html', 'night.html', 'fc.html', 'rules.html', 'faq.html', 'contacts.html', 'event.html', 'privacy.html'];
 
 const NAV = [
   ['/afisha', 'Афиша', 'ближайшие ночи и проходки'],
@@ -53,11 +53,11 @@ const FOOTER = `<!-- chrome:footer -->
           Мероприятия 18+. Вход строго по документу, на дверях FC/DC — фейсконтроль и дресс-код.
           Двери 22:00, старт 23:00, расходимся под утро.
         </p>
-        <p class="f-note"><!-- ЗАГЛУШКА: реквизиты организатора -->ИП (реквизиты уточняются) · © 2026 PROJECT X · Оренбург</p>
+        <p class="f-note"><span data-legal-line>Организатор</span> · © 2026 PROJECT X · Оренбург</p>
       </div>
       <nav class="f-links" aria-label="Разделы">
 ${NAV.map(([href, label]) => `        <a href="${href}">${label}</a>`).join('\n')}
-        <a href="/privacy.html">Политика</a>
+        <a href="/privacy">Политика</a>
         <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">Instagram*</a>
       </nav>
       <div class="dev-sign">Дизайн и разработка — <a href="https://maxim-batutin.ru" target="_blank" rel="noopener">maxim-batutin.ru</a></div>

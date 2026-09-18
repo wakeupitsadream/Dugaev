@@ -1,6 +1,7 @@
 // Общая обвязка витрины: шапка, меню на телефоне, появление блоков по скроллу.
 // Одна и та же для главной и страниц второго уровня.
 import { initMetrika } from './metrika.js';
+import { SITE } from './data/config.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,6 +16,17 @@ export function initChrome() {
   markCurrentNav();
   initStickyCta();
   addMyTickets();
+  fillLegalLine();
+}
+
+// Реквизиты организатора в футере — из SITE.legal, чтобы менять в одном месте
+function fillLegalLine() {
+  const L = SITE.legal || {};
+  const short = L.operatorShort || L.operator;
+  if (!short) return;
+  document.querySelectorAll('[data-legal-line]').forEach((el) => {
+    el.textContent = `${short}${L.inn ? ` · ИНН ${L.inn}` : ''}`;
+  });
 }
 
 // Липкая кнопка появляется снизу, когда карточка ближайшей ночи ушла с экрана

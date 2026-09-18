@@ -6,6 +6,7 @@ import { initChrome, observeReveal } from './chrome.js';
 import { loadEvents, upcoming, esc } from './events-load.js';
 import { qrSvg } from './qr.js';
 import { promoSlug, promoLink } from './promo-link.js';
+import { ladderText, fmtRub, waveStates } from './waves.js';
 import { dateBox } from './ticket-format.js';
 
 const $ = (id) => document.getElementById(id);
@@ -56,9 +57,12 @@ function renderTexts(link) {
   const db = e ? dateBox(e.startsAt) : null;
   const when = db ? `${db.day} ${db.mon}` : '26 сен';
   const venue = e && e.venue ? e.venue : 'арт-локация «Режиссёр»';
+  const ladder = (e && ladderText(e.waves)) || 'Первые 50 проходок — по 1 000 ₽, дальше дороже';
+  const active = e ? waveStates((e.waves || []).filter((w) => w.public !== false)).find((w) => w.state === 'active') : null;
+  const now = active ? `по ${fmtRub(active.priceRub)}` : 'по стартовой цене';
   state.texts = [
-    { t: 'Сторис', s: `${when} — PROJECT X, ${venue}. Двери 22:00, до 04:00, 18+. Первые 50 проходок по 1000 ₽, дальше 1500. Беру себе и тебе: ${link}` },
-    { t: 'В личку другу', s: `Го ${when} на PROJECT X? Четыре комнаты, танцпол, диджеи, всё до 04:00. Проходку бери тут, пока есть по 1000: ${link}` },
+    { t: 'Сторис', s: `${when} — PROJECT X, ${venue}. Двери 22:00, до 04:00, 18+. ${ladder}. Беру себе и тебе: ${link}` },
+    { t: 'В личку другу', s: `Го ${when} на PROJECT X? Четыре комнаты, танцпол, диджеи, всё до 04:00. Проходку бери тут, пока есть ${now}: ${link}` },
     { t: 'В чат группы или общаги', s: `Собираем компанию на PROJECT X ${when}, «Режиссёр», двери 22:00. Проходки именные, на сайте; на входе продают только если останутся места. Ссылка: ${link}` },
   ];
   $('pr-texts').innerHTML = state.texts.map((x, i) => `

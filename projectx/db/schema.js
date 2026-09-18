@@ -107,4 +107,13 @@ export const SCHEMA = [
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (chat_id, order_id)
   )`,
+
+  // v7: покупка прямо в боте — шаги мастера (количество → имена → телефон →
+  // подтверждение) живут между сообщениями здесь, по одной строке на чат.
+  `CREATE TABLE IF NOT EXISTS tg_sessions (
+    chat_id    bigint PRIMARY KEY,
+    state      text NOT NULL,
+    data       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ];

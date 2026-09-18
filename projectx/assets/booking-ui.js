@@ -28,7 +28,7 @@ export function payBlockHtml(order, bot, opts = {}) {
     <div class="pay-sum">${esc(String(order.amountRub))} ₽</div>
     <div class="pay-rows">
       <div class="pay-row"><span>СБП по номеру</span><b>${esc(t.phone || '—')}</b></div>
-      ${t.bank ? `<div class="pay-row"><span>Банк получателя</span><b>${esc(t.bank)}</b></div>` : ''}
+      ${t.bank ? `<div class="pay-row"><span>Банк получателя</span><b>${t.bankKey ? `<i class="bank-badge bank-${esc(t.bankKey)}" aria-hidden="true"></i>` : ''}${esc(t.bank)}</b></div>` : ''}
       ${t.recipient ? `<div class="pay-row"><span>Получатель</span><b>${esc(t.recipient)}</b></div>` : ''}
       <div class="pay-row"><span>Код в комментарии</span><b class="pay-code" id="pay-code">${esc(order.payCode || '')}</b></div>
     </div>

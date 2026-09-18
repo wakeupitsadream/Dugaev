@@ -39,6 +39,30 @@ export function totalQuota(waves) {
   return waves.reduce((s, w) => s + w.quota, 0);
 }
 
+// Сумма с неразрывным пробелом между разрядами: «1 200»
+export function fmtRub(n) {
+  return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+}
+
+// Лесенка цен одной фразой для витрины — берётся из волн события, а не из
+// статичного текста, поэтому цена в панели меняет все страницы сразу.
+//   «Первые 50 проходок — по 1 000 ₽, дальше 1 200 ₽»
+//   short: «первые 50 — 1 000 ₽» (тег в hero)
+export function ladderText(waves, { short = false } = {}) {
+  const pub = waveStates((waves || []).filter((w) => w.public !== false));
+  if (!pub.length) return null;
+  const active = pub.find((w) => w.state === 'active');
+  if (!active) return short ? 'всё продано' : 'Все проходки проданы';
+  const first = pub[0];
+  const next = pub.find((w) => w.waveNo > active.waveNo && w.state === 'next') || null;
+  if (short) {
+    return active === first && next ? `первые ${first.quota} — ${fmtRub(first.priceRub)} ₽` : `проходка ${fmtRub(active.priceRub)} ₽`;
+  }
+  if (active === first && next) return `Первые ${first.quota} проходок — по ${fmtRub(first.priceRub)} ₽, дальше ${fmtRub(next.priceRub)} ₽`;
+  if (active !== first) return `Сейчас ${fmtRub(active.priceRub)} ₽ за проходку — первые ${first.quota} по ${fmtRub(first.priceRub)} ₽ уже разобрали`;
+  return `Проходка — ${fmtRub(active.priceRub)} ₽`;
+}
+
 function clampInt(v, lo, hi) {
   const n = Math.floor(Number(v) || 0);
   return Math.min(hi, Math.max(lo, n));

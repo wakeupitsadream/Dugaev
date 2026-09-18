@@ -2,7 +2,7 @@
 // лента афиш, манифест, программа, фейсконтроль. Блоки — в blocks.js,
 // здесь только порядок сборки, живой знак и то, что есть лишь на главной.
 import { loadEvents, upcoming, esc } from './events-load.js';
-import { fromPrice } from './waves.js';
+import { fromPrice, ladderText } from './waves.js';
 import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
 import { springTo } from './spring.js';
 import { initChrome, observeReveal, wrapWords } from './chrome.js';
@@ -87,8 +87,11 @@ function renderCta() {
   }
   const price = fromPrice(e.waves);
   const db = dateBox(e.startsAt);
+  // Лесенка цен — из волн (панель), а не из HTML: «Первые 50 — по 1 000 ₽, дальше 1 200 ₽»
+  const ladder = ladderText(e.waves);
   $('cta-lead').innerHTML =
-    `<b>${db.day} ${esc(db.mon)}</b> · ${esc(e.venue || 'SECRET PLACE')}${price ? ` · от <b>${price} ₽</b>` : ''}. ` +
+    `<b>${db.day} ${esc(db.mon)}</b> · ${esc(e.venue || 'SECRET PLACE')}. ` +
+    (ladder ? `<span data-ladder>${esc(ladder)}</span>. ` : '') +
     'Проходка берётся за минуту, вход — по именному QR. ' +
     (e.address && !e.secret ? `Адрес — ${esc(e.address)}.` : 'Адрес придёт в проходку перед стартом.');
   $('cta-buy').textContent = price ? `Взять проходку · ${price} ₽` : 'Подробнее о ночи';

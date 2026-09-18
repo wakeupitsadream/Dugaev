@@ -573,6 +573,42 @@ function bindService() {
   };
 
   $('svc-selftest').onclick = runSelfTest;
+  $('svc-bot').onclick = setupBot;
+}
+
+// «Настроить бота»: сервер регистрирует вебхук, команды и описание в
+// Telegram (api/tg-webhook.js, action=setup). Токен остаётся на сервере.
+async function setupBot() {
+  const btn = $('svc-bot');
+  const note = $('bot-note');
+  btn.disabled = true;
+  note.textContent = 'Настраиваю…';
+  let j = null;
+  try {
+    const r = await fetch('/api/tg-webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers() },
+      body: JSON.stringify({ action: 'setup' }),
+    });
+    j = await r.json().catch(() => null);
+  } catch { /* ниже */ }
+  btn.disabled = false;
+  if (!j?.ok) {
+    note.textContent = `Не получилось: ${j?.message || 'сервер не ответил'}`;
+    return;
+  }
+  const wh = j.webhook || {};
+  const parts = [`Готово: @${j.bot.username} принимает брони.`];
+  if (wh.url) parts.push(`Вебхук: ${wh.url}.`);
+  if (wh.pending) parts.push(`В очереди Telegram: ${wh.pending}.`);
+  if (wh.last_error) parts.push(`Последняя ошибка Telegram: ${wh.last_error}.`);
+  if (j.username_mismatch) {
+    parts.push(
+      `Внимание: в Vercel TELEGRAM_BOT_USERNAME=${j.username_mismatch.env}, а бот на самом деле @${j.username_mismatch.actual} — ` +
+        'исправь переменную, иначе кнопка «Получить в Telegram» на сайте ведёт не туда.'
+    );
+  }
+  note.textContent = parts.join(' ');
 }
 
 // Боевой самотест: полный цикл покупка → билет → скан → чек-ин → повтор →

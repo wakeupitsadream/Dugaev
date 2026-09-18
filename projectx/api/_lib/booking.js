@@ -9,6 +9,7 @@
 import { SITE } from '../../assets/data/config.js';
 import { makeToken, primarySecret } from './sign.js';
 import { tgApi } from './tg.js';
+import { fmtRub } from '../../assets/waves.js';
 
 export function paymentMode() {
   return process.env.PAYMENT_MODE === 'demo' ? 'demo' : 'transfer';
@@ -30,16 +31,21 @@ export function normalizePayCode(raw) {
 
 export const isOrderId = (s) => /^ord_[0-9a-z]{10}$/.test(String(s || ''));
 
+// Реквизиты перевода парами «что — значение»: бот собирает из них и
+// простой текст, и HTML с выделением
+export function transferLines(amountRub, payCode) {
+  const t = SITE.transfer || {};
+  return [
+    ['Сумма', `${fmtRub(amountRub)} ₽`],
+    t.phone ? ['СБП по номеру', `${t.phone}${t.bank ? ` (${t.bank})` : ''}`] : null,
+    t.recipient ? ['Получатель', t.recipient] : null,
+    payCode ? ['Код брони в комментарии к переводу', payCode] : null,
+  ].filter(Boolean);
+}
+
 // Реквизиты перевода одной строкой — для бота и уведомлений
 export function transferText(amountRub, payCode) {
-  const t = SITE.transfer || {};
-  const lines = [
-    `Сумма: ${amountRub} ₽`,
-    t.phone ? `СБП по номеру: ${t.phone}${t.bank ? ` (${t.bank})` : ''}` : null,
-    t.recipient ? `Получатель: ${t.recipient}` : null,
-    payCode ? `В комментарии к переводу укажи код брони: ${payCode}` : null,
-  ];
-  return lines.filter(Boolean).join('\n');
+  return transferLines(amountRub, payCode).map(([k, v]) => `${k}: ${v}`).join('\n');
 }
 
 export function ticketLinks(tickets, origin) {

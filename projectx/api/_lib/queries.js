@@ -163,10 +163,24 @@ WHERE id = $1 AND status = 'active' AND checked_in_at IS NULL
 RETURNING holder_name, age_cat, checked_in_at`;
 
 // Следующая доступная волна (после 409 wave_sold_out)
+// Только публичные волны: скрытую (гостевой список, касса) гостю не предлагаем.
 export const NEXT_WAVE_SQL = `
 SELECT wave_no, name, price_rub, quota - sold AS left
-FROM price_waves WHERE event_id = $1 AND sold < quota
+FROM price_waves WHERE event_id = $1 AND sold < quota AND public
 ORDER BY wave_no LIMIT 1`;
+
+// Первая публичная волна, где хватит мест на всю компанию ($2 = qty), —
+// для бота: цена меняется один раз, а не «по одной проходке по разным ценам».
+export const NEXT_WAVE_FOR_SQL = `
+SELECT wave_no, name, price_rub, quota - sold AS left
+FROM price_waves WHERE event_id = $1 AND quota - sold >= $2 AND public
+ORDER BY wave_no LIMIT 1`;
+
+// Сколько мест осталось в публичных волнах: всего и максимум в одной волне
+// (одна бронь = одна волна, поэтому «до max_one за раз»)
+export const SEATS_LEFT_SQL = `
+SELECT COALESCE(SUM(quota - sold), 0)::int AS total, COALESCE(MAX(quota - sold), 0)::int AS max_one
+FROM price_waves WHERE event_id = $1 AND public`;
 
 // Событие: создать или обновить. Один стейтмент на два сценария — сид афиши
 // (/api/seed) и правка из админки (/api/event-upsert).

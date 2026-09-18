@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { waveStates, activeWave, fromPrice, totalSold, demoSold, demoWaves, hash } from '../assets/waves.js';
+import { waveStates, activeWave, fromPrice, totalSold, demoSold, demoWaves, hash, ladderText, fmtRub } from '../assets/waves.js';
 
 const W = (waveNo, priceRub, quota, sold) => ({ waveNo, name: `Волна ${waveNo}`, priceRub, quota, sold });
 
@@ -94,4 +94,31 @@ test('demoWaves: симуляция продаёт только первую п�
   const ls = demoWaves(ladder, Date.parse('2026-09-26T12:00:00+05:00'));
   assert.ok(ls[0].sold > 0 && ls[0].sold <= 48, `sold=${ls[0].sold}`); // первая — живая, но не распродана
   assert.deepEqual([ls[1].sold, ls[2].sold], [0, 0]);
+});
+
+// ---------- v10: лесенка цен из данных волн ----------
+test('fmtRub: неразрывный пробел между разрядами', () => {
+  assert.equal(fmtRub(1000), '1\u00A0000');
+  assert.equal(fmtRub(950), '950');
+  assert.equal(fmtRub(1234567), '1\u00A0234\u00A0567');
+  assert.equal(fmtRub(null), '0');
+});
+
+test('ladderText: первая волна активна → «первые N по X, дальше Y»; вторая → «уже разобрали»; всё продано; скрытые волны не участвуют', () => {
+  const waves = [
+    { waveNo: 1, name: 'Первая', priceRub: 1000, quota: 50, sold: 10 },
+    { waveNo: 2, name: 'Вторая', priceRub: 1200, quota: 100, sold: 0 },
+    { waveNo: 3, name: 'Скрытая', priceRub: 1, quota: 50, sold: 0, public: false },
+  ];
+  assert.equal(ladderText(waves), 'Первые 50 проходок — по 1\u00A0000 ₽, дальше 1\u00A0200 ₽');
+  assert.equal(ladderText(waves, { short: true }), 'первые 50 — 1\u00A0000 ₽');
+  const second = [{ ...waves[0], sold: 50 }, waves[1], waves[2]];
+  assert.equal(ladderText(second), 'Сейчас 1\u00A0200 ₽ за проходку — первые 50 по 1\u00A0000 ₽ уже разобрали');
+  assert.equal(ladderText(second, { short: true }), 'проходка 1\u00A0200 ₽');
+  const gone = [{ ...waves[0], sold: 50 }, { ...waves[1], sold: 100 }, waves[2]];
+  assert.equal(ladderText(gone), 'Все проходки проданы');
+  assert.equal(ladderText(gone, { short: true }), 'всё продано');
+  assert.equal(ladderText([{ waveNo: 1, name: 'Одна', priceRub: 800, quota: 10, sold: 0 }]), 'Проходка — 800 ₽');
+  assert.equal(ladderText([]), null);
+  assert.equal(ladderText([waves[2]]), null);
 });

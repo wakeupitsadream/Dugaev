@@ -4,7 +4,7 @@
 import { SITE } from './data/config.js';
 import { GALLERY, SHOW_PROGRAM, AFTERMOVIE } from './data/events.js';
 import { esc } from './events-load.js';
-import { waveStates, fromPrice, totalSold } from './waves.js';
+import { waveStates, fromPrice, totalSold, ladderText } from './waves.js';
 import { goingCount } from './social.js';
 import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
 import { faceControl, shareText } from './facecontrol.js';
@@ -371,6 +371,11 @@ export function initFaceControl() {
 export function pointBuyLinks(nearest) {
   const price = nearest ? fromPrice(nearest.waves) : null;
   const href = nearest ? `/e/${nearest.id}` : '/afisha';
+  // Цены в текстах страниц — из волн ближайшей ночи, а не из вёрстки
+  const full = nearest ? ladderText(nearest.waves) : null;
+  const short = nearest ? ladderText(nearest.waves, { short: true }) : null;
+  if (full) document.querySelectorAll('[data-ladder]').forEach((el) => { el.textContent = full; });
+  if (short) document.querySelectorAll('[data-ladder-short]').forEach((el) => { el.textContent = short; });
   for (const id of ['header-buy', 'menu-buy', 'sticky-buy', 'cta-buy', 'am-buy']) {
     const el = $(id);
     if (!el) continue;

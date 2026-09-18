@@ -69,7 +69,7 @@ export function parseEventForm(body, ctx = {}) {
   if (!ageRating) errors.push({ field: 'ageRating', message: 'Возраст: 16+ или 18+' });
 
   const venue = String(b.venue || '').trim().slice(0, 80) || 'площадка придёт в билете';
-  const descr = String(b.descr || '').trim().slice(0, 400) || null;
+  const descr = String(b.descr || '').trim().slice(0, 1500) || null; // абзац с программой ночи не влезал в 400
 
   // ---- волны ----
   const rawWaves = Array.isArray(b.waves) ? b.waves.slice(0, 6) : [];

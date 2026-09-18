@@ -598,10 +598,11 @@ async function setupBot() {
     return;
   }
   const wh = j.webhook || {};
-  const parts = [`Готово: @${j.bot.username} принимает брони.`];
-  if (wh.url) parts.push(`Вебхук: ${wh.url}.`);
+  const parts = [`${j.message || `Готово: @${j.bot.username}`}.`];
+  if (wh.url) parts.push(`Вебхук: ${wh.url}${wh.redirected_from ? ` (взят после редиректа с ${wh.redirected_from})` : ''}.`);
   if (wh.pending) parts.push(`В очереди Telegram: ${wh.pending}.`);
   if (wh.last_error) parts.push(`Последняя ошибка Telegram: ${wh.last_error}.`);
+  else parts.push('Ошибок доставки Telegram не видит.');
   if (j.username_mismatch) {
     parts.push(
       `Внимание: в Vercel TELEGRAM_BOT_USERNAME=${j.username_mismatch.env}, а бот на самом деле @${j.username_mismatch.actual} — ` +

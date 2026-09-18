@@ -15,7 +15,7 @@
 // handleUpdate экспортирован отдельно и принимает зависимости —
 // тесты гоняют его на PGlite с фейковым Telegram и без сети.
 import { timingSafeEqual } from 'node:crypto';
-import { db, hasDb } from './_lib/db.js';
+import { db, hasDb, ensureSchema } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { isAdmin } from './_lib/auth.js';
 import { notifyOwner, tgApi, tgBotUsername } from './_lib/tg.js';
@@ -57,8 +57,10 @@ export default async function handler(req, res) {
 
   // Telegram ретраит не-200: отвечаем 200 всегда, кроме ошибок конфигурации
   try {
+    const sql = hasDb() ? db() : null;
+    if (sql) await ensureSchema(sql); // таблицы бота могли появиться после «Инициализировать БД»
     await handleUpdate(req.body || {}, {
-      sql: hasDb() ? db() : null,
+      sql,
       extract: extractPost,
       extractAvailable: extractorAvailable(),
       notify: notifyOwner,
@@ -66,6 +68,9 @@ export default async function handler(req, res) {
       autoPublish: process.env.AUTO_PUBLISH === '1',
       nowMs: Date.now(),
       origin: siteOrigin(req),
+      // хост, по которому нас реально достал Telegram: с него он точно
+      // сможет скачать афишу для приветствия (без редиректов)
+      assetOrigin: req.headers?.host ? `https://${req.headers.host}` : null,
     });
   } catch (e) {
     console.error('tg-webhook failed:', e);
@@ -80,10 +85,38 @@ export const BOT_COMMANDS = [
   { command: 'cancel', description: 'Отменить оформление' },
 ];
 
+// Telegram не ходит по редиректам: если proxject.ru перебрасывает на www,
+// вебхук на голом домене молча не работает («Wrong response: 308»). Поэтому
+// адрес проверяем сами и берём тот, что отвечает напрямую: наш обработчик
+// на GET отдаёт 405, это и есть признак «дошли до функции».
+async function probeUrl(url) {
+  try {
+    const r = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(5000) });
+    return { status: r.status, location: r.headers.get('location') };
+  } catch {
+    return null;
+  }
+}
+export async function resolveWebhookUrl(origin, probe = probeUrl) {
+  let url = `${String(origin).replace(/\/+$/, '')}/api/tg-webhook`;
+  const hops = [];
+  for (let i = 0; i < 4; i++) {
+    const p = await probe(url);
+    if (!p) return { url, verified: false, status: null, hops };
+    if ([301, 302, 307, 308].includes(p.status) && p.location) {
+      hops.push(url);
+      url = new URL(p.location, url).toString();
+      continue;
+    }
+    return { url, verified: p.status === 405 || p.status === 200, status: p.status, hops };
+  }
+  return { url, verified: false, status: null, hops };
+}
+
 // Регистрирует вебхук (с секретом и нужными типами апдейтов), меню команд
 // и описание бота. Идемпотентно: жать можно сколько угодно. Возвращает
 // отчёт по шагам — панель показывает его владельцу.
-export async function setupBot({ tg, origin, token, secret, username }) {
+export async function setupBot({ tg, origin, token, secret, username, probe }) {
   if (!token) return { ok: false, error: 'no_token', message: 'TELEGRAM_BOT_TOKEN не задан — добавь в Vercel и сделай Redeploy' };
   if (!secret) return { ok: false, error: 'no_secret', message: 'TG_WEBHOOK_SECRET не задан — придумай длинную случайную строку, добавь в Vercel и сделай Redeploy' };
   const me = await tg('getMe', {});
@@ -95,8 +128,9 @@ export async function setupBot({ tg, origin, token, secret, username }) {
     steps.push({ name, ok: r !== null });
     return r;
   };
+  const target = await resolveWebhookUrl(origin, probe);
   await step('вебхук', 'setWebhook', {
-    url: `${origin}/api/tg-webhook`,
+    url: target.url,
     secret_token: secret,
     allowed_updates: ['message', 'callback_query', 'channel_post'],
   });
@@ -110,17 +144,24 @@ export async function setupBot({ tg, origin, token, secret, username }) {
   });
   const info = await tg('getWebhookInfo', {});
   const allOk = steps.every((s) => s.ok);
+  const warning = target.verified
+    ? null
+    : `адрес ${target.url} не ответил как ожидалось${target.status ? ` (код ${target.status})` : ''} — проверь, что домен ведёт на этот проект`;
   return {
     ok: allOk,
     error: allOk ? undefined : 'partial',
     message: allOk
-      ? `Бот @${me.username} настроен`
+      ? `Бот @${me.username} настроен${warning ? `, но ${warning}` : ''}`
       : `Telegram не принял: ${steps.filter((s) => !s.ok).map((s) => s.name).join(', ')}`,
     bot: { username: me.username, name: me.first_name || '' },
     username_mismatch: username && username !== me.username ? { env: username, actual: me.username } : null,
-    webhook: info
-      ? { url: info.url || '', pending: Number(info.pending_update_count || 0), last_error: info.last_error_message || null }
-      : null,
+    webhook: {
+      url: (info && info.url) || target.url,
+      redirected_from: target.hops[0] || null,
+      verified: target.verified,
+      pending: Number(info?.pending_update_count || 0),
+      last_error: info?.last_error_message || null,
+    },
     steps,
   };
 }
@@ -326,25 +367,30 @@ async function handleMessage(msg, deps) {
   const session = text.startsWith('/') ? null : await getSession(deps.sql, chatId);
   if (session) return wizardInput(chatId, deps, session, msg);
 
-  if (/^\/tickets|проходк|билет/i.test(text)) {
-    const rows = rowsOf(await deps.sql.query(
-      `SELECT o.id FROM tg_links l JOIN orders o ON o.id = l.order_id
-       WHERE l.chat_id = $1 ORDER BY o.created_at DESC LIMIT 5`,
-      [chatId]
-    ));
-    if (!rows.length) {
-      await send('Проходок пока нет. Забронировать — /buy, это минута.');
-      return { done: 'tickets_none' };
-    }
-    for (const r of rows) {
-      const o = await loadOrder(deps.sql, r.id);
-      if (o) await sendOrderStatus(o, chatId, deps);
-    }
-    return { done: 'tickets', n: rows.length };
-  }
+  if (/^\/tickets|проходк|билет/i.test(text)) return sendTickets(chatId, deps);
 
   await sendWelcome(chatId, deps, { intro: false });
   return { done: 'unknown' };
+}
+
+// Все проходки этого чата (последние 5 заказов), каждая — по своему статусу
+async function sendTickets(chatId, deps) {
+  const rows = rowsOf(await deps.sql.query(
+    `SELECT o.id FROM tg_links l JOIN orders o ON o.id = l.order_id
+     WHERE l.chat_id = $1 ORDER BY o.created_at DESC LIMIT 5`,
+    [chatId]
+  ));
+  if (!rows.length) {
+    await sender(deps, chatId)('Проходок пока нет. Забронировать — минута.', {
+      inline_keyboard: [[{ text: '🎟 Забронировать проходки', callback_data: 'menu:buy' }]],
+    });
+    return { done: 'tickets_none' };
+  }
+  for (const r of rows) {
+    const o = await loadOrder(deps.sql, r.id);
+    if (o) await sendOrderStatus(o, chatId, deps);
+  }
+  return { done: 'tickets', n: rows.length };
 }
 
 async function loadOrder(sql, oid) {
@@ -411,13 +457,13 @@ const clearSession = (sql, chatId) => sql.query(`DELETE FROM tg_sessions WHERE c
 
 async function loadEvent(sql, id) {
   return rowsOf(await sql.query(
-    `SELECT id, title, venue, address, secret, starts_at, status FROM events WHERE id = $1`, [id]
+    `SELECT id, title, venue, address, secret, starts_at, status, poster_url FROM events WHERE id = $1`, [id]
   ))[0] || null;
 }
 // Ближайшая ночь в продаже
 async function nearestEvent(sql, nowMs) {
   return rowsOf(await sql.query(
-    `SELECT id, title, venue, address, secret, starts_at, status FROM events
+    `SELECT id, title, venue, address, secret, starts_at, status, poster_url FROM events
      WHERE status = 'onsale' AND starts_at > $1 ORDER BY starts_at LIMIT 1`,
     [new Date(nowMs).toISOString()]
   ))[0] || null;
@@ -431,31 +477,56 @@ async function eventWaves(sql, eventId) {
   }));
 }
 
-// Приветствие: ближайшая ночь, цена, кнопка брони
+// Абсолютный адрес афиши для sendPhoto: Telegram качает её сам
+const posterUrl = (p, deps) => {
+  if (!p) return null;
+  if (/^https?:\/\//.test(p)) return p;
+  const base = String(deps.assetOrigin || originOf(deps)).replace(/\/+$/, '');
+  return `${base}${p.startsWith('/') ? '' : '/'}${p}`;
+};
+
+// Приветствие — карточка ночи: афиша, дата, место, цена и меню кнопок.
+// Без афиши (или если Telegram её не скачал) — тот же текст сообщением.
 async function sendWelcome(chatId, deps, { intro }) {
   const send = sender(deps, chatId);
-  const hello = intro ? `👋 Привет! Это бот ${SITE.brandName} — проходки за минуту, без сайта и приложений.\n\n` : '';
+  const origin = originOf(deps);
+  const hello = intro ? `👋 Привет! Это бот ${SITE.brandName}: проходки за минуту, без сайта и приложений.\n\n` : '';
   const ev = await nearestEvent(deps.sql, deps.nowMs);
   if (!ev) {
-    await send(`${hello}Следующую ночь скоро объявим — следи за ${SITE.instagramName}. Свои проходки — /tickets.`);
+    await send(`${hello}Следующую ночь скоро объявим — следи за ${SITE.instagramName}.`, {
+      inline_keyboard: [
+        [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }],
+        [{ text: '🌐 Сайт', url: `${origin}/?src=tgbot` }],
+      ],
+    });
     return;
   }
   const ladder = ladderText(await eventWaves(deps.sql, ev.id));
   const where = ev.secret
     ? 'локация — секрет, адрес придёт в проходке'
     : [ev.venue, ev.address].filter(Boolean).join(', ');
-  await send(
+  const text =
     `${hello}<b>${escHtml(ev.title)}</b>\n${escHtml(fmtWhen(ev.starts_at))} · ${escHtml(where)}` +
-      `${ladder ? `\n${escHtml(ladder)}.` : ''}\n\n` +
-      `Бронируешь здесь, переводишь по СБП — проходки с QR приходят в этот чат. Вопросы — ${SITE.instagramName}.`,
-    {
-      inline_keyboard: [
-        [{ text: '🎟 Забронировать проходки', callback_data: `buy:${ev.id}` }],
-        [{ text: 'О ночи на сайте', url: `${originOf(deps)}/e/${ev.id}?src=tgbot` }],
+    `${ladder ? `\n${escHtml(ladder)}.` : ''}\n\n` +
+    `Бронь здесь за минуту, перевод по СБП — проходки с QR приходят в этот чат.`;
+  const menu = {
+    inline_keyboard: [
+      [{ text: '🎟 Забронировать проходки', callback_data: `buy:${ev.id}` }],
+      [
+        { text: '🎫 Мои проходки', callback_data: 'menu:tickets' },
+        { text: '📋 Правила и FAQ', url: `${origin}/faq` },
       ],
-    },
-    true
-  );
+      [{ text: '🌐 О ночи на сайте', url: `${origin}/e/${ev.id}?src=tgbot` }],
+    ],
+  };
+  const poster = posterUrl(ev.poster_url, deps);
+  if (poster) {
+    const r = await deps.tg('sendPhoto', {
+      chat_id: chatId, photo: poster, caption: text, parse_mode: 'HTML', reply_markup: menu,
+    });
+    if (r) return;
+  }
+  await send(text, menu, true);
 }
 
 // Шаг 1: сколько проходок. eventId=null — ближайшая ночь.
@@ -692,7 +763,7 @@ async function wizardBook(chatId, deps, cb) {
 // ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, ...(text ? { text } : {}) });
-  const m = /^(pub|skip|cancel|pay|nopay|claim|buy|qty|book):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  const m = /^(pub|skip|cancel|pay|nopay|claim|buy|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
   if (!m || !deps.sql) {
     await answer('Не получилось');
     return { done: 'callback_bad' };
@@ -700,7 +771,12 @@ async function handleCallback(cb, deps) {
   const [, action, arg] = m;
   const guestChat = cb.from?.id;
 
-  // ---- кнопки гостя: мастер брони ----
+  // ---- кнопки гостя: меню и мастер брони ----
+  if (action === 'menu') {
+    await answer();
+    if (arg === 'tickets') return sendTickets(guestChat, deps);
+    return startWizard(guestChat, deps, null);
+  }
   if (action === 'buy') {
     await answer();
     return startWizard(guestChat, deps, arg);

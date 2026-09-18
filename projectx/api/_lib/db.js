@@ -2,6 +2,7 @@
 // одним SQL-стейтментом (CTE): одиночный стейтмент атомарен, интерактивные
 // транзакции HTTP-драйверу не нужны.
 import { neon } from '@neondatabase/serverless';
+import { SCHEMA } from '../../db/schema.js';
 
 let cached = null;
 
@@ -41,4 +42,24 @@ export function withTimeout(promise, ms = 4000) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('db_timeout')), ms)),
   ]);
+}
+
+// Схема применяется кнопкой «Инициализировать БД», но таблицы, добавленные
+// релизом после этого нажатия, до боевой базы не доезжают — и функция молча
+// падает на «relation does not exist». Поэтому обработчик сам доводит схему
+// один раз на инстанс: все стейтменты идемпотентны (IF NOT EXISTS).
+const ensured = new WeakMap();
+export function ensureSchema(sql) {
+  if (!ensured.has(sql)) {
+    ensured.set(sql, (async () => {
+      for (const stmt of SCHEMA) {
+        try {
+          await sql.query(stmt);
+        } catch (e) {
+          console.warn('ensureSchema:', e.message);
+        }
+      }
+    })());
+  }
+  return ensured.get(sql);
 }

@@ -4,7 +4,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { SCHEMA } from '../db/schema.js';
-import handler, { handleUpdate, setupBot } from '../api/tg-webhook.js';
+import handler, { handleUpdate, setupBot, resolveWebhookUrl } from '../api/tg-webhook.js';
+import { ensureSchema } from '../api/_lib/db.js';
 
 let pg;
 const notifications = [];
@@ -275,7 +276,46 @@ test('бот: /start показывает ближайшую ночь с цен�
   assert.match(msg.text, /BOT NIGHT/);
   assert.match(msg.text, /1\u00A0000 ₽/);
   assert.equal(msg.reply_markup.inline_keyboard[0][0].callback_data, 'buy:ev-bot');
-  assert.equal(msg.reply_markup.inline_keyboard[1][0].url, 'https://px.test/e/ev-bot?src=tgbot');
+  assert.equal(msg.reply_markup.inline_keyboard[1][0].callback_data, 'menu:tickets');
+  assert.equal(msg.reply_markup.inline_keyboard[1][1].url, 'https://px.test/faq');
+  assert.equal(msg.reply_markup.inline_keyboard[2][0].url, 'https://px.test/e/ev-bot?src=tgbot');
+});
+
+test('бот: приветствие с афишей — фото с подписью и меню; Telegram не скачал фото — тот же текст сообщением', async () => {
+  await pg.query(`UPDATE events SET poster_url = '/assets/photos/p.jpg' WHERE id = 'ev-bot'`);
+  sent.length = 0;
+  // tg возвращает null → sendPhoto «не удался» → фолбэк текстом
+  await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: 'привет' } }, guestDeps({ assetOrigin: 'https://www.px.test' }));
+  assert.equal(sent[0].method, 'sendPhoto');
+  assert.equal(sent[0].payload.photo, 'https://www.px.test/assets/photos/p.jpg');
+  assert.equal(sent[0].payload.parse_mode, 'HTML');
+  assert.match(sent[0].payload.caption, /BOT NIGHT/);
+  assert.doesNotMatch(sent[0].payload.caption, /Привет/); // не /start — без вступления
+  assert.equal(sent[0].payload.reply_markup.inline_keyboard[0][0].callback_data, 'buy:ev-bot');
+  assert.equal(sent[1].method, 'sendMessage');
+  assert.equal(sent[1].payload.text, sent[0].payload.caption);
+
+  // Telegram принял фото — текстом не дублируем
+  sent.length = 0;
+  const okPhoto = guestDeps({ tg: async (method, payload) => { sent.push({ method, payload }); return method === 'sendPhoto' ? { message_id: 1 } : null; } });
+  await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: '/start' } }, okPhoto);
+  assert.deepEqual(sent.map((x) => x.method), ['sendPhoto']);
+  assert.match(sent[0].payload.caption, /Привет/);
+  await pg.query(`UPDATE events SET poster_url = NULL WHERE id = 'ev-bot'`);
+});
+
+test('бот: кнопки меню — «Мои проходки» и «Забронировать» без сессии', async () => {
+  sent.length = 0;
+  let r = await handleUpdate({ callback_query: { id: 'm1', data: 'menu:tickets', from: { id: 555 } } }, guestDeps());
+  assert.equal(r.done, 'tickets');
+  assert.match(sent.find((x) => x.method === 'sendMessage').payload.text, /Оплачено/);
+  sent.length = 0;
+  r = await handleUpdate({ callback_query: { id: 'm2', data: 'menu:tickets', from: { id: 799 } } }, guestDeps());
+  assert.equal(r.done, 'tickets_none');
+  assert.equal(sent.at(-1).payload.reply_markup.inline_keyboard[0][0].callback_data, 'menu:buy');
+  r = await handleUpdate({ callback_query: { id: 'm3', data: 'menu:buy', from: { id: 799 } } }, guestDeps());
+  assert.equal(r.done, 'wizard_qty');
+  await handleUpdate({ message: { chat: { id: 799, type: 'private' }, text: '/cancel' } }, guestDeps());
 });
 
 test('бот: мастер брони — количество → телефон → имена → сводка → бронь с реквизитами и кнопкой «Я перевёл»', async () => {
@@ -503,11 +543,14 @@ test('setupBot: вебхук с секретом и нужными апдейт�
     if (method === 'getWebhookInfo') return { url: 'https://px.test/api/tg-webhook', pending_update_count: 0 };
     return true;
   };
-  const r = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's3cret', username: 'px_bot' });
+  const direct = async () => ({ status: 405, location: null });
+  const r = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's3cret', username: 'px_bot', probe: direct });
   assert.equal(r.ok, true);
   assert.equal(r.bot.username, 'px_bot');
   assert.equal(r.username_mismatch, null);
   assert.equal(r.webhook.url, 'https://px.test/api/tg-webhook');
+  assert.equal(r.webhook.verified, true);
+  assert.equal(r.webhook.redirected_from, null);
   const wh = calls.find((c) => c.method === 'setWebhook').payload;
   assert.equal(wh.url, 'https://px.test/api/tg-webhook');
   assert.equal(wh.secret_token, 's3cret');
@@ -517,23 +560,53 @@ test('setupBot: вебхук с секретом и нужными апдейт�
   assert.ok(calls.some((c) => c.method === 'setMyDescription'));
   assert.ok(r.steps.every((s) => s.ok));
 
-  const mismatch = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's', username: 'other_bot' });
+  const mismatch = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's', username: 'other_bot', probe: direct });
   assert.deepEqual(mismatch.username_mismatch, { env: 'other_bot', actual: 'px_bot' });
 
-  const none = await setupBot({ tg, origin: 'https://px.test', token: '', secret: 's', username: null });
+  const none = await setupBot({ tg, origin: 'https://px.test', token: '', secret: 's', username: null, probe: direct });
   assert.equal(none.ok, false);
   assert.equal(none.error, 'no_token');
-  const noSecret = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: '', username: null });
+  const noSecret = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: '', username: null, probe: direct });
   assert.equal(noSecret.error, 'no_secret');
-  const bad = await setupBot({ tg: async () => null, origin: 'https://px.test', token: 't', secret: 's', username: null });
+  const bad = await setupBot({ tg: async () => null, origin: 'https://px.test', token: 't', secret: 's', username: null, probe: direct });
   assert.equal(bad.error, 'bad_token');
   const partial = await setupBot({
     tg: async (m) => (m === 'getMe' ? { username: 'px_bot' } : m === 'setMyCommands' ? null : true),
-    origin: 'https://px.test', token: 't', secret: 's', username: null,
+    origin: 'https://px.test', token: 't', secret: 's', username: null, probe: direct,
   });
   assert.equal(partial.ok, false);
   assert.equal(partial.error, 'partial');
   assert.match(partial.message, /команды/);
+});
+
+test('вебхук: голый домен редиректит на www — Telegram по редиректам не ходит, берём конечный адрес', async () => {
+  const probe = async (url) => (url.startsWith('https://px.test/')
+    ? { status: 308, location: 'https://www.px.test/api/tg-webhook' }
+    : { status: 405, location: null });
+  const r = await resolveWebhookUrl('https://px.test/', probe);
+  assert.equal(r.url, 'https://www.px.test/api/tg-webhook');
+  assert.equal(r.verified, true);
+  assert.deepEqual(r.hops, ['https://px.test/api/tg-webhook']);
+  // относительный Location тоже разбирается
+  const rel = await resolveWebhookUrl('https://px.test', async (u) => (u.includes('/api/') && !u.includes('/v2/') ? { status: 301, location: '/v2/api/tg-webhook' } : { status: 405 }));
+  assert.equal(rel.url, 'https://px.test/v2/api/tg-webhook');
+  // адрес не отвечает (сеть) — не проверен, но остаётся исходным
+  const dead = await resolveWebhookUrl('https://px.test', async () => null);
+  assert.equal(dead.url, 'https://px.test/api/tg-webhook');
+  assert.equal(dead.verified, false);
+  // 404 — функции нет: не проверен, код в отчёте
+  const missing = await resolveWebhookUrl('https://px.test', async () => ({ status: 404 }));
+  assert.equal(missing.verified, false);
+  assert.equal(missing.status, 404);
+
+  const calls = [];
+  const tg = async (method, payload) => { calls.push({ method, payload }); return method === 'getMe' ? { username: 'px_bot' } : method === 'getWebhookInfo' ? { url: 'https://www.px.test/api/tg-webhook' } : true; };
+  const set = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's', username: null, probe });
+  assert.equal(calls.find((c) => c.method === 'setWebhook').payload.url, 'https://www.px.test/api/tg-webhook');
+  assert.equal(set.webhook.redirected_from, 'https://px.test/api/tg-webhook');
+  const unverified = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's', username: null, probe: async () => ({ status: 404 }) });
+  assert.equal(unverified.ok, true);
+  assert.match(unverified.message, /не ответил как ожидалось/);
 });
 
 test('handler: action=setup только с ключом администратора; без токена — понятная ошибка, а не 500', async () => {
@@ -554,4 +627,16 @@ test('handler: action=setup только с ключом администрат�
   assert.equal(noToken.body.error, 'no_token');
   assert.equal(noToken.headers['Cache-Control'], 'no-store');
   delete process.env.ADMIN_KEY;
+});
+
+// ---------- схема доводится сама: таблица, добавленная после «Инициализировать БД» ----------
+test('ensureSchema: пропавшая таблица бота создаётся при первом запросе, повторно схема не гоняется', async () => {
+  await pg.query(`DROP TABLE tg_sessions`);
+  await ensureSchema(pg);
+  assert.equal((await pg.query(`SELECT count(*)::int AS n FROM tg_sessions`)).rows[0].n, 0);
+  // второй вызов — тот же промис, DDL не повторяется
+  await pg.query(`DROP TABLE tg_sessions`);
+  await ensureSchema(pg);
+  await assert.rejects(pg.query(`SELECT 1 FROM tg_sessions`), /does not exist/);
+  for (const stmt of SCHEMA) await pg.query(stmt); // вернуть для порядка
 });

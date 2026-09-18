@@ -271,6 +271,8 @@ test('бот: /start показывает ближайшую ночь с цен�
   sent.length = 0;
   const r = await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: '/start' } }, guestDeps());
   assert.equal(r.done, 'start');
+  assert.equal(r.welcome.via, 'none'); // мок tg отвечает null → «нет ответа»
+  assert.equal(r.welcome.error, 'нет ответа');
   const msg = sent.find((s) => s.method === 'sendMessage').payload;
   assert.equal(msg.parse_mode, 'HTML');
   assert.match(msg.text, /BOT NIGHT/);
@@ -285,7 +287,8 @@ test('бот: приветствие с афишей — фото с подпи�
   await pg.query(`UPDATE events SET poster_url = '/assets/photos/p.jpg' WHERE id = 'ev-bot'`);
   sent.length = 0;
   // tg возвращает null → sendPhoto «не удался» → фолбэк текстом
-  await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: 'привет' } }, guestDeps({ assetOrigin: 'https://www.px.test' }));
+  const w1 = await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: 'привет' } }, guestDeps({ assetOrigin: 'https://www.px.test' }));
+  assert.deepEqual(w1.welcome, { via: 'none', error: 'нет ответа', photo_error: 'нет ответа' });
   assert.equal(sent[0].method, 'sendPhoto');
   assert.equal(sent[0].payload.photo, 'https://www.px.test/assets/photos/p.jpg');
   assert.equal(sent[0].payload.parse_mode, 'HTML');
@@ -298,9 +301,16 @@ test('бот: приветствие с афишей — фото с подпи�
   // Telegram принял фото — текстом не дублируем
   sent.length = 0;
   const okPhoto = guestDeps({ tg: async (method, payload) => { sent.push({ method, payload }); return method === 'sendPhoto' ? { message_id: 1 } : null; } });
-  await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: '/start' } }, okPhoto);
+  const w2 = await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: '/start' } }, okPhoto);
+  assert.deepEqual(w2.welcome, { via: 'photo' });
   assert.deepEqual(sent.map((x) => x.method), ['sendPhoto']);
   assert.match(sent[0].payload.caption, /Привет/);
+  // с call: точная ошибка Telegram по афише, текст ушёл
+  sent.length = 0;
+  const withCall = guestDeps({ call: async (method, payload) => { sent.push({ method, payload }); return method === 'sendPhoto' ? { ok: false, error: 'Bad Request: wrong file identifier/HTTP URL specified' } : { ok: true, result: { message_id: 2 } }; } });
+  const w3 = await handleUpdate({ message: { chat: { id: 700, type: 'private' }, text: '/start' } }, withCall);
+  assert.deepEqual(w3.welcome, { via: 'text', photo_error: 'Bad Request: wrong file identifier/HTTP URL specified' });
+  assert.deepEqual(sent.map((x) => x.method), ['sendPhoto', 'sendMessage']);
   await pg.query(`UPDATE events SET poster_url = NULL WHERE id = 'ev-bot'`);
 });
 
@@ -627,6 +637,11 @@ test('setupBot: проверочное сообщение владельцу —
   assert.match(good.message, /команды \(Bad Request: BOT_COMMANDS_INVALID\)/);
   const bad = await setupBot({ tg, call, origin: 'https://px.test', token: 't', secret: 's', username: null, probe, ownerChat: '7' });
   assert.deepEqual(bad.delivery, { ok: false, error: 'Bad Request: chat not found' });
+  // приветствие владельцу тем же путём, что гостю — результат в отчёте
+  const greeted = await setupBot({ tg, call, origin: 'https://px.test', token: 't', secret: 's', username: null, probe, ownerChat: '42', welcome: async (chatId) => ({ via: 'photo', chatId }) });
+  assert.deepEqual(greeted.welcome, { via: 'photo', chatId: '42' });
+  const thrown = await setupBot({ tg, call, origin: 'https://px.test', token: 't', secret: 's', username: null, probe, ownerChat: '42', welcome: async () => { throw new Error('boom'); } });
+  assert.deepEqual(thrown.welcome, { via: 'none', error: 'boom' });
 });
 
 test('handler: action=setup только с ключом администратора; без токена — понятная ошибка, а не 500', async () => {

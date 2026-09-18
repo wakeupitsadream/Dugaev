@@ -36,6 +36,15 @@ export default async function handler(req, res) {
   // а не Telegram, поэтому проверка идёт до секрета вебхука.
   if (req.body?.action === 'setup') {
     if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен ключ администратора');
+    const guestDeps = {
+      sql: hasDb() ? db() : null,
+      tg: tgApi,
+      call: tgCall,
+      nowMs: Date.now(),
+      origin: siteOrigin(req),
+      assetOrigin: req.headers?.host ? `https://${req.headers.host}` : null,
+    };
+    if (guestDeps.sql) await ensureSchema(guestDeps.sql);
     const r = await setupBot({
       tg: tgApi,
       call: tgCall,
@@ -44,6 +53,9 @@ export default async function handler(req, res) {
       secret: process.env.TG_WEBHOOK_SECRET || '',
       username: tgBotUsername(),
       ownerChat: process.env.TELEGRAM_CHAT_ID || '',
+      // приветствие владельцу тем же кодом, каким бот отвечает гостям:
+      // если гость не получает ответ, ошибка Telegram будет видна здесь
+      welcome: guestDeps.sql ? (chatId) => sendWelcome(chatId, guestDeps, { intro: true }) : null,
     });
     return r.ok ? ok(res, r) : fail(res, 400, r.error, r.message, r);
   }
@@ -72,6 +84,7 @@ export default async function handler(req, res) {
       extractAvailable: extractorAvailable(),
       notify: notifyOwner,
       tg: tgApi,
+      call: tgCall,
       autoPublish: process.env.AUTO_PUBLISH === '1',
       nowMs: Date.now(),
       origin: siteOrigin(req),
@@ -125,7 +138,7 @@ export async function resolveWebhookUrl(origin, probe = probeUrl) {
 // Регистрирует вебхук (с секретом и нужными типами апдейтов), меню команд
 // и описание бота. Идемпотентно: жать можно сколько угодно. Возвращает
 // отчёт по шагам — панель показывает его владельцу.
-export async function setupBot({ tg, call, origin, token, secret, username, probe, ownerChat }) {
+export async function setupBot({ tg, call, origin, token, secret, username, probe, ownerChat, welcome }) {
   if (!token) return { ok: false, error: 'no_token', message: 'TELEGRAM_BOT_TOKEN не задан — добавь в Vercel и сделай Redeploy' };
   if (!secret) return { ok: false, error: 'no_secret', message: 'TG_WEBHOOK_SECRET не задан — придумай длинную случайную строку, добавь в Vercel и сделай Redeploy' };
   // call — вызов с текстом ошибки Telegram; без него — обёртка над tg
@@ -172,6 +185,14 @@ export async function setupBot({ tg, call, origin, token, secret, username, prob
     });
     delivery = d.ok ? { ok: true } : { ok: false, error: d.error };
   }
+  let greeted = null;
+  if (ownerChat && welcome) {
+    try {
+      greeted = await welcome(ownerChat);
+    } catch (e) {
+      greeted = { via: 'none', error: e.message };
+    }
+  }
   const allOk = steps.every((s) => s.ok);
   const warning = target.verified
     ? null
@@ -183,6 +204,7 @@ export async function setupBot({ tg, call, origin, token, secret, username, prob
       ? `Бот @${me.username} настроен${warning ? `, но ${warning}` : ''}`
       : `Telegram не принял: ${steps.filter((s) => !s.ok).map((s) => `${s.name}${s.error ? ` (${s.error})` : ''}`).join(', ')}`,
     delivery,
+    welcome: greeted,
     bot: { username: me.username, name: me.first_name || '' },
     username_mismatch: username && username !== me.username ? { env: username, actual: me.username } : null,
     webhook: {
@@ -377,8 +399,8 @@ async function handleMessage(msg, deps) {
       return { done: 'linked', order: o.id };
     }
     if (/^buy/i.test(payload)) return startWizard(chatId, deps, null);
-    await sendWelcome(chatId, deps, { intro: true });
-    return { done: 'start' };
+    const welcome = await sendWelcome(chatId, deps, { intro: true });
+    return { done: 'start', welcome };
   }
 
   if (/^\/buy(?:@\w+)?$/i.test(text)) return startWizard(chatId, deps, null);
@@ -399,8 +421,8 @@ async function handleMessage(msg, deps) {
 
   if (/^\/tickets|проходк|билет/i.test(text)) return sendTickets(chatId, deps);
 
-  await sendWelcome(chatId, deps, { intro: false });
-  return { done: 'unknown' };
+  const welcome = await sendWelcome(chatId, deps, { intro: false });
+  return { done: 'unknown', welcome };
 }
 
 // Все проходки этого чата (последние 5 заказов), каждая — по своему статусу
@@ -515,21 +537,33 @@ const posterUrl = (p, deps) => {
   return `${base}${p.startsWith('/') ? '' : '/'}${p}`;
 };
 
+// Вызов Bot API с текстом ошибки: deps.call, а без него — обёртка над deps.tg
+const callOf = (deps) => deps.call || (async (method, payload) => {
+  const r = await deps.tg(method, payload);
+  return r === null ? { ok: false, error: 'нет ответа' } : { ok: true, result: r };
+});
+
 // Приветствие — карточка ночи: афиша, дата, место, цена и меню кнопок.
-// Без афиши (или если Telegram её не скачал) — тот же текст сообщением.
+// Без афиши (или если Telegram её не принял) — тот же текст сообщением.
+// Возвращает, чем кончилось: { via: 'photo'|'text'|'none', error?, photo_error? }
 async function sendWelcome(chatId, deps, { intro }) {
-  const send = sender(deps, chatId);
+  const call = callOf(deps);
   const origin = originOf(deps);
   const hello = intro ? `👋 Привет! Это бот ${SITE.brandName}: проходки за минуту, без сайта и приложений.\n\n` : '';
   const ev = await nearestEvent(deps.sql, deps.nowMs);
   if (!ev) {
-    await send(`${hello}Следующую ночь скоро объявим — следи за ${SITE.instagramName}.`, {
-      inline_keyboard: [
-        [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }],
-        [{ text: '🌐 Сайт', url: `${origin}/?src=tgbot` }],
-      ],
+    const r = await call('sendMessage', {
+      chat_id: chatId,
+      text: `${hello}Следующую ночь скоро объявим — следи за ${SITE.instagramName}.`,
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }],
+          [{ text: '🌐 Сайт', url: `${origin}/?src=tgbot` }],
+        ],
+      },
     });
-    return;
+    return r.ok ? { via: 'text' } : { via: 'none', error: r.error };
   }
   const ladder = ladderText(await eventWaves(deps.sql, ev.id));
   const where = ev.secret
@@ -549,14 +583,19 @@ async function sendWelcome(chatId, deps, { intro }) {
       [{ text: '🌐 О ночи на сайте', url: `${origin}/e/${ev.id}?src=tgbot` }],
     ],
   };
+  let photoError = null;
   const poster = posterUrl(ev.poster_url, deps);
   if (poster) {
-    const r = await deps.tg('sendPhoto', {
+    const r = await call('sendPhoto', {
       chat_id: chatId, photo: poster, caption: text, parse_mode: 'HTML', reply_markup: menu,
     });
-    if (r) return;
+    if (r.ok) return { via: 'photo' };
+    photoError = r.error;
   }
-  await send(text, menu, true);
+  const t = await call('sendMessage', {
+    chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: menu,
+  });
+  return t.ok ? { via: 'text', ...(photoError ? { photo_error: photoError } : {}) } : { via: 'none', error: t.error, ...(photoError ? { photo_error: photoError } : {}) };
 }
 
 // Шаг 1: сколько проходок. eventId=null — ближайшая ночь.

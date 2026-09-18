@@ -606,6 +606,10 @@ async function setupBot() {
   if (j.delivery === null) parts.push('Проверочное сообщение не отправлено: TELEGRAM_CHAT_ID не задан.');
   else if (j.delivery?.ok) parts.push('Проверочное сообщение владельцу доставлено — смотри чат с ботом.');
   else parts.push(`Проверочное сообщение владельцу НЕ доставлено: ${j.delivery?.error || 'неизвестная ошибка'}.`);
+  const w = j.welcome;
+  if (w?.via === 'photo') parts.push('Приветствие с афишей владельцу отправлено — так же его получит гость.');
+  else if (w?.via === 'text') parts.push(`Приветствие владельцу отправлено текстом${w.photo_error ? ` (афиша не прошла: ${w.photo_error})` : ''}.`);
+  else if (w) parts.push(`Приветствие владельцу НЕ отправлено: ${w.error || 'неизвестная ошибка'}${w.photo_error ? `; афиша: ${w.photo_error}` : ''}.`);
   if (j.username_mismatch) {
     parts.push(
       `Внимание: в Vercel TELEGRAM_BOT_USERNAME=${j.username_mismatch.env}, а бот на самом деле @${j.username_mismatch.actual} — ` +

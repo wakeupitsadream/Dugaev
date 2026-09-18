@@ -18,7 +18,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { db, hasDb, ensureSchema } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { isAdmin } from './_lib/auth.js';
-import { notifyOwner, tgApi, tgBotUsername } from './_lib/tg.js';
+import { notifyOwner, tgApi, tgCall, tgBotUsername } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
 import { isOrderId, transferText, transferLines, ticketLinks, siteOrigin } from './_lib/booking.js';
@@ -38,10 +38,12 @@ export default async function handler(req, res) {
     if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен ключ администратора');
     const r = await setupBot({
       tg: tgApi,
+      call: tgCall,
       origin: siteOrigin(req),
       token: process.env.TELEGRAM_BOT_TOKEN || '',
       secret: process.env.TG_WEBHOOK_SECRET || '',
       username: tgBotUsername(),
+      ownerChat: process.env.TELEGRAM_CHAT_ID || '',
     });
     return r.ok ? ok(res, r) : fail(res, 400, r.error, r.message, r);
   }
@@ -56,10 +58,15 @@ export default async function handler(req, res) {
   }
 
   // Telegram ретраит не-200: отвечаем 200 всегда, кроме ошибок конфигурации
+  const update = req.body || {};
+  const kind = update.callback_query ? 'callback' : update.message ? 'message' : update.channel_post ? 'post' : 'other';
+  const chat = update.message?.chat?.id ?? update.callback_query?.from?.id ?? null;
+  const head = String(update.message?.text || update.callback_query?.data || '').slice(0, 24);
+  const t0 = Date.now();
   try {
     const sql = hasDb() ? db() : null;
     if (sql) await ensureSchema(sql); // таблицы бота могли появиться после «Инициализировать БД»
-    await handleUpdate(req.body || {}, {
+    const r = await handleUpdate(update, {
       sql,
       extract: extractPost,
       extractAvailable: extractorAvailable(),
@@ -72,8 +79,10 @@ export default async function handler(req, res) {
       // сможет скачать афишу для приветствия (без редиректов)
       assetOrigin: req.headers?.host ? `https://${req.headers.host}` : null,
     });
+    // одна строка на апдейт: что пришло, кому, чем кончилось и сколько заняло
+    console.log(`tg-webhook: ${kind} chat=${chat} "${head}" -> ${r?.done} (${Date.now() - t0} ms)`);
   } catch (e) {
-    console.error('tg-webhook failed:', e);
+    console.error(`tg-webhook failed: ${kind} chat=${chat} "${head}" (${Date.now() - t0} ms):`, e);
   }
   ok(res);
 }
@@ -116,17 +125,22 @@ export async function resolveWebhookUrl(origin, probe = probeUrl) {
 // Регистрирует вебхук (с секретом и нужными типами апдейтов), меню команд
 // и описание бота. Идемпотентно: жать можно сколько угодно. Возвращает
 // отчёт по шагам — панель показывает его владельцу.
-export async function setupBot({ tg, origin, token, secret, username, probe }) {
+export async function setupBot({ tg, call, origin, token, secret, username, probe, ownerChat }) {
   if (!token) return { ok: false, error: 'no_token', message: 'TELEGRAM_BOT_TOKEN не задан — добавь в Vercel и сделай Redeploy' };
   if (!secret) return { ok: false, error: 'no_secret', message: 'TG_WEBHOOK_SECRET не задан — придумай длинную случайную строку, добавь в Vercel и сделай Redeploy' };
+  // call — вызов с текстом ошибки Telegram; без него — обёртка над tg
+  const api = call || (async (m, p) => {
+    const r = await tg(m, p);
+    return r === null ? { ok: false, error: 'нет ответа' } : { ok: true, result: r };
+  });
   const me = await tg('getMe', {});
   if (!me?.username) return { ok: false, error: 'bad_token', message: 'Telegram не принял токен — проверь TELEGRAM_BOT_TOKEN' };
 
   const steps = [];
   const step = async (name, method, payload) => {
-    const r = await tg(method, payload);
-    steps.push({ name, ok: r !== null });
-    return r;
+    const r = await api(method, payload);
+    steps.push({ name, ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
+    return r.ok ? r.result : null;
   };
   const target = await resolveWebhookUrl(origin, probe);
   // drop_pending_updates: пока вебхук не работал, Telegram копил команды —
@@ -146,6 +160,18 @@ export async function setupBot({ tg, origin, token, secret, username, probe }) {
     short_description: `Проходки на ${SITE.brandName} — бронь за минуту`,
   });
   const info = await tg('getWebhookInfo', {});
+  // Проверка доставки тем же путём, каким бот пишет гостям: владелец получает
+  // сообщение, а панель — ответ Telegram (например «chat not found», если
+  // TELEGRAM_CHAT_ID чужой или владелец ещё не написал боту /start)
+  let delivery = null;
+  if (ownerChat) {
+    const d = await api('sendMessage', {
+      chat_id: ownerChat,
+      text: `✅ Бот @${me.username} настроен. Вебхук: ${target.url}\nЭто проверка доставки из панели — значит, писать тебе бот может.`,
+      disable_web_page_preview: true,
+    });
+    delivery = d.ok ? { ok: true } : { ok: false, error: d.error };
+  }
   const allOk = steps.every((s) => s.ok);
   const warning = target.verified
     ? null
@@ -155,7 +181,8 @@ export async function setupBot({ tg, origin, token, secret, username, probe }) {
     error: allOk ? undefined : 'partial',
     message: allOk
       ? `Бот @${me.username} настроен${warning ? `, но ${warning}` : ''}`
-      : `Telegram не принял: ${steps.filter((s) => !s.ok).map((s) => s.name).join(', ')}`,
+      : `Telegram не принял: ${steps.filter((s) => !s.ok).map((s) => `${s.name}${s.error ? ` (${s.error})` : ''}`).join(', ')}`,
+    delivery,
     bot: { username: me.username, name: me.first_name || '' },
     username_mismatch: username && username !== me.username ? { env: username, actual: me.username } : null,
     webhook: {

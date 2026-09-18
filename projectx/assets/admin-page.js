@@ -603,6 +603,9 @@ async function setupBot() {
   if (wh.pending) parts.push(`В очереди Telegram: ${wh.pending}.`);
   if (wh.last_error) parts.push(`Последняя ошибка Telegram: ${wh.last_error}.`);
   else parts.push('Ошибок доставки Telegram не видит.');
+  if (j.delivery === null) parts.push('Проверочное сообщение не отправлено: TELEGRAM_CHAT_ID не задан.');
+  else if (j.delivery?.ok) parts.push('Проверочное сообщение владельцу доставлено — смотри чат с ботом.');
+  else parts.push(`Проверочное сообщение владельцу НЕ доставлено: ${j.delivery?.error || 'неизвестная ошибка'}.`);
   if (j.username_mismatch) {
     parts.push(
       `Внимание: в Vercel TELEGRAM_BOT_USERNAME=${j.username_mismatch.env}, а бот на самом деле @${j.username_mismatch.actual} — ` +

@@ -548,6 +548,7 @@ test('setupBot: вебхук с секретом и нужными апдейт�
   assert.equal(r.ok, true);
   assert.equal(r.bot.username, 'px_bot');
   assert.equal(r.username_mismatch, null);
+  assert.equal(r.delivery, null); // TELEGRAM_CHAT_ID не передан — проверка пропущена
   assert.equal(r.webhook.url, 'https://px.test/api/tg-webhook');
   assert.equal(r.webhook.verified, true);
   assert.equal(r.webhook.redirected_from, null);
@@ -608,6 +609,24 @@ test('вебхук: голый домен редиректит на www — Tele
   const unverified = await setupBot({ tg, origin: 'https://px.test', token: 't', secret: 's', username: null, probe: async () => ({ status: 404 }) });
   assert.equal(unverified.ok, true);
   assert.match(unverified.message, /не ответил как ожидалось/);
+});
+
+test('setupBot: проверочное сообщение владельцу — ответ Telegram виден в отчёте, ошибки шагов с описанием', async () => {
+  const sentTo = [];
+  const call = async (method, payload) => {
+    if (method === 'sendMessage') { sentTo.push(payload.chat_id); return payload.chat_id === '42' ? { ok: true, result: { message_id: 1 } } : { ok: false, error: 'Bad Request: chat not found', code: 400 }; }
+    if (method === 'setMyCommands') return { ok: false, error: 'Bad Request: BOT_COMMANDS_INVALID', code: 400 };
+    return { ok: true, result: true };
+  };
+  const tg = async (m) => (m === 'getMe' ? { username: 'px_bot' } : m === 'getWebhookInfo' ? { url: 'https://px.test/api/tg-webhook' } : true);
+  const probe = async () => ({ status: 405 });
+  const good = await setupBot({ tg, call, origin: 'https://px.test', token: 't', secret: 's', username: null, probe, ownerChat: '42' });
+  assert.deepEqual(good.delivery, { ok: true });
+  assert.deepEqual(sentTo, ['42']);
+  assert.equal(good.ok, false);
+  assert.match(good.message, /команды \(Bad Request: BOT_COMMANDS_INVALID\)/);
+  const bad = await setupBot({ tg, call, origin: 'https://px.test', token: 't', secret: 's', username: null, probe, ownerChat: '7' });
+  assert.deepEqual(bad.delivery, { ok: false, error: 'Bad Request: chat not found' });
 });
 
 test('handler: action=setup только с ключом администратора; без токена — понятная ошибка, а не 500', async () => {

@@ -217,6 +217,15 @@ Env-переменные (Vercel → projectx-party → Settings → Environment
 setWebhook) · опционально `POLZA_API_KEY` (спящий конвейер из канала),
 `AUTO_PUBLISH=1`, `BOT_API_TOKEN`, `TICKET_SECRET_OLD`.
 
+**Откуда взять переменные бота.** `TELEGRAM_BOT_TOKEN` выдаёт BotFather при
+создании бота (/newbot), там же видно имя для `TELEGRAM_BOT_USERNAME`.
+`TELEGRAM_CHAT_ID` — числовой id личного чата владельца: напиши боту
+@userinfobot (или @getmyid_bot), он ответит твоим `Id`; этот же аккаунт
+должен первым написать нашему боту /start, иначе Telegram не даст боту
+писать тебе. `TG_WEBHOOK_SECRET` — любая случайная строка 30+ символов
+(латиница и цифры), её знает только Vercel. `SITE_ORIGIN` =
+`https://proxject.ru`.
+
 **Бот (после того как токен и секрет лежат в Vercel и сделан Redeploy):**
 панель → блок «Сервис» → **«Настроить бота»**. Сервер сам регистрирует
 вебхук `https://proxject.ru/api/tg-webhook` с секретом, меню команд

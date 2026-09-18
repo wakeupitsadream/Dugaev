@@ -555,6 +555,7 @@ test('setupBot: вебхук с секретом и нужными апдейт�
   assert.equal(wh.url, 'https://px.test/api/tg-webhook');
   assert.equal(wh.secret_token, 's3cret');
   assert.deepEqual(wh.allowed_updates, ['message', 'callback_query', 'channel_post']);
+  assert.equal(wh.drop_pending_updates, true);
   const cmds = calls.find((c) => c.method === 'setMyCommands').payload.commands.map((c) => c.command);
   assert.deepEqual(cmds, ['buy', 'tickets', 'cancel']);
   assert.ok(calls.some((c) => c.method === 'setMyDescription'));

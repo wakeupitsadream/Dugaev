@@ -129,10 +129,13 @@ export async function setupBot({ tg, origin, token, secret, username, probe }) {
     return r;
   };
   const target = await resolveWebhookUrl(origin, probe);
+  // drop_pending_updates: пока вебхук не работал, Telegram копил команды —
+  // после починки не надо отвечать на вчерашние /buy и /cancel скопом
   await step('вебхук', 'setWebhook', {
     url: target.url,
     secret_token: secret,
     allowed_updates: ['message', 'callback_query', 'channel_post'],
+    drop_pending_updates: true,
   });
   await step('команды', 'setMyCommands', { commands: BOT_COMMANDS });
   await step('кнопка меню', 'setChatMenuButton', { menu_button: { type: 'commands' } });

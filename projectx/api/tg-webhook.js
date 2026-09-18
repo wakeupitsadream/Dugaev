@@ -73,7 +73,11 @@ export default async function handler(req, res) {
   const update = req.body || {};
   const kind = update.callback_query ? 'callback' : update.message ? 'message' : update.channel_post ? 'post' : 'other';
   const chat = update.message?.chat?.id ?? update.callback_query?.from?.id ?? null;
-  const head = String(update.message?.text || update.callback_query?.data || '').slice(0, 24);
+  // в лог — только команды и данные кнопок; свободный текст (имена, телефоны) не пишем
+  const rawText = String(update.message?.text || '');
+  const head = update.callback_query
+    ? String(update.callback_query.data || '').slice(0, 24)
+    : rawText.startsWith('/') ? rawText.slice(0, 24) : update.message?.contact ? '<contact>' : rawText ? '<text>' : '';
   const t0 = Date.now();
   try {
     const sql = hasDb() ? db() : null;

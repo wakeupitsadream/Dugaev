@@ -3,3 +3,4 @@ BRIEF.md
 test/
 node_modules/
 0*.jpg
+devserver.mjs

@@ -1,15 +1,17 @@
 // Счётчик «идут N человек» — чистая логика без DOM.
-// При живых продажах (>= REAL_THRESHOLD билетов) показываем реальное число.
-// Иначе — детерминированная симуляция: базовое число от хеша ивента,
-// рост к дате, «живость» от 10-минутного ведра. Симуляция — только для демо,
-// в бою помечается и заменяется реальными данными (см. BRIEF.md).
+// В бою показываем только реальное число и только когда оно уже что-то
+// значит (>= REAL_THRESHOLD проходок); ниже порога счётчика нет вовсе —
+// null, и карточка его не рисует. Симуляция (базовое число от хеша ивента,
+// рост к дате, «живость» от 10-минутного ведра) включается только на
+// демо-стенде (demo: true) — гостю боевого сайта выдуманных цифр не показываем.
 import { hash } from './waves.js';
 
-export const REAL_THRESHOLD = 40;
+export const REAL_THRESHOLD = 20;
 const RAMP_DAYS = 30;
 
-export function goingCount(eventId, startsAtMs, soldTotal, nowMs) {
+export function goingCount(eventId, startsAtMs, soldTotal, nowMs, { demo = false } = {}) {
   if (soldTotal >= REAL_THRESHOLD) return soldTotal;
+  if (!demo) return null;
   const base = 70 + (hash(eventId) % 90); // 70..159 — правдоподобно для города
   const saleStart = startsAtMs - RAMP_DAYS * 86400_000;
   const t = clamp((nowMs - saleStart) / (startsAtMs - saleStart), 0, 1);

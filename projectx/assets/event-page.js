@@ -66,7 +66,11 @@ function renderEvent() {
   const e = store.event;
   // Данные пришли — только теперь кнопки могут что-то обещать
   for (const id of ['buy-open', 'sticky-buy']) $(id).disabled = false;
-  document.title = `${e.title} — проходки · PROJECT X`;
+  document.title = `${e.title} · проходки · PROJECT X Оренбург`;
+  // канонический адрес ночи — для поисковиков и шаринга
+  let canon = document.querySelector('link[rel="canonical"]');
+  if (!canon) { canon = document.createElement('link'); canon.rel = 'canonical'; document.head.appendChild(canon); }
+  canon.href = `${SITE.siteUrl}/e/${e.id}`;
   const db = dateBox(e.startsAt);
   $('eh-word').textContent = e.title;
   $('eh-day').textContent = db.day;
@@ -135,8 +139,11 @@ function renderWaves() {
   }
   const ws = waveStates(e.waves);
   const sold = totalSold(e.waves);
-  const going = goingCount(e.id, Date.parse(e.startsAt), sold, Date.now());
-  $('ev-going').innerHTML = `уже ${plural(going, 'идёт', 'идут', 'идут')} <b>${going}</b> ${plural(going, 'человек', 'человека', 'человек')}`;
+  const going = goingCount(e.id, Date.parse(e.startsAt), sold, Date.now(), { demo: SITE.paymentDemo });
+  $('ev-going').hidden = going === null;
+  $('ev-going').innerHTML = going === null
+    ? ''
+    : `уже ${plural(going, 'идёт', 'идут', 'идут')} <b>${going}</b> ${plural(going, 'человек', 'человека', 'человек')}`;
   $('ev-wp-rows').innerHTML = ws
     .map((w) => {
       const pct = Math.round((w.sold / w.quota) * 100);
@@ -457,9 +464,9 @@ function updateTotal() {
   const note = $('submit-note');
   if (note && w) {
     note.textContent = SITE.paymentDemo
-      ? 'Нажимая «Получить проходки», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа.'
-      : `Нажимая «Забронировать», ты подтверждаешь, что тебе есть 18, и принимаешь правила входа. ` +
-        `Оплата — переводом по СБП, бронь держим ${SITE.holdHours || 3} часа.`;
+      ? 'Нажимая «Получить проходки», ты подтверждаешь, что тебе есть 18, принимаешь условия покупки и правила входа.'
+      : `Нажимая «Забронировать», ты подтверждаешь, что тебе есть 18, принимаешь условия покупки и правила входа. ` +
+        `Оплата — переводом по СБП, бронь держим до ${SITE.holdHours || 3} часов, в день ночи — час.`;
   }
   $('sh-title').textContent = store.event ? `Проходки · ${store.event.title}` : 'Проходки';
 }

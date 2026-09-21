@@ -3,6 +3,7 @@
 // здесь только порядок сборки, живой знак и то, что есть лишь на главной.
 import { loadEvents, upcoming, esc } from './events-load.js';
 import { fromPrice, ladderText } from './waves.js';
+import { fillSecretNote } from './blocks.js';
 import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
 import { springTo } from './spring.js';
 import { initChrome, observeReveal, wrapWords } from './chrome.js';
@@ -79,6 +80,7 @@ function renderNext() {
 
 function renderCta() {
   const e = state.nearest;
+  fillSecretNote(e);
   if (!e) {
     $('cta-lead').textContent = 'Следующую ночь объявим здесь. Оставь контакт на афише — напишем первым, пока действует ранняя волна.';
     $('cta-buy').textContent = 'Оставить контакт';

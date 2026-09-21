@@ -12,7 +12,10 @@ const L = SITE.legal || {};
 const $ = (id) => document.getElementById(id);
 
 // оператор и связь
-document.querySelectorAll('[data-legal-operator]').forEach((el) => { el.textContent = L.operator || 'организатор ночей PROJECT X'; });
+document.querySelectorAll('[data-legal-operator]').forEach((el) => {
+  el.textContent = `${L.status ? `${L.status} ` : ''}${L.operator || 'организатор ночей PROJECT X'}`;
+});
+document.querySelectorAll('[data-legal-role]').forEach((el) => { el.textContent = L.roleNote || 'организатор ночей PROJECT X'; });
 document.querySelectorAll('[data-dm]').forEach((a) => { a.href = SITE.instagramDm; });
 document.querySelectorAll('[data-ig-name]').forEach((el) => { el.textContent = SITE.instagramName; });
 

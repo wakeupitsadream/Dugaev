@@ -26,7 +26,7 @@ export function nightCard(e) {
   const ws = waveStates(e.waves);
   const active = ws.find((w) => w.state === 'active');
   const price = fromPrice(e.waves);
-  const going = goingCount(e.id, Date.parse(e.startsAt), totalSold(e.waves), Date.now());
+  const going = goingCount(e.id, Date.parse(e.startsAt), totalSold(e.waves), Date.now(), { demo: SITE.paymentDemo });
   const poster = e.posterUrl
     ? `<img src="${esc(e.posterUrl)}" alt="" loading="lazy" onerror="this.remove()" />`
     : '';
@@ -49,7 +49,7 @@ export function nightCard(e) {
           <span><b>${esc(e.venue || 'SECRET PLACE')}</b>${e.address ? ` · ${esc(e.address)}` : ''}</span>
           ${e.address ? '' : `<span class="nc-secret">Адрес — в проходке сразу после покупки${addressIsPublic(e) ? '' : ', остальным за сутки до ночи'}</span>`}
           <span>${esc(fmtWhen(e.startsAt).replace(/·\s*\d{2}:\d{2}$/, '').trim())} · двери ${esc(SITE.doorsOpen)} · старт ${esc(SITE.showStart)}</span>
-          <span>уже идут <b>${going}</b></span>
+          ${going === null ? '' : `<span>уже идут <b>${going}</b></span>`}
         </div>
         <div class="nc-foot">
           <div>${priceHtml}<br />${leftHtml}</div>
@@ -426,4 +426,15 @@ export function mountAftermovie(hostId) {
     v.controls = false;
     v.currentTime = 0;
   });
+}
+
+// Правило SECRET PLACE на главной и /night — общее для бренда, а у ближайшей
+// ночи адрес может быть открыт: дописываем, как именно в этот раз
+export function fillSecretNote(e) {
+  const note = e
+    ? (e.address && !e.secret
+      ? `Ближайшая ночь — с открытым адресом: ${e.venue}, ${e.address}.`
+      : 'Ближайшая ночь — SECRET PLACE: адрес придёт в проходку.')
+    : '';
+  document.querySelectorAll('[data-secret-note]').forEach((el) => { el.textContent = note; });
 }

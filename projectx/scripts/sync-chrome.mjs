@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PAGES = ['index.html', 'afisha.html', 'night.html', 'fc.html', 'rules.html', 'faq.html', 'contacts.html', 'event.html', 'privacy.html'];
+const PAGES = ['index.html', 'afisha.html', 'night.html', 'fc.html', 'rules.html', 'faq.html', 'contacts.html', 'event.html', 'privacy.html', 'offer.html'];
 
 const NAV = [
   ['/afisha', 'Афиша', 'ближайшие ночи и проходки'],
@@ -57,6 +57,7 @@ const FOOTER = `<!-- chrome:footer -->
       </div>
       <nav class="f-links" aria-label="Разделы">
 ${NAV.map(([href, label]) => `        <a href="${href}">${label}</a>`).join('\n')}
+        <a href="/offer">Условия</a>
         <a href="/privacy">Политика</a>
         <a href="https://www.instagram.com/project.x.prty" target="_blank" rel="noopener">Instagram*</a>
       </nav>

@@ -632,6 +632,15 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
   color: var(--text); font-size: 1.05rem; padding: 14px; margin-bottom: 10px; text-align: center;
 }
 .pin-panel input:focus { border-color: var(--acid); outline: none; }
+/* касса на дверях: выпадающий список в стиле полей, чекбокс не растягивается на всю ширину */
+.pin-panel select {
+  width: 100%; background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--radius-s);
+  color: var(--text); font-family: inherit; font-size: 1.05rem; padding: 14px; margin-bottom: 10px;
+  text-align: center; text-align-last: center; -webkit-appearance: none; appearance: none;
+}
+.pin-panel select:focus { border-color: var(--acid); outline: none; }
+.pin-panel .check { justify-content: center; align-items: center; margin: 2px 0 0; padding: 8px; font-size: 1rem; color: var(--text); }
+.pin-panel .check input { width: 20px; height: 20px; padding: 0; margin: 0; text-align: initial; }
 .guest-brand { font-family: var(--font-display); font-weight: 900; font-size: 1.6rem; }
 .guest-brand .l2 { color: var(--acid); }
 

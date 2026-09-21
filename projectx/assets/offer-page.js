@@ -41,15 +41,17 @@ document.querySelectorAll('[data-receipt]').forEach((el) => {
     : 'Кассовый чек формируется после подтверждения оплаты и присылается тебе в Telegram-бот или в директ по запросу.';
 });
 
-// реквизиты продавца: только заполненные строки
+// реквизиты продавца — один раз, в разделе «Реквизиты»: полное имя и ИНН
+// нужны по ст. 9 ЗоЗПП, дальше по сайту продавец идёт коротким именем.
+// E-mail здесь не дублируем — он в разделе «Вопросы и претензии».
 const props = [
+  ['Продавец', SE.fullName || ''],
   ['Статус', SE.status ? SE.status[0].toUpperCase() + SE.status.slice(1) : ''],
   ['ИНН', SE.inn],
-  ['E-mail', SE.email ? `<a href="mailto:${esc(SE.email)}">${esc(SE.email)}</a>` : ''],
 ].filter(([, v]) => v);
-for (const dl of [$('seller-props'), $('seller-props-2')]) {
-  if (!dl) continue;
-  if (props.length) dl.innerHTML = props.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
+const dl = $('seller-props');
+if (dl) {
+  if (props.length) dl.innerHTML = props.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
   else dl.hidden = true;
 }
 const emailLi = $('offer-email');

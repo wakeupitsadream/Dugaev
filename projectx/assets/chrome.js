@@ -19,14 +19,15 @@ export function initChrome() {
   fillLegalLine();
 }
 
-// Реквизиты организатора в футере — из SITE.legal, чтобы менять в одном месте
+// Организатор и продавец в футере — из SITE.legal, чтобы менять в одном месте.
+// Только имена: ИНН и полные реквизиты живут в политике и условиях покупки.
 function fillLegalLine() {
   const L = SITE.legal || {};
   const op = L.operator || {};
   const se = L.seller || {};
   const parts = [];
-  if (op.short || op.name) parts.push(`Организатор: ${op.short || op.name}${op.inn ? `, ИНН ${op.inn}` : ''}`);
-  if (se.name) parts.push(`Проходки продаёт ${se.status ? `${se.status} ` : ''}${se.name}${se.inn ? `, ИНН ${se.inn}` : ''}`);
+  if (op.short || op.name) parts.push(`Организатор: ${op.short || op.name}`);
+  if (se.name) parts.push(`Проходки продаёт ${se.status ? `${se.status} ` : ''}${se.name}`);
   if (!parts.length) return;
   document.querySelectorAll('[data-legal-line]').forEach((el) => { el.textContent = parts.join(' · '); });
 }

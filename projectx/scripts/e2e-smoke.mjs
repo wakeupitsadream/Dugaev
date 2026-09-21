@@ -113,15 +113,23 @@ step('выгрузка оплат закрыта для ключа двери', 
 // ---- условия и политика: продавец из конфига ----
 await page.goto(`${B}/offer`, { waitUntil: 'load' });
 await page.waitForTimeout(500);
-const offer = await page.evaluate(() => ({
+const offer = await page.evaluate((inn) => ({
   seller: document.querySelector('[data-seller]')?.textContent || '',
   recipient: document.querySelector('[data-transfer-recipient]')?.textContent || '',
   receipt: document.querySelector('[data-receipt]')?.textContent || '',
   refund: document.querySelector('[data-refund-until]')?.textContent || '',
   ladder: document.querySelector('[data-ladder]')?.textContent || '',
-}));
+  props: document.getElementById('seller-props')?.textContent || '',
+  propsTwice: Boolean(document.getElementById('seller-props-2')),
+  email: document.getElementById('offer-email')?.textContent || '',
+  innCount: inn ? (document.body.textContent.match(new RegExp(inn, 'g')) || []).length : 0,
+  photo: /фотограф/.test(document.getElementById('entry')?.nextElementSibling?.nextElementSibling?.textContent || ''),
+}), SITE.legal.seller.inn);
 step('условия: продавец, получатель и чек из конфига', offer.seller.includes(SITE.legal.seller.name) && offer.recipient === SITE.transfer.recipient && /Мой налог/.test(offer.receipt), offer.seller);
 step('условия: дата возврата и лесенка цен', /2026/.test(offer.refund) && /1 000/.test(offer.ladder), `${offer.refund}; ${offer.ladder}`);
+step('условия: ФИО и ИНН продавца один раз (раздел 11), e-mail в претензиях, согласие на съёмку',
+  offer.props.includes(SITE.legal.seller.fullName) && offer.props.includes(SITE.legal.seller.inn) && !offer.propsTwice
+  && offer.innCount === 1 && offer.email.includes(SITE.legal.seller.email) && offer.photo, `${offer.props} · ИНН ×${offer.innCount}`);
 await page.goto(`${B}/privacy`, { waitUntil: 'load' });
 await page.waitForTimeout(400);
 step('политика: оператор и продавец из конфига', (await page.textContent('[data-legal-operator]')).includes(SITE.legal.operator.name) && (await page.textContent('[data-seller]')).includes(SITE.legal.seller.name));

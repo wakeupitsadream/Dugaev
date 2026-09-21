@@ -22,11 +22,13 @@ export function initChrome() {
 // Реквизиты организатора в футере — из SITE.legal, чтобы менять в одном месте
 function fillLegalLine() {
   const L = SITE.legal || {};
-  const short = L.operatorShort || L.operator;
-  if (!short) return;
-  document.querySelectorAll('[data-legal-line]').forEach((el) => {
-    el.textContent = `${short}${L.inn ? ` · ИНН ${L.inn}` : ''}`;
-  });
+  const op = L.operator || {};
+  const se = L.seller || {};
+  const parts = [];
+  if (op.short || op.name) parts.push(`Организатор: ${op.short || op.name}${op.inn ? `, ИНН ${op.inn}` : ''}`);
+  if (se.name) parts.push(`Проходки продаёт ${se.status ? `${se.status} ` : ''}${se.name}${se.inn ? `, ИНН ${se.inn}` : ''}`);
+  if (!parts.length) return;
+  document.querySelectorAll('[data-legal-line]').forEach((el) => { el.textContent = parts.join(' · '); });
 }
 
 // Липкая кнопка появляется снизу, когда карточка ближайшей ночи ушла с экрана

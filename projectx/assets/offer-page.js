@@ -10,6 +10,8 @@ initChrome();
 observeReveal();
 
 const L = SITE.legal || {};
+const SE = L.seller || {};
+const OP = L.operator || {};
 const T = SITE.transfer || {};
 const $ = (id) => document.getElementById(id);
 const fmtDate = (iso) => (iso
@@ -17,9 +19,9 @@ const fmtDate = (iso) => (iso
   : '');
 
 // продавец
-const seller = `${L.status ? `${L.status} ` : ''}${L.operator || 'организатор ночей PROJECT X'}`;
+const seller = `${SE.status ? `${SE.status} ` : ''}${SE.name || 'организатор ночей PROJECT X'}`;
 document.querySelectorAll('[data-seller]').forEach((el) => { el.textContent = seller; });
-document.querySelectorAll('[data-legal-role]').forEach((el) => { el.textContent = L.roleNote || 'организатор ночей PROJECT X'; });
+document.querySelectorAll('[data-legal-operator]').forEach((el) => { el.textContent = OP.name || 'организатор ночей PROJECT X'; });
 document.querySelectorAll('[data-dm]').forEach((a) => { a.href = SITE.instagramDm; });
 document.querySelectorAll('[data-ig-name]').forEach((el) => { el.textContent = SITE.instagramName; });
 document.querySelectorAll('[data-legal-updated]').forEach((el) => { el.textContent = fmtDate(L.policyUpdated); });
@@ -32,7 +34,7 @@ document.querySelectorAll('[data-transfer-bank]').forEach((el) => { el.textConte
 document.querySelectorAll('[data-transfer-recipient]').forEach((el) => { el.textContent = T.recipient || ''; });
 
 // чек: самозанятый — из «Мой налог», ИП — кассовый
-const selfEmployed = /самозанят/i.test(L.status || '');
+const selfEmployed = /самозанят/i.test(SE.status || '');
 document.querySelectorAll('[data-receipt]').forEach((el) => {
   el.textContent = selfEmployed
     ? 'Продавец применяет налог на профессиональный доход: чек формируется в приложении «Мой налог» после подтверждения оплаты и присылается тебе в Telegram-бот или в директ по запросу.'
@@ -41,11 +43,9 @@ document.querySelectorAll('[data-receipt]').forEach((el) => {
 
 // реквизиты продавца: только заполненные строки
 const props = [
-  ['Статус', L.status ? L.status[0].toUpperCase() + L.status.slice(1) : ''],
-  ['ИНН', L.inn],
-  ['ОГРНИП', L.ogrnip],
-  ['Адрес', L.address],
-  ['E-mail', L.email ? `<a href="mailto:${esc(L.email)}">${esc(L.email)}</a>` : ''],
+  ['Статус', SE.status ? SE.status[0].toUpperCase() + SE.status.slice(1) : ''],
+  ['ИНН', SE.inn],
+  ['E-mail', SE.email ? `<a href="mailto:${esc(SE.email)}">${esc(SE.email)}</a>` : ''],
 ].filter(([, v]) => v);
 for (const dl of [$('seller-props'), $('seller-props-2')]) {
   if (!dl) continue;
@@ -54,7 +54,7 @@ for (const dl of [$('seller-props'), $('seller-props-2')]) {
 }
 const emailLi = $('offer-email');
 if (emailLi) {
-  if (L.email) emailLi.innerHTML = `по электронной почте <a href="mailto:${esc(L.email)}">${esc(L.email)}</a>;`;
+  if (SE.email) emailLi.innerHTML = `по электронной почте <a href="mailto:${esc(SE.email)}">${esc(SE.email)}</a>;`;
   else emailLi.remove();
 }
 

@@ -3,6 +3,8 @@
 // Это витрина тех же данных, которые позже заберёт TG-бот через /api/stats.
 import { plural, fmtWhen, fmtTime } from './ticket-format.js';
 import { esc } from './events-load.js';
+import { SITE } from './data/config.js';
+import { ordersCsv, csvFileName } from './csv.js';
 import { activeWave } from './waves.js';
 import { qrSvg } from './qr.js';
 
@@ -544,7 +546,39 @@ function bindWalkin() {
 // ---------- Сервис: инициализация БД и боевой самотест ----------
 const TEST_PHONE = '+70000000000'; // маркер тестовых заказов, чистится cleanupTest
 
+// Выгрузка оплаченных заказов ночи: продавец выбивает по ним чеки в
+// «Мой налог», файл открывается в Excel без импорта (BOM, «;»)
+function bindExport() {
+  const b = $('btn-export');
+  if (!b || b.dataset.bound) return;
+  b.dataset.bound = '1';
+  b.onclick = async () => {
+    if (!state.current) return;
+    b.disabled = true;
+    let j = null;
+    try {
+      const r = await fetch(`/api/stats?event_id=${encodeURIComponent(state.current)}&orders=1`, { headers: headers() });
+      j = await r.json().catch(() => null);
+    } catch { /* ниже */ }
+    b.disabled = false;
+    if (!j?.ok) {
+      $('offline-note').textContent = `Выгрузка не удалась: ${j?.message || 'нет ответа'}`;
+      return;
+    }
+    const blob = new Blob([ordersCsv(j.orders || [], { tz: SITE.tz })], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = csvFileName(state.current);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    $('offline-note').textContent = `Оплат в файле: ${(j.orders || []).length}`;
+  };
+}
+
 function bindService() {
+  bindExport();
   if ($('svc-seed').dataset.bound) return;
   $('svc-seed').dataset.bound = '1';
 

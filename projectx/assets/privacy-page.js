@@ -12,19 +12,21 @@ const L = SITE.legal || {};
 const $ = (id) => document.getElementById(id);
 
 // оператор и связь
-document.querySelectorAll('[data-legal-operator]').forEach((el) => {
-  el.textContent = `${L.status ? `${L.status} ` : ''}${L.operator || 'организатор ночей PROJECT X'}`;
+const OP = L.operator || {};
+const SE = L.seller || {};
+document.querySelectorAll('[data-legal-operator]').forEach((el) => { el.textContent = OP.name || 'организатор ночей PROJECT X'; });
+document.querySelectorAll('[data-seller]').forEach((el) => {
+  el.textContent = SE.name ? `${SE.status ? `${SE.status} ` : ''}${SE.name}` : 'продавец проходок';
 });
-document.querySelectorAll('[data-legal-role]').forEach((el) => { el.textContent = L.roleNote || 'организатор ночей PROJECT X'; });
 document.querySelectorAll('[data-dm]').forEach((a) => { a.href = SITE.instagramDm; });
 document.querySelectorAll('[data-ig-name]').forEach((el) => { el.textContent = SITE.instagramName; });
 
 // реквизиты: только заполненные строки, пустой блок скрывается
 const props = [
-  ['ИНН', L.inn],
-  ['ОГРНИП', L.ogrnip],
-  ['Адрес', L.address],
-  ['E-mail', L.email ? `<a href="mailto:${esc(L.email)}">${esc(L.email)}</a>` : ''],
+  ['ИНН', OP.inn],
+  ['ОГРНИП', OP.ogrnip],
+  ['Адрес', OP.address],
+  ['E-mail', OP.email ? `<a href="mailto:${esc(OP.email)}">${esc(OP.email)}</a>` : ''],
 ].filter(([, v]) => v);
 const dl = $('legal-props');
 if (dl) {
@@ -33,7 +35,7 @@ if (dl) {
 }
 const emailLi = $('legal-email');
 if (emailLi) {
-  if (L.email) emailLi.innerHTML = `по электронной почте <a href="mailto:${esc(L.email)}">${esc(L.email)}</a>;`;
+  if (OP.email) emailLi.innerHTML = `по электронной почте <a href="mailto:${esc(OP.email)}">${esc(OP.email)}</a>;`;
   else emailLi.remove();
 }
 

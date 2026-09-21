@@ -163,6 +163,32 @@ export default async function handler(req, res) {
       })),
     };
 
+    // ?orders=1 — оплаченные заказы ночи: продавец выбивает по ним чеки
+    // в «Мой налог» (панель отдаёт CSV), бухгалтерия сверяет с выпиской
+    if (req.query.orders === '1') {
+      const rows = await sql.query(
+        `SELECT o.id, o.pay_code, o.qty, o.amount_rub, o.buyer_name, o.buyer_phone, o.provider,
+                o.confirmed_by, o.paid_at, o.created_at, o.utm
+         FROM orders o WHERE o.event_id = $1 AND o.status = 'paid' ORDER BY o.paid_at, o.created_at`,
+        [eventId]
+      );
+      out.orders = (rows.rows || rows).map((o) => {
+        const utm = typeof o.utm === 'string' ? JSON.parse(o.utm) : (o.utm || {});
+        return {
+          id: o.id,
+          pay_code: o.pay_code,
+          qty: Number(o.qty),
+          amount_rub: Number(o.amount_rub),
+          buyer_name: o.buyer_name,
+          buyer_phone: o.buyer_phone,
+          provider: o.provider,
+          confirmed_by: o.confirmed_by,
+          paid_at: o.paid_at ? new Date(o.paid_at).toISOString() : null,
+          created_at: new Date(o.created_at).toISOString(),
+          src: utm && utm.src ? String(utm.src) : '',
+        };
+      });
+    }
     if (req.query.list === '1') {
       const rows = await sql.query(
         `SELECT id, holder_name, age_cat, status, checked_in_at

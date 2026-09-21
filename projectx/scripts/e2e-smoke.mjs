@@ -1,6 +1,6 @@
 // Дымовой e2e боевого сценария на локальном стенде (scripts/devserver.mjs,
 // DEV_PGLITE=1). Запуск из projectx:
-//   NODE_PATH=<папка с playwright-core> node test/e2e/smoke.mjs
+//   NODE_PATH=<папка с playwright-core> node scripts/e2e-smoke.mjs
 // Проверяет то, без чего нельзя принимать деньги: бронь на сайте → экран
 // перевода с реквизитами из конфига → «Я перевёл» → подтверждение в панели
 // → проходка активна → дверь по ключу двери; плюс страницы условий и
@@ -21,7 +21,7 @@ const api = async (path, opts = {}) => {
 };
 const admin = { 'X-Admin-Key': KEY, 'X-Admin-Name': encodeURIComponent('Тест') };
 
-const { SITE } = await import('../../assets/data/config.js');
+const { SITE } = await import('../assets/data/config.js');
 const browser = await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium' });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const page = await ctx.newPage();
@@ -88,6 +88,28 @@ await door.click('#do-checkin');
 await door.waitForFunction(() => document.querySelector('#stage')?.textContent.includes('Впущен'), null, { timeout: 10000 });
 step('чек-ин прошёл', true);
 
+// ---- дверь: гость без проходки прямо со сканера ----
+await door.goto(`${B}/scan`, { waitUntil: 'load' });
+await door.waitForSelector('#walkin-open', { timeout: 10000 });
+await door.click('#walkin-open');
+await door.waitForSelector('#wk-name', { timeout: 10000 });
+const waveOptions = await door.$$eval('#wk-wave option', (els) => els.map((o) => o.textContent));
+step('дверь: форма гостя с волнами из афиши', waveOptions.length >= 1 && /1000 ₽/.test(waveOptions[0]), waveOptions[0]);
+await door.fill('#wk-name', 'Гость Свхода');
+await door.click('#wk-add');
+await door.waitForFunction(() => /Оформлен/.test(document.querySelector('#stage')?.textContent || ''), null, { timeout: 10000 });
+step('дверь: гость оформлен и впущен', /впущен/.test(await door.textContent('#stage')) && /1000 ₽/.test(await door.textContent('#stage')));
+const guests = await api(`/api/stats?event_id=${NIGHT}&list=1`, { headers: admin });
+const walk = (guests.j?.tickets || []).find((t) => t.holder_name === 'Гость Свхода');
+step('панель: гость с двери в списке, уже вошёл', Boolean(walk && walk.checked_in_at));
+
+// ---- выгрузка оплат для чеков ----
+const orders = await api(`/api/stats?event_id=${NIGHT}&orders=1`, { headers: admin });
+const paid = orders.j?.orders || [];
+step('оплаты для чеков: перевод и касса с суммами и датами', paid.length >= 2 && paid.every((o) => o.paid_at && o.amount_rub > 0) && paid.some((o) => o.provider === 'door') && paid.some((o) => o.provider === 'transfer'), `${paid.length} оплат`);
+const doorDenied = await api(`/api/stats?event_id=${NIGHT}&orders=1`, { headers: { 'X-Admin-Key': DOOR } });
+step('выгрузка оплат закрыта для ключа двери', doorDenied.status === 403);
+
 // ---- условия и политика: продавец из конфига ----
 await page.goto(`${B}/offer`, { waitUntil: 'load' });
 await page.waitForTimeout(500);
@@ -98,11 +120,11 @@ const offer = await page.evaluate(() => ({
   refund: document.querySelector('[data-refund-until]')?.textContent || '',
   ladder: document.querySelector('[data-ladder]')?.textContent || '',
 }));
-step('условия: продавец, получатель и чек из конфига', offer.seller.includes(SITE.legal.operator) && offer.recipient === SITE.transfer.recipient && /Мой налог/.test(offer.receipt), offer.seller);
+step('условия: продавец, получатель и чек из конфига', offer.seller.includes(SITE.legal.seller.name) && offer.recipient === SITE.transfer.recipient && /Мой налог/.test(offer.receipt), offer.seller);
 step('условия: дата возврата и лесенка цен', /2026/.test(offer.refund) && /1 000/.test(offer.ladder), `${offer.refund}; ${offer.ladder}`);
 await page.goto(`${B}/privacy`, { waitUntil: 'load' });
 await page.waitForTimeout(400);
-step('политика: оператор из конфига', (await page.textContent('[data-legal-operator]')).includes(SITE.legal.operator));
+step('политика: оператор и продавец из конфига', (await page.textContent('[data-legal-operator]')).includes(SITE.legal.operator.name) && (await page.textContent('[data-seller]')).includes(SITE.legal.seller.name));
 
 // ---- главная: правило SECRET PLACE с открытым адресом, футер ----
 await page.goto(`${B}/`, { waitUntil: 'load' });
@@ -113,7 +135,7 @@ const home = await page.evaluate(() => ({
   going: document.body.innerText.includes('уже идут'),
 }));
 step('главная: правило SECRET PLACE говорит об открытом адресе', /открытым адресом/.test(home.note) && /Волгоградская/.test(home.note), home.note);
-step('главная: футер с продавцом из конфига, без выдуманного счётчика', home.legal.includes(SITE.legal.operatorShort) && !home.going, home.legal);
+step('главная: футер с организатором и продавцом из конфига, без выдуманного счётчика', home.legal.includes(SITE.legal.operator.short) && home.legal.includes(SITE.legal.seller.name) && !home.going, home.legal);
 
 // ---- /night: то же правило с приписки об адресе ----
 await page.goto(`${B}/night`, { waitUntil: 'load' });

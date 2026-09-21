@@ -9,7 +9,7 @@
 //   + офлайн-список из admin.html (localStorage).
 import { parseToken, formatTicketCode, normalizeManualId, fmtTime, plural } from './ticket-format.js';
 import { enqueue, pendingItems, applyResults } from './outbox.js';
-import { esc } from './events-load.js';
+import { esc, loadEvents, upcoming } from './events-load.js';
 
 const $ = (id) => document.getElementById(id);
 const LS_KEY = 'th_admin_key';
@@ -256,9 +256,10 @@ function renderExpired(j) {
   stage('danger', `
     <div class="scan-verdict">${j.status === 'cancelled' ? 'Бронь отменена' : 'Бронь сгорела'}</div>
     <div class="scan-name">${esc(j.holder_name || '')}</div>
-    <p class="scan-sub">Оплата не подтверждена вовремя, места вернулись в продажу. Хочет зайти — оформи как нового гостя через кассу в панели (телефон админа).</p>
+    <p class="scan-sub">Оплата не подтверждена вовремя, места вернулись в продажу. Хочет зайти — возьми деньги на входе и оформи как нового гостя.</p>
   `);
-  foot(scanNextBtn());
+  foot(`<button class="btn btn-ghost" id="walkin-open" type="button">＋ Оформить как нового гостя</button>${scanNextBtn()}`);
+  $('walkin-open').onclick = () => renderWalkin(j.holder_name || '');
   bindScanNext();
   beep('bad');
 }
@@ -395,11 +396,100 @@ function renderManualOnly() {
     <div class="scan-meta-pill" id="outbox-pill"></div>
   `);
   foot(`<button class="btn btn-acid" id="manual-go" type="button">Найти билет</button>
+        <button class="btn btn-ghost" id="walkin-open" type="button">＋ Гость без проходки</button>
         <button class="btn btn-ghost" id="logout" type="button">Выйти из режима</button>`);
   $('manual-go').onclick = manualLookup;
   $('manual-id').onkeydown = (e) => { if (e.key === 'Enter') manualLookup(); };
+  $('walkin-open').onclick = () => renderWalkin('');
   $('logout').onclick = () => { localStorage.removeItem(LS_KEY); state.key = ''; renderGuest(); };
   updateOutboxPill();
+}
+
+// ---------- Касса на дверях: гость без проходки ----------
+// Дверь оформляет гостя, который платит на входе: та же касса, что в панели
+// (/api/walkin, роль двери), но с телефона хостес. Волны — публичные, с
+// местами; цена берётся из афиши, квота списывается атомарно.
+async function loadWalkinEvent() {
+  if (state.walkinEvent) return state.walkinEvent;
+  const { events } = await loadEvents();
+  const e = upcoming(events)[0] || null;
+  state.walkinEvent = e;
+  return e;
+}
+
+async function renderWalkin(prefillName) {
+  stage('neutral', `<div class="scan-verdict" style="color: var(--muted);">Загружаю афишу…</div>`);
+  foot('');
+  const e = await loadWalkinEvent();
+  const waves = e ? e.waves.filter((w) => (w.quota - (w.sold || 0)) > 0) : [];
+  if (!e || !waves.length) {
+    stage('danger', `
+      <div class="scan-verdict">${e ? 'Мест нет' : 'Нет ночи в продаже'}</div>
+      <p class="scan-sub">${e ? 'Все публичные волны распроданы — гостя может оформить только владелец через панель.' : 'На афише нет ночи в продаже.'}</p>
+    `);
+    foot(scanNextBtn());
+    bindScanNext();
+    return;
+  }
+  stage('neutral', `
+    <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
+    <p class="scan-sub" style="margin: 10px 0 4px;">Гость без проходки · ${esc(e.title)}</p>
+    <p class="scan-sub" style="margin: 0 0 14px;">Возьми деньги на входе и оформи — квота спишется, проходка появится в списке гостей.</p>
+    <div class="pin-panel">
+      <input type="text" id="wk-name" placeholder="Имя и фамилия гостя" autocomplete="off" value="${esc(prefillName || '')}" />
+      <select id="wk-wave" aria-label="Цена">
+        ${waves.map((w) => `<option value="${w.waveNo}">${esc(w.name)} · ${w.priceRub} ₽ · осталось ${w.quota - (w.sold || 0)}</option>`).join('')}
+      </select>
+      <label class="check" style="margin: 8px 0 0;"><input type="checkbox" id="wk-checkin" checked /><span>сразу впустить</span></label>
+    </div>
+  `);
+  foot(`<button class="btn btn-ok btn-block" id="wk-add" type="button">Оформить</button>
+        <button class="btn btn-ghost" id="wk-back" type="button">Назад</button>`);
+  $('wk-name').focus();
+  $('wk-add').onclick = () => submitWalkin(e);
+  $('wk-name').onkeydown = (ev) => { if (ev.key === 'Enter') submitWalkin(e); };
+  $('wk-back').onclick = renderManualOnly;
+}
+
+async function submitWalkin(e) {
+  const name = $('wk-name').value.trim();
+  if (name.length < 2) {
+    $('wk-name').focus();
+    return pinHint('Напиши имя и фамилию гостя — проходка именная.');
+  }
+  const btn = $('wk-add');
+  btn.disabled = true;
+  btn.textContent = 'Оформляю…';
+  let j = null;
+  let status = 0;
+  try {
+    const r = await fetch('/api/walkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({
+        action: 'walkin', event_id: e.id, wave_no: Number($('wk-wave').value), name,
+        checkin: $('wk-checkin').checked, by: `дверь · ${state.name}`, src: 'door',
+      }),
+    });
+    status = r.status;
+    j = await r.json().catch(() => null);
+  } catch { /* ниже */ }
+  if (j?.ok) {
+    state.walkinEvent = null; // квоты изменились — при следующем госте перечитаем
+    stageLockOk(
+      j.checked_in_at ? 'Оформлен и впущен' : 'Оформлен',
+      `${name} · ${j.price_rub} ₽ принято${j.checked_in_at ? ' · выдай браслет' : ''}`
+    );
+    return;
+  }
+  if (status === 403) return badKey();
+  btn.disabled = false;
+  btn.textContent = 'Оформить';
+  if (j?.error === 'wave_sold_out') {
+    state.walkinEvent = null;
+    return pinHint(j.next_wave ? `${j.message}: ${j.next_wave.name} за ${j.next_wave.priceRub} ₽ — обнови форму кнопкой «Назад»` : j.message);
+  }
+  pinHint(j?.message || 'Не получилось — проверь сеть и попробуй ещё раз');
 }
 
 function manualBtn() {

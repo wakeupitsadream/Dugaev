@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       const e = (ev.rows || ev)[0];
       if (!e) return fail(res, 404, 'not_found', 'Ночь не найдена');
       const rows = await sql.query(
-        `SELECT id, holder_name, age_cat, status, checked_in_at FROM tickets WHERE event_id = $1 ORDER BY holder_name`,
+        `SELECT id, order_id, holder_name, age_cat, status, checked_in_at FROM tickets WHERE event_id = $1 ORDER BY holder_name`,
         [eventId]
       );
       return ok(res, {
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
         title: e.title,
         starts_at: new Date(e.starts_at).toISOString(),
         tickets: (rows.rows || rows).map((t) => ({
-          id: t.id, holder_name: t.holder_name, age_cat: t.age_cat, status: t.status,
+          id: t.id, order_id: t.order_id, holder_name: t.holder_name, age_cat: t.age_cat, status: t.status,
           checked_in_at: t.checked_in_at ? new Date(t.checked_in_at).toISOString() : null,
         })),
       });
@@ -71,7 +71,7 @@ export default async function handler(req, res) {
     // сгоревшие брони списываются перед подсчётом — иначе «ожидают» врут
     try { await sql.query(EXPIRE_SQL); } catch { /* не критично для сводки */ }
 
-    const [summary, byWave, curve, scans, byDay, byProvider, pending, sources, evRow] = await Promise.all([
+    const [summary, byWave, curve, scans, byDay, byProvider, pending, sources, evRow, refunds] = await withTimeout(Promise.all([
       sql.query(
         `SELECT count(t.id) FILTER (WHERE t.status IN ('active'))::int AS sold,
                 count(t.id) FILTER (WHERE t.status = 'reserved')::int AS reserved,
@@ -104,7 +104,7 @@ export default async function handler(req, res) {
         [eventId]
       ),
       sql.query(
-        `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d,
+        `SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'Asia/Yekaterinburg'), 'YYYY-MM-DD') AS d,
                 sum(qty)::int AS n, sum(amount_rub)::int AS rub
          FROM orders
          WHERE event_id = $1 AND status = 'paid' AND created_at > now() - interval '14 days'
@@ -120,7 +120,14 @@ export default async function handler(req, res) {
       sql.query(PENDING_SQL, [eventId]),
       sql.query(SOURCES_SQL, [eventId]),
       sql.query(`SELECT title, starts_at, capacity, secret, address, venue FROM events WHERE id = $1`, [eventId]),
-    ]);
+      // возвращённые проходки: их деньги вычитаем из выручки
+      sql.query(
+        `SELECT count(*)::int AS n, coalesce(sum(w.price_rub), 0)::int AS rub
+         FROM tickets t JOIN orders o ON o.id = t.order_id JOIN price_waves w ON w.id = o.wave_id
+         WHERE t.event_id = $1 AND t.status = 'refunded'`,
+        [eventId]
+      ),
+    ]), 8000);
 
     const ev = (evRow.rows || evRow)[0] || {};
     const out = {
@@ -129,6 +136,7 @@ export default async function handler(req, res) {
       capacity: ev.capacity == null ? null : Number(ev.capacity),
       secret: Boolean(ev.secret),
       ...((summary.rows || summary)[0] || {}),
+      refunded: (refunds.rows || refunds)[0] ? { n: Number((refunds.rows || refunds)[0].n), rub: Number((refunds.rows || refunds)[0].rub) } : { n: 0, rub: 0 },
       by_wave: (byWave.rows || byWave),
       pending: (pending.rows || pending).map((o) => ({
         id: o.id,
@@ -168,7 +176,8 @@ export default async function handler(req, res) {
     if (req.query.orders === '1') {
       const rows = await sql.query(
         `SELECT o.id, o.pay_code, o.qty, o.amount_rub, o.buyer_name, o.buyer_phone, o.provider,
-                o.confirmed_by, o.paid_at, o.created_at, o.utm
+                o.confirmed_by, o.paid_at, o.created_at, o.utm,
+                (SELECT count(*) FROM tickets t WHERE t.order_id = o.id AND t.status = 'refunded')::int AS refunded
          FROM orders o WHERE o.event_id = $1 AND o.status = 'paid' ORDER BY o.paid_at, o.created_at`,
         [eventId]
       );
@@ -185,18 +194,20 @@ export default async function handler(req, res) {
           confirmed_by: o.confirmed_by,
           paid_at: o.paid_at ? new Date(o.paid_at).toISOString() : null,
           created_at: new Date(o.created_at).toISOString(),
+          refunded: Number(o.refunded || 0),
           src: utm && utm.src ? String(utm.src) : '',
         };
       });
     }
     if (req.query.list === '1') {
       const rows = await sql.query(
-        `SELECT id, holder_name, age_cat, status, checked_in_at
+        `SELECT id, order_id, holder_name, age_cat, status, checked_in_at
          FROM tickets WHERE event_id = $1 ORDER BY holder_name`,
         [eventId]
       );
       out.tickets = (rows.rows || rows).map((t) => ({
         id: t.id,
+        order_id: t.order_id,
         holder_name: t.holder_name,
         age_cat: t.age_cat,
         status: t.status,

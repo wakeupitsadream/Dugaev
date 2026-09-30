@@ -10,12 +10,21 @@
 //
 // POST { action: 'claim', order_id } — гость нажал «Я перевёл»: заказ
 // помечается, владельцу уходит уведомление с кнопкой подтверждения.
+import { createHash } from 'node:crypto';
 import { normalizePhone } from '../assets/ticket-format.js';
 import { db, hasDb } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { notifyOwner, tgBotUsername } from './_lib/tg.js';
-import { isOrderId } from './_lib/booking.js';
-import { placeOrder, ownerNotice } from './_lib/order-core.js';
+import { isOrderId, TEST_PHONE } from './_lib/booking.js';
+import { isAdmin } from './_lib/auth.js';
+import { placeOrder, ownerNotice, ownerNoticeMarkup } from './_lib/order-core.js';
+
+// Адрес гостя в базе не храним — только короткий хеш для лимита броней
+function ipHash(req) {
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || String(req.socket?.remoteAddress || '');
+  if (!ip) return '';
+  return createHash('sha256').update(`${ip}|${process.env.TICKET_SECRET || ''}`).digest('hex').slice(0, 16);
+}
 
 export default async function handler(req, res) {
   noStore(res);
@@ -34,14 +43,15 @@ export default async function handler(req, res) {
   const buyer = b.buyer || {};
   const attendees = Array.isArray(b.attendees) ? b.attendees : [];
   const phone = normalizePhone(String(buyer.phone || ''));
-  const buyerName = String(buyer.name || '').trim();
+  const buyerName = String(buyer.name || '').trim().slice(0, 80);
   const buyerTg = String(buyer.tg || '').trim().replace(/^@/, '').slice(0, 64) || null;
   const utm = typeof b.utm === 'object' && b.utm ? { src: String(b.utm.src || '').slice(0, 32) } : null;
 
   const fieldErrors = {};
-  if (!eventId || !Number.isInteger(waveNo)) return fail(res, 400, 'validation', 'Некорректный запрос');
+  if (!eventId || !Number.isInteger(waveNo) || waveNo < 1 || waveNo > 32767) return fail(res, 400, 'validation', 'Некорректный запрос');
   if (buyerName.length < 2) fieldErrors.name = 'Как тебя зовут?';
   if (!phone) fieldErrors.phone = 'Нужен телефон в формате +7...';
+  else if (phone === TEST_PHONE && !isAdmin(req)) fieldErrors.phone = 'Укажи настоящий номер';
   if (b.consent !== true) fieldErrors.consent = 'Нужно согласие на обработку данных';
   if (Object.keys(fieldErrors).length) {
     return fail(res, 400, 'validation', 'Проверь поля', { fields: fieldErrors });
@@ -51,10 +61,10 @@ export default async function handler(req, res) {
     return fail(res, 503, 'db_unavailable', 'Онлайн-оформление сейчас недоступно');
   }
 
-  const r = await placeOrder(db(), { eventId, waveNo, buyerName, phone, buyerTg, utm, attendees });
+  const r = await placeOrder(db(), { eventId, waveNo, buyerName, phone, buyerTg, utm, attendees, iph: ipHash(req) });
   if (!r.ok) return fail(res, r.status, r.error, r.message, r.extra || {});
   const { event, order } = r;
-  await notifyOwner(ownerNotice(event, order, 'сайт'));
+  await notifyOwner(ownerNotice(event, order, 'сайт'), ownerNoticeMarkup(order));
 
   ok(res, {
     order_id: order.id,
@@ -75,19 +85,26 @@ async function claim(req, res, b) {
   if (!isOrderId(oid)) return fail(res, 400, 'validation', 'Некорректный номер брони');
   if (!hasDb()) return fail(res, 503, 'db_unavailable', 'Сервис недоступен');
   try {
+    // повторное нажатие в ближайшие минуты владельца не дёргает: одна бронь —
+    // одно уведомление, иначе кнопкой можно заспамить его чат
+    const cur = (await db().query(
+      `SELECT status, claimed_at, (claimed_at IS NOT NULL AND claimed_at > now() - interval '10 minutes') AS recent
+       FROM orders WHERE id = $1`, [oid]
+    ));
+    const c = (cur.rows || cur)[0];
+    if (!c || c.status !== 'pending') {
+      // уже подтверждена, сгорела или отменена — страница проходки покажет актуальный статус
+      return fail(res, 409, 'not_pending', 'Бронь уже обработана', { status: c ? c.status : 'not_found' });
+    }
+    if (c.recent) return ok(res, { claimed_at: new Date(c.claimed_at).toISOString(), repeated: true });
     const rows = await db().query(
-      `UPDATE orders SET claimed_at = COALESCE(claimed_at, now())
+      `UPDATE orders SET claimed_at = now()
        WHERE id = $1 AND status = 'pending'
        RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone, claimed_at, event_id`,
       [oid]
     );
     const o = (rows.rows || rows)[0];
-    if (!o) {
-      // уже подтверждена, сгорела или отменена — страница проходки покажет актуальный статус
-      const st = await db().query(`SELECT status FROM orders WHERE id = $1`, [oid]);
-      const s = (st.rows || st)[0];
-      return fail(res, 409, 'not_pending', 'Бронь уже обработана', { status: s ? s.status : 'not_found' });
-    }
+    if (!o) return fail(res, 409, 'not_pending', 'Бронь уже обработана', { status: 'not_found' });
     await notifyOwner(
       `💸 Гость сообщил о переводе\n${o.pay_code} · ${o.amount_rub} ₽ · ${o.qty} шт.\n` +
         `${o.buyer_name}, ${o.buyer_phone}\n\nПроверь поступление в банке и подтверди:`,

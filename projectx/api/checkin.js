@@ -31,7 +31,14 @@ export default async function handler(req, res) {
 
   if (!hasDb()) return fail(res, 503, 'db_unavailable', 'БД недоступна — работай по офлайн-списку');
 
-  const at = b.at && !Number.isNaN(Date.parse(b.at)) ? new Date(b.at).toISOString() : null;
+  // время отметки из офлайн-очереди телефона: только строка, не из будущего
+  // и не старше двух суток — иначе кривые часы телефона портят журнал входа
+  let at = null;
+  if (typeof b.at === 'string' && !Number.isNaN(Date.parse(b.at))) {
+    const t = Date.parse(b.at);
+    const now = Date.now();
+    if (t <= now + 5 * 60_000 && t >= now - 48 * 3600_000) at = new Date(t).toISOString();
+  }
 
   try {
     const sql = db();
@@ -95,6 +102,7 @@ export default async function handler(req, res) {
 
 async function logScan(sql, ticketId, result, by) {
   try {
-    await sql.query(`INSERT INTO scan_log (ticket_id, result, scanned_by) VALUES ($1, $2, $3)`, [ticketId, result, by]);
+    // журнал не должен ни ломать, ни задерживать вход: секунда — и отвечаем
+    await withTimeout(sql.query(`INSERT INTO scan_log (ticket_id, result, scanned_by) VALUES ($1, $2, $3)`, [ticketId, result, by]), 1000);
   } catch { /* лог не должен ломать вход */ }
 }

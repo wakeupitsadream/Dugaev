@@ -1,11 +1,16 @@
 // Офлайн-очередь чек-инов — чистая логика без localStorage и без сети.
 // Хранение и отправка — забота вызывающего кода (scan-page.js).
-// Запись: { ticketId, by, at } (at — ISO-время нажатия «Впустить под запись»).
+// Запись: { ticketId, by, at, orderId?, cash? } (at — ISO-время нажатия
+// «Впустить под запись»; cash — дверь приняла наличные за неоплаченную бронь,
+// при синхронизации сервер сначала подтверждает заказ, потом отмечает вход).
 
 export function enqueue(list, entry) {
   if (!entry || typeof entry.ticketId !== 'string' || !entry.ticketId) return list;
   if (list.some((e) => e.ticketId === entry.ticketId)) return list; // идемпотентно
-  return [...list, { ticketId: entry.ticketId, by: entry.by || '', at: entry.at || '' }];
+  return [...list, {
+    ticketId: entry.ticketId, by: entry.by || '', at: entry.at || '',
+    ...(entry.orderId ? { orderId: entry.orderId } : {}), ...(entry.cash ? { cash: true } : {}),
+  }];
 }
 
 // Что отправлять при синхронизации (порядок сохраняется)

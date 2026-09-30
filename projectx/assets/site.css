@@ -173,7 +173,7 @@ body.menu-open { overflow: hidden; }
 
 /* ---------- HERO: чёрная сцена, живой знак ---------- */
 .hero-v3 {
-  position: relative; min-height: 100svh; overflow: hidden;
+  position: relative; min-height: 100vh; min-height: 100svh; overflow: hidden;
   display: flex; flex-direction: column; justify-content: flex-end;
   padding: calc(var(--header-h) + 24px) 0 28px;
   background: var(--bg);
@@ -301,10 +301,10 @@ body.menu-open { overflow: hidden; }
 @keyframes light-in { to { opacity: 1; } }
 
 /* ---------- НОЧЬ: сцена по скроллу — три правила ---------- */
-.night { position: relative; height: 330svh; }
-@media (max-width: 760px) { .night { height: 280svh; } }
+.night { position: relative; height: 330vh; height: 330svh; }
+@media (max-width: 760px) { .night { height: 280vh; height: 280svh; } }
 .night-stage {
-  position: sticky; top: 0; height: 100svh; overflow: hidden;
+  position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
 }
 .night-x {
@@ -815,3 +815,7 @@ a.poster:active { --s: 0.98; transform: scale(var(--s)); }
   .legal-props dt { margin-top: 8px; }
   .legal-props dt:first-child { margin-top: 0; }
 }
+
+/* липкая кнопка «Проходки» не должна накрывать последние строки футера (сноска про Meta) */
+@media (max-width: 760px) { .site-v3 .site-footer { padding-bottom: calc(96px + env(safe-area-inset-bottom)); } }
+.nc-left b { color: var(--acid-text, var(--acid)); }

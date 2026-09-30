@@ -47,11 +47,15 @@ export async function tgApi(method, payload, timeoutMs = 4000) {
 // replyMarkup — опциональная inline-клавиатура (кнопки подтверждения).
 export async function notifyOwner(text, replyMarkup) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!chatId) return;
-  await tgApi('sendMessage', {
+  if (!chatId) return null;
+  const payload = {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
-  }, 2500);
+  };
+  // одна повторная попытка: медленный Telegram не должен терять «Я перевёл»
+  const r = await tgApi('sendMessage', payload, 2500);
+  if (r) return r;
+  return tgApi('sendMessage', payload, 2500);
 }

@@ -2,7 +2,7 @@
 // лента афиш, манифест, программа, фейсконтроль. Блоки — в blocks.js,
 // здесь только порядок сборки, живой знак и то, что есть лишь на главной.
 import { loadEvents, upcoming, esc } from './events-load.js';
-import { fromPrice, ladderText } from './waves.js';
+import { fromPrice, ladderText, fmtRub } from './waves.js';
 import { fillSecretNote } from './blocks.js';
 import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
 import { springTo } from './spring.js';
@@ -96,7 +96,7 @@ function renderCta() {
     (ladder ? `<span data-ladder>${esc(ladder)}</span>. ` : '') +
     'Проходка берётся за минуту, вход — по именному QR. ' +
     (e.address && !e.secret ? `Адрес — ${esc(e.address)}.` : 'Адрес придёт в проходку перед стартом.');
-  $('cta-buy').textContent = price ? `Взять проходку · ${price} ₽` : 'Подробнее о ночи';
+  $('cta-buy').textContent = price ? `Взять проходку · ${fmtRub(price)} ₽` : 'Подробнее о ночи';
 }
 
 // ---------- Счётчик ----------
@@ -107,6 +107,14 @@ function startCountdown() {
   const target = Date.parse(e.startsAt);
   $('countdown').hidden = false;
   const tick = () => {
+    if (target - Date.now() <= 0) {
+      // ночь уже идёт: вместо нулей — честная строка
+      $('countdown').hidden = true;
+      const meta = $('ne-meta');
+      if (meta && !/уже идёт/.test(meta.textContent)) meta.textContent = `${meta.textContent} · уже идёт, двери открыты`;
+      clearInterval(cdTimer);
+      return;
+    }
     let left = Math.max(0, target - Date.now());
     const d = Math.floor(left / 86400_000);
     left -= d * 86400_000;

@@ -16,7 +16,7 @@ async function init() {
   renderAfisha('afisha-grid', next);
   pointBuyLinks(next[0] || null);
   $('afisha-count').textContent = next.length
-    ? `${next.length === 1 ? 'одна ночь' : `${next.length} ночи`} в продаже`
+    ? `${next.length === 1 ? 'одна ночь' : `${next.length} ${next.length < 5 ? 'ночи' : 'ночей'}`} в продаже`
     : 'анонс скоро';
   renderWall(events);
   observeReveal();

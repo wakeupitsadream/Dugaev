@@ -7,7 +7,7 @@ import { initChrome, closeMenu, trafficSource } from './chrome.js';
 import { track } from './metrika.js';
 import { springTo } from './spring.js';
 import { loadEvents, esc } from './events-load.js';
-import { waveStates, activeWave, totalSold } from './waves.js';
+import { waveStates, activeWave, totalSold, fmtRub } from './waves.js';
 import { goingCount } from './social.js';
 import { plural, dateBox, fmtWhen, fmtTime, ageLabel, normalizePhone, stripRuPhone, formatRuPhoneDigits } from './ticket-format.js';
 import { handlePayment } from './payment.js';
@@ -91,20 +91,33 @@ function renderEvent() {
   $('eh-lineup').innerHTML = (e.lineup || [])
     .map((n) => `<span class="badge">${esc(n)}</span>`)
     .join('');
+  const mapLinks = e.address
+    ? ` · <a class="map-link" href="https://yandex.ru/maps/?text=${encodeURIComponent(`${SITE.cities[e.city] || 'Оренбург'}, ${e.address}`)}" target="_blank" rel="noopener">Яндекс Карты</a>` +
+      ` · <a class="map-link" href="https://2gis.ru/search/${encodeURIComponent(`${SITE.cities[e.city] || 'Оренбург'}, ${e.address}`)}" target="_blank" rel="noopener">2ГИС</a>`
+    : '';
   const rows = [
-    ['Когда', fmtWhen(e.startsAt)],
-    ['Где', `${e.venue} · ${SITE.cities[e.city] || e.city}`],
+    ['Когда', esc(fmtWhen(e.startsAt))],
+    ['Где', esc(`${e.venue} · ${SITE.cities[e.city] || e.city}`)],
     ['Адрес', e.address
-      ? e.address
-      : `в проходке сразу после покупки${addressIsPublic(e) ? '' : ' · всем остальным за сутки до ночи'}`],
-    ['Возраст', `${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`],
+      ? `${esc(e.address)}${mapLinks}`
+      : esc(`в проходке сразу после покупки${addressIsPublic(e) ? '' : ' · всем остальным за сутки до ночи'}`)],
+    ['Возраст', esc(`${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`)],
   ];
-  // Финиш — из endsAt ночи (26.09 — до 04:00); без него — «до утра»
+  // Финиш — из endsAt ночи; без него — «до утра»
   const finish = e.endsAt ? `до ${fmtTime(e.endsAt)}` : 'до утра';
-  rows.push(['Регламент', `двери ${SITE.doorsOpen} · старт ${SITE.showStart} · ${finish}`]);
+  rows.push(['Регламент', esc(`двери ${SITE.doorsOpen} · старт ${SITE.showStart} · ${finish}`)]);
   $('eh-meta').innerHTML = rows
-    .map(([k, v]) => `<div class="eh-meta-item"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`)
+    .map(([k, v]) => `<div class="eh-meta-item"><span class="k">${k}</span><span class="v">${v}</span></div>`)
     .join('');
+  // на телефоне афиша занимает весь первый экран: главное — одной строкой над ней
+  const strip = $('eh-strip');
+  if (strip) {
+    const a = activeWave(e.waves);
+    strip.textContent = [
+      `${db.day} ${db.mon}`, e.venue, `двери ${SITE.doorsOpen}`, a ? `от ${fmtRub(a.priceRub)} ₽` : null,
+    ].filter(Boolean).join(' · ');
+    strip.hidden = false;
+  }
   $('event-root').hidden = false;
   renderProgram(e);
 }
@@ -155,7 +168,7 @@ function renderWaves() {
         <div class="wave-row is-${w.state}">
           <div class="wave-name">${esc(w.name)}<small class="wave-left">${note}</small></div>
           <div></div>
-          <div class="wave-price">${w.priceRub} ₽</div>
+          <div class="wave-price">${fmtRub(w.priceRub)} ₽</div>
           <div class="wave-bar"><i style="transform:scaleX(${(pct / 100).toFixed(3)})"></i></div>
         </div>`;
     })
@@ -166,7 +179,7 @@ function renderWaves() {
   const soldOut = !a;
   for (const btn of [$('buy-open'), $('sticky-buy')]) {
     btn.disabled = soldOut;
-    btn.textContent = soldOut ? 'Все проходки проданы' : `Взять проходку · ${a.priceRub} ₽`;
+    btn.textContent = soldOut ? 'Все проходки проданы' : `Взять проходку · ${fmtRub(a.priceRub)} ₽`;
   }
   updateTotal();
 }
@@ -454,19 +467,21 @@ function renderAttendees() {
 function updateTotal() {
   const w = store.wave;
   $('ot-label').textContent = `${store.qty} ${plural(store.qty, 'проходка', 'проходки', 'проходок')}${w ? ` · ${w.name.toLowerCase()}` : ''}`;
-  $('ot-sum').textContent = w ? `${w.priceRub * store.qty} ₽` : '— ₽';
+  $('ot-sum').textContent = w ? `${fmtRub(w.priceRub * store.qty)} ₽` : '— ₽';
   $('submit-order').textContent = !w
     ? 'Проходок нет'
     : SITE.paymentDemo
-      ? `Получить проходки · ${w.priceRub * store.qty} ₽ (демо)`
-      : `Забронировать · ${w.priceRub * store.qty} ₽`;
+      ? `Получить проходки · ${fmtRub(w.priceRub * store.qty)} ₽ (демо)`
+      : `Забронировать · ${fmtRub(w.priceRub * store.qty)} ₽`;
   $('submit-order').disabled = !w || store.sending;
   const note = $('submit-note');
   if (note && w) {
-    note.textContent = SITE.paymentDemo
-      ? 'Нажимая «Получить проходки», ты подтверждаешь, что тебе есть 18, принимаешь условия покупки и правила входа.'
-      : `Нажимая «Забронировать», ты подтверждаешь, что тебе есть 18, принимаешь условия покупки и правила входа. ` +
-        `Оплата — переводом по СБП, бронь держим до ${SITE.holdHours || 3} часов, в день ночи — час.`;
+    // условия и правила — ссылками, в момент принятия, а не где-то в футере
+    const links = 'принимаешь <a href="/offer" target="_blank" rel="noopener">условия покупки</a> и <a href="/rules" target="_blank" rel="noopener">правила входа</a>';
+    note.innerHTML = SITE.paymentDemo
+      ? `Нажимая «Получить проходки», ты подтверждаешь, что тебе есть 18, ${links}.`
+      : `Нажимая «Забронировать», ты подтверждаешь, что тебе есть 18, ${links}. ` +
+        `Оплата — переводом по СБП; бронь держим ${SITE.holdHours || 3} часа, за сутки до ночи — час.`;
   }
   $('sh-title').textContent = store.event ? `Проходки · ${store.event.title}` : 'Проходки';
 }
@@ -518,7 +533,12 @@ async function submitOrder() {
   btn.classList.add('is-busy');
   btn.textContent = 'Оформляем…';
   const cancelBtn = $('submit-cancel');
-  const cancelTimer = setTimeout(() => cancelBtn?.classList.remove('hidden'), 3000);
+  // медленная сеть: показываем, что ждём, и даём выход в ручное оформление,
+  // но запрос не обрываем — бронь на сервере могла уже создаться
+  const cancelTimer = setTimeout(() => {
+    cancelBtn?.classList.remove('hidden');
+    btn.textContent = 'Оформляем… сеть медленная, ждём ответ';
+  }, 3000);
 
   const body = {
     event_id: store.event.id,
@@ -538,10 +558,10 @@ async function submitOrder() {
   try {
     const ctrl = new AbortController();
     store.ctrl = ctrl;
-    if (cancelBtn) cancelBtn.onclick = () => ctrl.abort();
-    // 8 секунд: дольше на ночной мобильной сети всё равно читается как отказ,
-    // а ручное оформление в директ уже готово и ждёт.
-    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    if (cancelBtn) cancelBtn.onclick = () => showFallback({ slow: true });
+    // 15 секунд: ночная мобильная сеть бывает очень медленной, а обрыв на
+    // полпути оставлял бы фантомную бронь, о которой гость не знает
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
     const r = await fetch('/api/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -560,8 +580,11 @@ async function submitOrder() {
   btn.classList.remove('is-busy');
   updateTotal();
 
-  // сервер недоступен/упал — фолбэк в директ Instagram, никакой «ошибки 500»
-  if (!resp || !resp.json || (resp.status >= 500)) return showFallback();
+  // сервер недоступен/упал — фолбэк в Telegram, никакой «ошибки 500»
+  if (!resp || !resp.json || (resp.status >= 500)) return showFallback({ slow: !resp });
+  if (resp.status === 429) {
+    return alertNote(resp.json.message || 'Слишком много броней подряд — попробуй позже или напиши нам.', 'error', { href: SITE.telegramUrl || SITE.instagramDm, label: 'Написать нам' });
+  }
 
   const j = resp.json;
   if (j.ok) {
@@ -655,14 +678,16 @@ function showSuccess(j) {
   if (pending) {
     $('success-title').textContent = 'Бронь оформлена';
     $('success-note').textContent =
-      `Места держим за тобой ${j.hold_minutes >= 120 ? `${Math.round(j.hold_minutes / 60)} часа` : `${j.hold_minutes} минут`}. ` +
-      'Переведи сумму по реквизитам ниже и нажми «Я перевёл» — проходки станут активными после подтверждения.';
+      `Места держим за тобой ${j.hold_minutes >= 120 ? `${Math.round(j.hold_minutes / 60)} ${plural(Math.round(j.hold_minutes / 60), 'час', 'часа', 'часов')}` : `${j.hold_minutes} минут`}. ` +
+      'Переведи сумму по реквизитам ниже и нажми «Я перевёл» — бронь перестанет сгорать по таймеру, а мы получим сигнал проверить перевод.';
     const order = { id: j.order_id, payCode: j.pay_code, amountRub: j.amount_rub, qty: (j.tickets || []).length, expiresAt: j.expires_at, claimedAt: null };
     payHost.innerHTML = payBlockHtml(order, j.bot);
     bindPayBlock(order);
     steps.innerHTML =
       `<li><b>Переведи</b> сумму по СБП и укажи код брони в комментарии.</li>` +
-      `<li><b>Нажми «Я перевёл»</b> или открой бота в Telegram — проходки придут туда сразу после подтверждения.</li>` +
+      (j.bot
+        ? `<li><b>Нажми «Я перевёл»</b> или открой бота в Telegram — проходки придут туда сразу после подтверждения.</li>`
+        : `<li><b>Нажми «Я перевёл»</b> — мы проверим перевод и подтвердим бронь.</li>`) +
       `<li><b>Проходки ниже</b> станут активными после подтверждения. Открой каждую и сохрани QR — ссылки остаются на этой странице.</li>` +
       `<li><b>На дверях</b> паспорт с собой, двери в ${esc(SITE.doorsOpen)}. Друзьям — перешли их именные проходки.</li>`;
   } else {
@@ -747,7 +772,7 @@ function renderSavedTickets() {
   host.hidden = false;
 }
 
-function showFallback() {
+function showFallback({ slow = false } = {}) {
   track('booking_fallback');
   const e = store.event;
   const names = store.attendees.map((a) => a.name.trim()).filter(Boolean).join(', ');
@@ -766,6 +791,10 @@ function showFallback() {
       copy.textContent = 'Выдели текст выше и скопируй';
     }
   };
-  $('fallback-tg').href = SITE.instagramDm;
+  $('fallback-tg').href = SITE.telegramUrl || SITE.instagramDm;
+  const ig = $('fallback-ig');
+  if (ig) ig.href = SITE.instagramDm;
+  const slowNote = $('fallback-slow');
+  if (slowNote) slowNote.hidden = !slow;
   swapPane('fallback');
 }

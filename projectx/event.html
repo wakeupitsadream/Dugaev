@@ -6,9 +6,10 @@
   <title>Проходки — PROJECT X</title>
   <meta name="description" content="Проходки на ночные вечеринки PROJECT X в Оренбурге. 18+ по паспорту, именной QR-проход, вход за секунды." />
   <meta name="theme-color" content="#070707" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
-  <meta property="og:title" content="PROJECT X · 26.09 · арт-локация «Режиссёр» · проходки" />
-  <meta property="og:description" content="Ночная вечеринка 18+, FC/DC. Двери 22:00, старт 23:00, до 04:00. Первые 50 проходок — 1 000 ₽. Бронь за минуту, вход по именному QR." />
+  <meta property="og:title" content="PROJECT X · проходки на ночь · Оренбург" />
+  <meta property="og:description" content="Ночная вечеринка 18+, FC/DC. Двери 22:00, старт 23:00. Бронь за минуту, вход по именному QR." />
   <meta property="og:image" content="https://proxject.ru/assets/photos/og-260926.jpg" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="stylesheet" href="/assets/styles.css" />
@@ -58,6 +59,7 @@
     <div class="container">
       <p style="margin-bottom: 18px;"><a class="muted" href="/#afisha" style="text-decoration: none;">← Вся афиша</a></p>
 
+      <p class="eh-strip" id="eh-strip" hidden></p>
       <div class="eh-grid" id="event-root" hidden>
         <div class="eh-poster" id="eh-poster">
           <span class="ec-word" id="eh-word"></span>
@@ -178,11 +180,13 @@
     <div id="pane-fallback" class="hidden">
       <h3>Оформим вручную</h3>
       <div class="fallback-box">
-        Онлайн-оплата сейчас недоступна, но проходки не убегут: напиши нам в директ
-        Instagram* — придержим места и подскажем, как оплатить.
+        Онлайн-бронь сейчас недоступна, но проходки не убегут: напиши нам в Telegram —
+        придержим места и подскажем, как оплатить.
+        <p class="form-note" id="fallback-slow" hidden style="margin: 10px 0 0;">Если бронь всё же прошла, она сгорит сама через 3 часа — второй раз не бронируй.</p>
         <p class="fallback-text" id="fallback-text" style="margin: 12px 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--radius-s); color: var(--muted); font-size: 0.92rem;"></p>
         <button class="btn btn-ghost btn-block" id="fallback-copy" type="button" style="margin-bottom: 10px;">Скопировать текст заявки</button>
-        <a class="btn btn-acid btn-block" id="fallback-tg" href="#" target="_blank" rel="noopener">Написать в Instagram</a>
+        <a class="btn btn-acid btn-block" id="fallback-tg" href="#" target="_blank" rel="noopener">Написать в Telegram</a>
+        <a class="btn btn-ghost btn-block" id="fallback-ig" href="#" target="_blank" rel="noopener" style="margin-top: 8px;">Или в директ Instagram*</a>
         <p class="form-note" style="margin: 10px 0 0;">* Instagram принадлежит Meta, признанной
         экстремистской организацией и запрещённой в РФ.</p>
       </div>
@@ -222,6 +226,20 @@
   </footer>
   <!-- /chrome:footer -->
 
+  <link rel="modulepreload" href="/assets/event-page.js" />
+  <link rel="modulepreload" href="/assets/data/config.js" />
+  <link rel="modulepreload" href="/assets/data/events.js" />
+  <link rel="modulepreload" href="/assets/chrome.js" />
+  <link rel="modulepreload" href="/assets/events-load.js" />
+  <link rel="modulepreload" href="/assets/waves.js" />
+  <link rel="modulepreload" href="/assets/ticket-format.js" />
+  <link rel="modulepreload" href="/assets/booking-ui.js" />
+  <link rel="modulepreload" href="/assets/sheet-drag.js" />
+  <link rel="modulepreload" href="/assets/spring.js" />
+  <link rel="modulepreload" href="/assets/metrika.js" />
+  <link rel="modulepreload" href="/assets/social.js" />
+  <link rel="modulepreload" href="/assets/payment.js" />
+  <link rel="modulepreload" href="/assets/secret-place.js" />
   <script type="module" src="/assets/event-page.js"></script>
 </body>
 </html>

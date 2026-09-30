@@ -7,7 +7,7 @@
 //   cancel  — отменить неоплаченную бронь, вернуть места (админ)
 //   void    — аннулировать проходку: возврат/отзыв, место вернуть (админ)
 //   rename  — переоформить проходку на другого человека (дверь, админ)
-import { db, hasDb } from './_lib/db.js';
+import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ticketId, orderId } from './_lib/ids.js';
 import { makeToken, primarySecret } from './_lib/sign.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
@@ -31,25 +31,34 @@ export default async function handler(req, res) {
   const action = String(b.action || 'walkin');
   const by = String(b.by || '').trim().slice(0, 64) || staffName(req) || (role === 'door' ? 'дверь' : 'касса');
 
-  if (action === 'walkin') return walkin(req, res, b, by);
-  if (action === 'confirm') return confirm(req, res, b, by);
-  if (role !== 'admin' && action !== 'rename') {
-    return fail(res, 403, 'forbidden', 'Это действие доступно только владельцу');
+  try {
+    if (action === 'walkin') return await walkin(req, res, b, by, role);
+    if (action === 'confirm') return await confirm(req, res, b, by, role);
+    if (role !== 'admin' && action !== 'rename') {
+      return fail(res, 403, 'forbidden', 'Это действие доступно только владельцу');
+    }
+    if (action === 'cancel') return await cancel(req, res, b, by);
+    if (action === 'void') return await voidTicket(req, res, b, by);
+    if (action === 'rename') return await rename(req, res, b, by);
+    return fail(res, 400, 'validation', 'Неизвестное действие');
+  } catch (err) {
+    // Neon мигнул или не уложился в таймаут: касса получает понятную 503,
+    // а не безымянную 500 от платформы
+    console.error(`walkin(${action}) failed:`, err.message);
+    return fail(res, 503, 'db_unavailable', 'БД не ответила — попробуй ещё раз');
   }
-  if (action === 'cancel') return cancel(req, res, b, by);
-  if (action === 'void') return voidTicket(req, res, b, by);
-  if (action === 'rename') return rename(req, res, b, by);
-  return fail(res, 400, 'validation', 'Неизвестное действие');
 }
 
-async function walkin(req, res, b, by) {
+const q = (sql, text, params) => withTimeout(sql.query(text, params), 5000);
+
+async function walkin(req, res, b, by, role) {
   const eventId = String(b.event_id || '');
   const waveNo = Number(b.wave_no);
   const name = String(b.name || '').trim().slice(0, 80);
   const doCheckin = b.checkin !== false; // на кассе гость обычно сразу заходит
   const src = String(b.src || 'door').slice(0, 32);
 
-  if (!eventId || !Number.isInteger(waveNo)) return fail(res, 400, 'validation', 'Некорректный запрос');
+  if (!eventId || !Number.isInteger(waveNo) || waveNo < 1 || waveNo > 32767) return fail(res, 400, 'validation', 'Некорректный запрос');
   if (name.length < 2) return fail(res, 400, 'validation', 'Имя гостя — минимум 2 символа', { fields: { name: 'Как зовут гостя?' } });
 
   const sql = db();
@@ -63,7 +72,8 @@ async function walkin(req, res, b, by) {
     try {
       const rows = await sql.query(ORDER_SQL, [
         1, eventId, waveNo, oid, name, 'касса', null,
-        JSON.stringify({ src }), [tid], [name], ['adult'], 'door', 0, null, true,
+        // скрытые волны (гостевой список) продаёт только владелец из панели
+        JSON.stringify({ src }), [tid], [name], ['adult'], 'door', 0, null, role === 'admin',
       ]);
       const r = rowsOf(rows)[0] || {};
       priceRub = r.price_rub === null ? null : Number(r.price_rub);
@@ -112,36 +122,36 @@ async function walkin(req, res, b, by) {
 // Подтвердить оплату брони: по номеру заказа или по коду брони (как в
 // комментарии к переводу). provider: 'transfer' — деньги пришли переводом,
 // 'door' — гость заплатил на входе. ticket_id — сразу впустить этого гостя.
-async function confirm(req, res, b, by) {
+async function confirm(req, res, b, by, role) {
   const sql = db();
   let oid = String(b.order_id || '');
   if (!isOrderId(oid)) {
     const code = normalizePayCode(b.pay_code);
     if (!code) return fail(res, 400, 'validation', 'Нужен номер заказа или код брони вида PX-7F3K');
-    const found = rowsOf(await sql.query(`SELECT id FROM orders WHERE pay_code = $1`, [code]))[0];
+    // код из четырёх символов может повториться между ночами: берём живую бронь, потом свежую
+    const found = rowsOf(await q(sql,
+      `SELECT id FROM orders WHERE pay_code = $1
+       ORDER BY (status = 'pending') DESC, (status = 'expired') DESC, created_at DESC LIMIT 1`, [code]
+    ))[0];
     if (!found) return fail(res, 404, 'not_found', `Брони с кодом ${code} нет`);
     oid = found.id;
   }
-  const provider = b.provider === 'door' ? 'door' : b.provider === 'transfer' ? 'transfer' : null;
+  // дверь принимает только наличные; «перевод пришёл» подтверждает владелец
+  const provider = role === 'door' ? 'door' : b.provider === 'door' ? 'door' : b.provider === 'transfer' ? 'transfer' : null;
 
-  let o;
-  try {
-    o = rowsOf(await sql.query(CONFIRM_SQL, [oid, by, provider]))[0];
-  } catch (err) {
-    console.error('confirm failed:', err);
-    return fail(res, 503, 'db_unavailable', 'БД не ответила — попробуй ещё раз');
-  }
+  const o = rowsOf(await q(sql, CONFIRM_SQL, [oid, by, provider]))[0];
   if (!o) {
-    const st = rowsOf(await sql.query(`SELECT status FROM orders WHERE id = $1`, [oid]))[0];
+    const st = rowsOf(await q(sql, `SELECT status FROM orders WHERE id = $1`, [oid]))[0];
     const status = st ? st.status : 'not_found';
     const why = {
       paid: 'Эта бронь уже оплачена',
-      expired: 'Бронь сгорела — оформи гостя заново через кассу',
+      expired: 'Бронь сгорела, а её места уже разобрали — оформи гостя заново через кассу',
       cancelled: 'Бронь отменена — оформи гостя заново через кассу',
       not_found: 'Такой брони нет',
     }[status] || 'Бронь нельзя подтвердить';
     return fail(res, 409, 'not_pending', why, { status });
   }
+  const restored = o.was === 'expired'; // сгоревшая бронь восстановлена: места снова списаны
   const tickets = (typeof o.tickets === 'string' ? JSON.parse(o.tickets) : o.tickets) || [];
 
   // дверь: подтвердил и сразу впустил того, кто стоит перед тобой
@@ -159,14 +169,19 @@ async function confirm(req, res, b, by) {
   const origin = siteOrigin(req);
   await notifyOwner(
     `✅ Оплата подтверждена: ${o.pay_code || o.id} · ${o.amount_rub} ₽ · ${o.qty} шт. ` +
-      `(${provider === 'door' ? 'на входе' : 'перевод'})\n${o.buyer_name}, ${o.buyer_phone}\nПодтвердил: ${by}`
+      `(${provider === 'door' ? 'на входе' : 'перевод'})${restored ? ' · бронь была сгоревшей, восстановлена' : ''}\n${o.buyer_name}, ${o.buyer_phone}\nПодтвердил: ${by}`
   );
-  await deliverTickets(o.tg_chat_id, o, tickets, origin);
+  let ev = null;
+  if (o.tg_chat_id) {
+    try { ev = rowsOf(await q(sql, `SELECT title, starts_at, venue, address FROM events WHERE id = $1`, [o.event_id]))[0] || null; } catch { /* без даты в сообщении */ }
+  }
+  await deliverTickets(o.tg_chat_id, o, tickets, origin, ev);
 
   ok(res, {
     order_id: o.id,
     pay_code: o.pay_code,
     amount_rub: Number(o.amount_rub),
+    restored,
     checked_in_at: checkedInAt,
     tickets: tickets.map((t) => ({ id: t.id, holder_name: t.holder_name, url: `/t/${makeToken(t.id, primarySecret())}` })),
   });
@@ -175,7 +190,7 @@ async function confirm(req, res, b, by) {
 async function cancel(req, res, b, by) {
   const oid = String(b.order_id || '');
   if (!isOrderId(oid)) return fail(res, 400, 'validation', 'Некорректный номер брони');
-  const o = rowsOf(await db().query(CANCEL_SQL, [oid]))[0];
+  const o = rowsOf(await q(db(), CANCEL_SQL, [oid]))[0];
   if (!o) return fail(res, 409, 'not_pending', 'Отменить можно только неоплаченную бронь');
   await notifyOwner(`✖ Бронь ${oid} отменена (${by}) — места возвращены в продажу`);
   await tellGuest(o.tg_chat_id, 'Бронь отменена, места вернулись в продажу. Если это ошибка — напиши нам в директ.');
@@ -187,8 +202,8 @@ async function voidTicket(req, res, b, by) {
   if (!/^[0-9a-z]{10}$/.test(id)) return fail(res, 400, 'validation', 'Некорректный номер проходки');
   const status = b.status === 'refunded' ? 'refunded' : 'revoked';
   const note = String(b.note || '').trim().slice(0, 120) || null;
-  const t = rowsOf(await db().query(VOID_SQL, [id, status, note ? `${note} (${by})` : by]))[0];
-  if (!t) return fail(res, 409, 'not_voidable', 'Проходку нельзя аннулировать: её нет, она уже использована или отозвана');
+  const t = rowsOf(await q(db(), VOID_SQL, [id, status, note ? `${note} (${by})` : by]))[0];
+  if (!t) return fail(res, 409, 'not_voidable', 'Проходку нельзя аннулировать: её нет, она не оплачена (неоплаченную бронь отменяй целиком), уже использована или отозвана');
   await notifyOwner(`🚫 Проходка ${id} (${t.holder_name}) ${status === 'refunded' ? 'возвращена' : 'аннулирована'}${note ? ': ' + note : ''} — ${by}`);
   ok(res, { ticket_id: id, status });
 }
@@ -198,7 +213,7 @@ async function rename(req, res, b, by) {
   const name = String(b.name || '').trim().slice(0, 80);
   if (!/^[0-9a-z]{10}$/.test(id)) return fail(res, 400, 'validation', 'Некорректный номер проходки');
   if (name.length < 2) return fail(res, 400, 'validation', 'Имя — минимум 2 символа');
-  const t = rowsOf(await db().query(RENAME_SQL, [id, name]))[0];
+  const t = rowsOf(await q(db(), RENAME_SQL, [id, name]))[0];
   if (!t) return fail(res, 409, 'not_editable', 'Переоформить нельзя: проходка использована или отозвана');
   await notifyOwner(`✏️ Проходка ${id} переоформлена на ${name} — ${by}`);
   ok(res, { ticket_id: id, holder_name: t.holder_name });

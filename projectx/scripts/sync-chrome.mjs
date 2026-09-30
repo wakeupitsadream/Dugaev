@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PAGES = ['index.html', 'afisha.html', 'night.html', 'fc.html', 'rules.html', 'faq.html', 'contacts.html', 'event.html', 'privacy.html', 'offer.html'];
+const PAGES = ['index.html', 'afisha.html', 'night.html', 'fc.html', 'rules.html', 'faq.html', 'contacts.html', 'event.html', 'privacy.html', 'offer.html', 'promo.html'];
 
 const NAV = [
   ['/afisha', 'Афиша', 'ближайшие ночи и проходки'],

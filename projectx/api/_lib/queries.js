@@ -22,7 +22,8 @@ WITH w AS (
     AND ($15::bool OR public)
     AND EXISTS (
       SELECT 1 FROM events e
-      WHERE e.id = $2 AND e.status = 'onsale' AND e.starts_at > now()
+      WHERE e.id = $2 AND e.status = 'onsale'
+        AND COALESCE(e.ends_at, e.starts_at + interval '8 hours') > now()
     )
   RETURNING id, price_rub
 ),
@@ -76,18 +77,33 @@ SELECT id FROM exp`;
 
 // Подтверждение оплаты владельцем (или приём денег на входе): заказ 'paid',
 // билеты 'active'. Возвращает заказ и его билеты — для ответа и для бота.
+// Сгоревшая бронь ('expired') тоже подтверждается — гость перевёл, но не
+// нажал «Я перевёл», а срок вышел: места забираются обратно в волну тем же
+// стейтментом (w), и только если они ещё есть; иначе строк нет и вызывающий
+// код объясняет, что делать. Колонка was — 'pending' | 'expired'.
 // Параметры: $1 order_id, $2 кто подтвердил, $3 provider ('transfer' — перевод,
 // 'door' — наличные на входе; null — оставить как есть)
 export const CONFIRM_SQL = `
-WITH o AS (
+WITH cand AS (
+  SELECT id, wave_id, qty, status FROM orders WHERE id = $1 AND status IN ('pending', 'expired')
+),
+w AS (
+  UPDATE price_waves p SET sold = p.sold + c.qty
+  FROM cand c
+  WHERE p.id = c.wave_id AND c.status = 'expired' AND p.sold + c.qty <= p.quota
+  RETURNING p.id
+),
+o AS (
   UPDATE orders SET status = 'paid', paid_at = now(), confirmed_by = $2,
-                    provider = COALESCE($3::text, provider)
-  WHERE id = $1 AND status = 'pending'
-  RETURNING id, event_id, qty, amount_rub, buyer_name, buyer_phone, buyer_tg, tg_chat_id, pay_code
+                    provider = COALESCE($3::text, orders.provider)
+  FROM cand c
+  WHERE orders.id = c.id AND (c.status = 'pending' OR EXISTS (SELECT 1 FROM w))
+  RETURNING orders.id, orders.event_id, orders.qty, orders.amount_rub, orders.buyer_name,
+            orders.buyer_phone, orders.buyer_tg, orders.tg_chat_id, orders.pay_code, c.status AS was
 ),
 t AS (
   UPDATE tickets SET status = 'active'
-  WHERE order_id IN (SELECT id FROM o) AND status = 'reserved'
+  WHERE order_id IN (SELECT id FROM o) AND status IN ('reserved', 'expired')
   RETURNING id, holder_name
 )
 SELECT o.*, (SELECT json_agg(json_build_object('id', t.id, 'holder_name', t.holder_name)) FROM t) AS tickets
@@ -110,13 +126,15 @@ dec AS (
 )
 SELECT id, tg_chat_id FROM o`;
 
-// Аннулирование одной проходки (возврат или отзыв): только пока по ней не
-// прошли вход; место возвращается в волну. Параметры: $1 ticket_id,
+// Аннулирование одной проходки (возврат или отзыв): только оплаченной и пока
+// по ней не прошли вход; место возвращается в волну. Неоплаченную бронь
+// снимают целиком через CANCEL_SQL — иначе место вернулось бы дважды
+// (здесь и при сгорании/отмене заказа). Параметры: $1 ticket_id,
 // $2 новый статус ('revoked' | 'refunded'), $3 причина
 export const VOID_SQL = `
 WITH t AS (
   UPDATE tickets SET status = $2, note = $3
-  WHERE id = $1 AND status IN ('active', 'reserved') AND checked_in_at IS NULL
+  WHERE id = $1 AND status = 'active' AND checked_in_at IS NULL
   RETURNING id, order_id, holder_name
 ),
 dec AS (
@@ -219,11 +237,21 @@ ON CONFLICT (event_id, wave_no) DO UPDATE SET
 RETURNING wave_no, quota, sold`;
 
 // Снос волн, которых больше нет в форме. Проданные не трогаем: на них
-// ссылаются заказы (FK orders.wave_id), да и гости уже купили.
+// ссылаются заказы (FK orders.wave_id), да и гости уже купили. Волна с
+// sold = 0, на которую ссылаются сгоревшие или отменённые заказы, тоже
+// не удаляется (FK) — её прячет WAVES_HIDE_SQL.
 // Параметры: $1 event_id, $2 оставляемые wave_no[]
 export const WAVES_PRUNE_SQL = `
 DELETE FROM price_waves
 WHERE event_id = $1 AND sold = 0 AND NOT (wave_no = ANY($2::int[]))
+  AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.wave_id = price_waves.id)
+RETURNING wave_no`;
+
+// Волны, которых нет в форме, но удалить нельзя (на них ссылаются заказы):
+// снимаем с сайта, чтобы владелец не видел «удалённую» волну в продаже.
+export const WAVES_HIDE_SQL = `
+UPDATE price_waves SET public = false
+WHERE event_id = $1 AND NOT (wave_no = ANY($2::int[])) AND public
 RETURNING wave_no`;
 
 // Афиша для админки: все события, включая черновики (на сайте их не видно).

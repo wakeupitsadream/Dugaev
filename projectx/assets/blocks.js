@@ -430,6 +430,35 @@ export function mountAftermovie(hostId) {
 
 // Правило SECRET PLACE на главной и /night — общее для бренда, а у ближайшей
 // ночи адрес может быть открыт: дописываем, как именно в этот раз
+// Дата полного возврата: за SITE.refundDaysBefore дней до ночи, в поясе
+// площадки. Элемент [data-refund-until] получает целую фразу («до 24 сентября
+// включительно»), data-refund-until="year" — с годом (условия покупки).
+export function refundUntilFor(e, daysBefore = SITE.refundDaysBefore ?? 2) {
+  if (!e || !e.startsAt) return null;
+  return new Date(Date.parse(e.startsAt) - daysBefore * 86_400_000);
+}
+export function fillRefundUntil(e) {
+  const els = document.querySelectorAll('[data-refund-until]');
+  if (!els.length) return;
+  const d = refundUntilFor(e);
+  const days = SITE.refundDaysBefore ?? 2;
+  els.forEach((el) => {
+    if (!d) {
+      el.textContent = `не позднее чем за ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} до ночи`;
+      return;
+    }
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('ru-RU', { timeZone: SITE.tz, day: 'numeric', month: 'long', year: 'numeric' })
+      .formatToParts(d).map((p) => [p.type, p.value]));
+    el.textContent = `до ${parts.day} ${parts.month}${el.dataset.refundUntil === 'year' ? ` ${parts.year}` : ''} включительно`;
+  });
+}
+// Всё, что на странице зависит от ближайшей ночи: приписка SECRET PLACE и
+// дата возврата. Вызывается с upcoming(events)[0] или null.
+export function fillEventCopy(e) {
+  fillSecretNote(e);
+  fillRefundUntil(e);
+}
+
 export function fillSecretNote(e) {
   const note = e
     ? (e.address && !e.secret

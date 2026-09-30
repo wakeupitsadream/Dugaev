@@ -2,9 +2,13 @@
 // Высота — единственное место, где её оправдано анимировать: у раскрытия
 // нет transform-эквивалента. Коротко (200 мс), ease-out, прерываемо через WAAPI.
 import { initChrome, observeReveal } from './chrome.js';
+import { loadEvents, upcoming } from './events-load.js';
+import { fillEventCopy } from './blocks.js';
 
 initChrome();
 observeReveal();
+// адрес ближайшей ночи и дата возврата — из афиши, а не из текста
+loadEvents().then(({ events }) => fillEventCopy(upcoming(events)[0] || null)).catch(() => fillEventCopy(null));
 
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
 const EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';

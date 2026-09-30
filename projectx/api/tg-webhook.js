@@ -22,9 +22,9 @@ import { notifyOwner, tgApi, tgCall, tgBotUsername } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
 import { isOrderId, transferText, transferLines, ticketLinks, siteOrigin } from './_lib/booking.js';
-import { placeOrder, nextWaveOf, nextWaveFor, seatsLeft, ownerNotice } from './_lib/order-core.js';
-import { CONFIRM_SQL } from './_lib/queries.js';
-import { normalizePhone } from '../assets/ticket-format.js';
+import { placeOrder, nextWaveOf, nextWaveFor, seatsLeft, ownerNotice, ownerNoticeMarkup, liveUntilMs } from './_lib/order-core.js';
+import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL } from './_lib/queries.js';
+import { normalizePhone, fmtTime } from '../assets/ticket-format.js';
 import { ladderText, fmtRub } from '../assets/waves.js';
 import { SITE } from '../assets/data/config.js';
 
@@ -100,6 +100,10 @@ export default async function handler(req, res) {
     console.log(`tg-webhook: ${kind} chat=${chat} "${head}" -> ${r?.done} (${Date.now() - t0} ms)`);
   } catch (e) {
     console.error(`tg-webhook failed: ${kind} chat=${chat} "${head}" (${Date.now() - t0} ms):`, e);
+    // гость не должен получать тишину в ответ: коротко скажем, что сломалось
+    if (chat && kind !== 'post') {
+      await tgApi('sendMessage', { chat_id: chat, text: 'Что-то сломалось — попробуй ещё раз через минуту. Если повторится, напиши нам в директ.' }, 2000);
+    }
   }
   ok(res);
 }
@@ -161,12 +165,18 @@ export async function setupBot({ tg, call, origin, token, secret, username, prob
   };
   const target = await resolveWebhookUrl(origin, probe);
   // drop_pending_updates: пока вебхук не работал, Telegram копил команды —
-  // после починки не надо отвечать на вчерашние /buy и /cancel скопом
+  // после починки не надо отвечать на вчерашние /buy и /cancel скопом. Но
+  // если адрес не менялся (кнопку нажали во время продаж), очередь — это
+  // живые «Я перевёл» гостей, и её не трогаем.
+  const before = await tg('getWebhookInfo', {});
+  const sameUrl = Boolean(before?.url) && before.url === target.url;
+  // посты канала слушаем только если свой канал задан (TELEGRAM_CHANNEL_ID)
+  const allowed = ['message', 'callback_query', ...(process.env.TELEGRAM_CHANNEL_ID ? ['channel_post'] : [])];
   await step('вебхук', 'setWebhook', {
     url: target.url,
     secret_token: secret,
-    allowed_updates: ['message', 'callback_query', 'channel_post'],
-    drop_pending_updates: true,
+    allowed_updates: allowed,
+    drop_pending_updates: !sameUrl,
   });
   await step('команды', 'setMyCommands', { commands: BOT_COMMANDS });
   await step('кнопка меню', 'setChatMenuButton', { menu_button: { type: 'commands' } });
@@ -223,12 +233,9 @@ export async function setupBot({ tg, call, origin, token, secret, username, prob
 }
 
 export async function handleUpdate(update, deps) {
-  if (update.callback_query) return handleCallback(update.callback_query, deps);
-  if (update.message) return handleMessage(update.message, deps);
-  const post = update.channel_post;
-  if (!post) return { done: 'ignored' };
-
-  // идемпотентность: каждый update_id обрабатываем один раз
+  // идемпотентность: каждый update_id обрабатываем один раз — Telegram
+  // повторяет доставку, если функция не ответила вовремя (холодный старт),
+  // и без этого гость получал бы два приветствия, а владелец — два «Я перевёл»
   if (deps.sql && Number.isInteger(update.update_id)) {
     const rows = await deps.sql.query(
       `INSERT INTO tg_updates (update_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING update_id`,
@@ -236,6 +243,19 @@ export async function handleUpdate(update, deps) {
     );
     if (!(rows.rows || rows).length) return { done: 'duplicate' };
   }
+  // сгоревшие брони списываются и от активности в боте, не только от заказов и панели
+  if (deps.sql && (update.message || update.callback_query)) {
+    try { await deps.sql.query(EXPIRE_SQL); } catch { /* не критично */ }
+  }
+  if (update.callback_query) return handleCallback(update.callback_query, deps);
+  if (update.message) return handleMessage(update.message, deps);
+  const post = update.channel_post;
+  if (!post) return { done: 'ignored' };
+
+  // посты принимаем только из своего канала: бота можно сделать админом в
+  // любом канале, и без проверки чужие посты уходили бы владельцу как афиши
+  const wantChannel = String(deps.channelId ?? process.env.TELEGRAM_CHANNEL_ID ?? '');
+  if (!wantChannel || String(post.chat?.id ?? '') !== wantChannel) return { done: 'ignored_channel' };
 
   const text = String(post.text || post.caption || '').trim();
   const photoId = Array.isArray(post.photo) && post.photo.length
@@ -358,6 +378,8 @@ const plural = (n, one, few, many) => {
   return many;
 };
 const originOf = (deps) => String(deps.origin || process.env.SITE_ORIGIN || 'https://proxject.ru').replace(/\/+$/, '');
+// «10 октября» без времени: время дверей пишем отдельно, чтобы не дублировать
+const fmtDay = (iso) => fmtWhen(iso).replace(/ в \d{1,2}:\d{2}$/, '');
 const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 // send(text, replyMarkup, html): html=true — разметка <b>/<a> (все данные гостя экранируются)
 const sender = (deps, chatId) => (text, markup, html = false) => deps.tg('sendMessage', {
@@ -380,8 +402,19 @@ async function handleMessage(msg, deps) {
   if (!chatId || (msg.chat.type && msg.chat.type !== 'private')) return { done: 'ignored' };
   const send = sender(deps, chatId);
   if (!deps.sql) {
-    await send('Бот пока не подключён к базе — проходки и адрес смотри на сайте.');
+    await send(`Бот на паузе — бронь и проходки на сайте: ${originOf(deps)}`);
     return { done: 'no_db' };
+  }
+
+  // владелец отвечает гостю: reply на пересланное сообщение с меткой #g<chat>
+  const ownerChat = String(process.env.TELEGRAM_CHAT_ID || '');
+  if (ownerChat && String(chatId) === ownerChat && msg.reply_to_message && text && !text.startsWith('/')) {
+    const m = /#g(\d{3,20})\b/.exec(String(msg.reply_to_message.text || msg.reply_to_message.caption || ''));
+    if (m) {
+      const r = await callOf(deps)('sendMessage', { chat_id: Number(m[1]), text: `💬 Организатор: ${text}` });
+      await send(r.ok ? 'Отправлено гостю.' : `Не доставлено: ${r.error}`);
+      return { done: r.ok ? 'owner_reply' : 'owner_reply_failed' };
+    }
   }
 
   const start = /^\/start(?:@\w+)?(?:\s+(\S+))?$/i.exec(text);
@@ -391,14 +424,16 @@ async function handleMessage(msg, deps) {
     if (isOrderId(payload)) {
       const o = await loadOrder(deps.sql, payload);
       if (!o) {
-        await send('Не нашли бронь по этой ссылке. Открой бота ещё раз по кнопке «Получить в Telegram» на странице брони.');
+        await send('Бронь по этой ссылке не нашли. Вернись на страницу брони и нажми «Получить проходку в Telegram» ещё раз.');
         return { done: 'start_unknown' };
       }
       await deps.sql.query(
         `INSERT INTO tg_links (chat_id, order_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
         [chatId, o.id]
       );
-      await deps.sql.query(`UPDATE orders SET tg_chat_id = $1 WHERE id = $2`, [chatId, o.id]);
+      // проходки уходят в тот чат, который открыл ссылку первым: чужой
+      // переход по той же ссылке доставку не перехватывает
+      await deps.sql.query(`UPDATE orders SET tg_chat_id = COALESCE(tg_chat_id, $1) WHERE id = $2`, [chatId, o.id]);
       await sendOrderStatus(o, chatId, deps);
       return { done: 'linked', order: o.id };
     }
@@ -413,17 +448,41 @@ async function handleMessage(msg, deps) {
     const had = await getSession(deps.sql, chatId);
     await clearSession(deps.sql, chatId);
     await send(
-      had ? 'Ок, ничего не бронируем. Передумаешь — /buy.' : 'Сейчас ничего не оформляется. Забронировать — /buy.',
+      had ? 'Ок, ничего не бронируем. Передумаешь — /buy.' : 'Сейчас ничего не оформляем. Забронировать — /buy.',
       { remove_keyboard: true }
     );
     return { done: 'wizard_cancelled' };
   }
+
+  // любая команда сбрасывает мастер: после /tickets следующий текст — не имена
+  if (text.startsWith('/')) await clearSession(deps.sql, chatId);
 
   // Ответы мастера: всё, что не команда, пока идёт оформление
   const session = text.startsWith('/') ? null : await getSession(deps.sql, chatId);
   if (session) return wizardInput(chatId, deps, session, msg);
 
   if (/^\/tickets|проходк|билет/i.test(text)) return sendTickets(chatId, deps);
+
+  // свободный текст, скрин перевода или вопрос от гостя с бронью — организатору,
+  // а не афиша в ответ; владелец отвечает reply'ем на пересланное сообщение
+  if (!text.startsWith('/') && ownerChat && (text || msg.photo || msg.document)) {
+    const linked = rowsOf(await deps.sql.query(
+      `SELECT o.pay_code, o.buyer_name, o.buyer_phone FROM tg_links l JOIN orders o ON o.id = l.order_id
+       WHERE l.chat_id = $1 ORDER BY o.created_at DESC LIMIT 1`, [chatId]
+    ))[0];
+    if (linked) {
+      await deps.notify(
+        `✉️ Пишет гость · ${linked.pay_code || 'без кода'} · ${linked.buyer_name} · ${linked.buyer_phone} · #g${chatId}\n` +
+          'Ответить ему — reply на это сообщение.' + (msg.message_id ? '' : `\n\n${text.slice(0, 1000)}`)
+      );
+      if (msg.message_id) {
+        const fw = await callOf(deps)('forwardMessage', { chat_id: ownerChat, from_chat_id: chatId, message_id: msg.message_id });
+        if (!fw.ok && text) await deps.notify(text.slice(0, 1000));
+      }
+      await send('Передали организатору — ответ придёт сюда.');
+      return { done: 'relayed' };
+    }
+  }
 
   const welcome = await sendWelcome(chatId, deps, { intro: false });
   return { done: 'unknown', welcome };
@@ -437,7 +496,7 @@ async function sendTickets(chatId, deps) {
     [chatId]
   ));
   if (!rows.length) {
-    await sender(deps, chatId)('Проходок пока нет. Забронировать — минута.', {
+    await sender(deps, chatId)('Проходок пока нет. Бронь занимает минуту 👇', {
       inline_keyboard: [[{ text: '🎟 Забронировать проходки', callback_data: 'menu:buy' }]],
     });
     return { done: 'tickets_none' };
@@ -468,8 +527,8 @@ async function sendOrderStatus(o, chatId, deps) {
 
   if (o.status === 'pending') {
     const waiting = o.claimed_at
-      ? `\n\nТы уже нажал «Я перевёл» — ждём, пока владелец увидит перевод. Подтверждение придёт сюда.`
-      : `\n\nБронь действует до ${fmtWhen(o.expires_at)}. Как переведёшь — нажми кнопку.`;
+      ? `\n\n«Я перевёл» уже нажато — проверяем перевод, подтверждение придёт сюда.`
+      : `\n\nБронь держим до ${fmtWhen(o.expires_at)}. Перевёл — жми кнопку.`;
     await send(
       `🕒 Бронь ${o.pay_code}: ${what}\n\n${transferText(Number(o.amount_rub), o.pay_code)}${waiting}`,
       o.claimed_at ? undefined : { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${o.id}` }]] }
@@ -481,21 +540,28 @@ async function sendOrderStatus(o, chatId, deps) {
       `SELECT id, holder_name FROM tickets WHERE order_id = $1 AND status = 'active' ORDER BY id`, [o.id]
     ));
     const links = ticketLinks(tickets, origin).map((t) => `• ${t.holder_name}: ${t.url}`);
-    const addr = o.address && !o.secret ? `\n\nАдрес: ${o.venue}, ${o.address}` : '';
+    // оплатившим адрес показываем всегда — и на SECRET PLACE тоже
+    const where = [o.venue, o.address].filter(Boolean).join(', ');
+    const addr = where ? `\n\n📍 ${fmtDay(o.starts_at)} · двери ${SITE.doorsOpen || '22:00'} · ${where}` : '';
     await send(`✅ Оплачено: ${what}\n\n${links.join('\n') || 'Проходки уже использованы или отозваны.'}${addr}`);
     return;
   }
-  await send(
-    `Бронь ${o.pay_code || o.id} ${o.status === 'cancelled' ? 'отменена' : 'сгорела'}. ` +
-      `Забронировать заново: /buy или ${origin}/e/${o.event_id}`
-  );
+  if (o.status === 'expired') {
+    await send(
+      `Бронь ${o.pay_code} сгорела — время на перевод вышло, места вернулись в продажу. ` +
+        'Уже перевёл? Нажми «Я перевёл» — проверим и восстановим бронь, если места остались. Взять заново — /buy',
+      { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${o.id}` }, { text: '🎟 Забронировать', callback_data: 'menu:buy' }]] }
+    );
+    return;
+  }
+  await send(`Бронь ${o.pay_code || o.id} отменена. Если это ошибка — напиши сюда.`);
 }
 
 // ---------- покупка в боте: мастер брони ----------
 // Состояние между сообщениями — строка в tg_sessions (одна на чат):
 // qty → phone → names → confirm → (booking). Любая команда сбрасывает мастер,
 // сессия старше двух часов считается брошенной.
-const SESSION_TTL_MS = 2 * 3600_000;
+const SESSION_TTL_MS = 12 * 3600_000; // брошенный мастер живёт полсуток — чтобы имена, набранные после паузы, не встречала афиша
 
 async function getSession(sql, chatId) {
   const s = rowsOf(await sql.query(`SELECT state, data, updated_at FROM tg_sessions WHERE chat_id = $1`, [chatId]))[0];
@@ -513,14 +579,14 @@ const clearSession = (sql, chatId) => sql.query(`DELETE FROM tg_sessions WHERE c
 
 async function loadEvent(sql, id) {
   return rowsOf(await sql.query(
-    `SELECT id, title, venue, address, secret, starts_at, status, poster_url FROM events WHERE id = $1`, [id]
+    `SELECT id, title, venue, address, secret, starts_at, ends_at, status, poster_url FROM events WHERE id = $1`, [id]
   ))[0] || null;
 }
 // Ближайшая ночь в продаже
 async function nearestEvent(sql, nowMs) {
   return rowsOf(await sql.query(
-    `SELECT id, title, venue, address, secret, starts_at, status, poster_url FROM events
-     WHERE status = 'onsale' AND starts_at > $1 ORDER BY starts_at LIMIT 1`,
+    `SELECT id, title, venue, address, secret, starts_at, ends_at, status, poster_url FROM events
+     WHERE status = 'onsale' AND COALESCE(ends_at, starts_at + interval '8 hours') > $1 ORDER BY starts_at LIMIT 1`,
     [new Date(nowMs).toISOString()]
   ))[0] || null;
 }
@@ -553,12 +619,12 @@ const callOf = (deps) => deps.call || (async (method, payload) => {
 async function sendWelcome(chatId, deps, { intro }) {
   const call = callOf(deps);
   const origin = originOf(deps);
-  const hello = intro ? `👋 Привет! Это бот ${SITE.brandName}: проходки за минуту, без сайта и приложений.\n\n` : '';
+  const hello = intro ? `👋 Это бот ${SITE.brandName} — здесь берут проходки.\n\n` : '';
   const ev = await nearestEvent(deps.sql, deps.nowMs);
   if (!ev) {
     const r = await call('sendMessage', {
       chat_id: chatId,
-      text: `${hello}Следующую ночь скоро объявим — следи за ${SITE.instagramName}.`,
+      text: `${hello}Пока ничего не продаём — следующую ночь объявим на сайте и в соцсетях.`,
       disable_web_page_preview: true,
       reply_markup: {
         inline_keyboard: [
@@ -576,7 +642,7 @@ async function sendWelcome(chatId, deps, { intro }) {
   const text =
     `${hello}<b>${escHtml(ev.title)}</b>\n${escHtml(fmtWhen(ev.starts_at))} · ${escHtml(where)}` +
     `${ladder ? `\n${escHtml(ladder)}.` : ''}\n\n` +
-    `Бронь здесь за минуту, перевод по СБП — проходки с QR приходят в этот чат.`;
+    `Строго 18+, FC/DC. Бронь за минуту, оплата переводом по СБП, QR приходит сюда в чат.`;
   const menu = {
     inline_keyboard: [
       [{ text: '🎟 Забронировать проходки', callback_data: `buy:${ev.id}` }],
@@ -603,18 +669,36 @@ async function sendWelcome(chatId, deps, { intro }) {
 }
 
 // Шаг 1: сколько проходок. eventId=null — ближайшая ночь.
-async function startWizard(chatId, deps, eventId) {
+async function startWizard(chatId, deps, eventId, { force = false } = {}) {
   const send = sender(deps, chatId);
-  const ev = eventId ? await loadEvent(deps.sql, eventId) : await nearestEvent(deps.sql, deps.nowMs);
-  if (!ev || ev.status !== 'onsale' || new Date(ev.starts_at).getTime() <= deps.nowMs) {
+  let ev = eventId ? await loadEvent(deps.sql, eventId) : null;
+  // кнопка со старой афиши (ночь прошла или снята) — предлагаем ближайшую живую
+  if (!ev || ev.status !== 'onsale' || liveUntilMs(ev) <= deps.nowMs) ev = await nearestEvent(deps.sql, deps.nowMs);
+  if (!ev) {
     await clearSession(deps.sql, chatId);
-    await send(`Продажи на эту ночь закрыты. Следующую объявим в ${SITE.instagramName}.`);
+    await send('Сейчас продаж нет — следующую ночь объявим на сайте и в соцсетях.');
     return { done: 'wizard_closed' };
+  }
+  // уже есть неоплаченная бронь: напоминаем о ней, а не плодим вторую
+  if (!force) {
+    const pend = rowsOf(await deps.sql.query(
+      `SELECT o.pay_code, o.qty, o.expires_at FROM tg_links l JOIN orders o ON o.id = l.order_id
+       WHERE l.chat_id = $1 AND o.status = 'pending' ORDER BY o.created_at DESC LIMIT 1`, [chatId]
+    ))[0];
+    if (pend) {
+      await clearSession(deps.sql, chatId);
+      await send(
+        `У тебя уже есть бронь ${pend.pay_code} на ${pend.qty} ${plural(Number(pend.qty), 'проходку', 'проходки', 'проходок')} — держим до ${fmtWhen(pend.expires_at)}. ` +
+          'Оплати её или оформи ещё одну.',
+        { inline_keyboard: [[{ text: '🎫 Показать бронь', callback_data: 'menu:tickets' }, { text: '➕ Ещё одну', callback_data: `more:${ev.id}` }]] }
+      );
+      return { done: 'wizard_pending_exists', order: pend.pay_code };
+    }
   }
   const wave = await nextWaveOf(deps.sql, ev.id);
   if (!wave) {
     await clearSession(deps.sql, chatId);
-    await send(`Все проходки проданы 😔 Если что-то освободится — расскажем в ${SITE.instagramName}.`);
+    await send('Всё продано 😔 Если места освободятся — расскажем на сайте и в соцсетях.');
     return { done: 'wizard_sold_out' };
   }
   await setSession(deps.sql, chatId, 'qty', {
@@ -622,12 +706,14 @@ async function startWizard(chatId, deps, eventId) {
     waveNo: wave.waveNo, priceRub: wave.priceRub,
   });
   const scarce = wave.left <= 10
-    ? ` — по этой цене ${plural(wave.left, 'осталась', 'остались', 'осталось')} ${wave.left}`
+    ? `, по этой цене ${plural(wave.left, 'осталась', 'остались', 'осталось')} ${wave.left}`
     : '';
+  const nextWave = (await eventWaves(deps.sql, ev.id)).find((w) => w.public && w.waveNo > wave.waveNo && w.sold < w.quota);
+  const further = nextWave && nextWave.priceRub !== wave.priceRub ? `, дальше ${fmtRub(nextWave.priceRub)} ₽` : '';
   await send(
     `<b>${escHtml(ev.title)}</b> · ${escHtml(fmtWhen(ev.starts_at))}\n` +
-      `Проходка сейчас — <b>${fmtRub(wave.priceRub)} ₽</b>${scarce}.\n\n` +
-      `Сколько проходок? Нажми или напиши число (до 10).`,
+      `Сейчас проходка — <b>${fmtRub(wave.priceRub)} ₽</b>${scarce}${further}.\n\n` +
+      `Сколько берёшь? Жми цифру или напиши число до 10.`,
     { inline_keyboard: [[1, 2, 3, 4].map((n) => ({ text: String(n), callback_data: `qty:${n}` }))] },
     true
   );
@@ -637,7 +723,7 @@ async function startWizard(chatId, deps, eventId) {
 async function wizardInput(chatId, deps, s, msg) {
   const text = String(msg.text || '').trim();
   if (s.state === 'qty') return wizardQty(chatId, deps, s, parseInt(text.replace(/\D+/g, ' ').trim(), 10));
-  if (s.state === 'phone') return wizardPhone(chatId, deps, s, msg.contact?.phone_number || text);
+  if (s.state === 'phone') return wizardPhone(chatId, deps, s, msg.contact?.phone_number || text, Boolean(msg.contact));
   if (s.state === 'names') return wizardNames(chatId, deps, s, text);
   // confirm/booking: ждём кнопку — повторим сводку
   await sendSummary(chatId, deps, s.data);
@@ -645,15 +731,15 @@ async function wizardInput(chatId, deps, s, msg) {
 }
 
 const namesPrompt = (qty) => (qty === 1
-  ? 'Как тебя зовут? Имя и фамилия — проходка именная, на входе сверят с паспортом.'
-  : `Имена всех ${qty} гостей, каждое с новой строки, первое — твоё. Проходки именные, на входе сверят с паспортом.`);
+  ? 'Как тебя зовут? Имя и фамилию как в паспорте — проходка именная, на входе сверят.'
+  : `Напиши ${qty} ${plural(qty, 'имя', 'имени', 'имён')} с фамилиями — каждого гостя с новой строки, первым себя. Проходки именные, на входе сверят с паспортом.`);
 
 // Шаг 2: телефон — кнопкой «отправить номер» или текстом. Если телефон уже
 // известен (гость меняет количество после «столько уже нет») — сразу имена.
 async function wizardQty(chatId, deps, s, n) {
   const send = sender(deps, chatId);
   if (!Number.isInteger(n) || n < 1 || n > 10) {
-    await send('Напиши число от 1 до 10 — сколько проходок нужно.');
+    await send('Нужно число от 1 до 10 — сколько проходок берёшь?');
     return { done: 'wizard_qty_bad' };
   }
   if (s.data.cap && n > s.data.cap) {
@@ -661,8 +747,31 @@ async function wizardQty(chatId, deps, s, n) {
     return { done: 'wizard_qty_bad' };
   }
   const { cap, ...rest } = s.data;
-  const d = { ...rest, qty: n };
-  const sum = `${n} ${plural(n, 'проходка', 'проходки', 'проходок')} × ${fmtRub(d.priceRub)} ₽ = <b>${fmtRub(n * d.priceRub)} ₽</b>.`;
+  let d = { ...rest, qty: n };
+  // цена сразу под всю компанию: если в текущей волне столько нет, бронь
+  // целиком идёт по следующей — гость видит это здесь, а не на подтверждении
+  let note = '';
+  const nw = await nextWaveFor(deps.sql, d.eventId, n);
+  if (nw && nw.waveNo !== d.waveNo) {
+    note = nw.priceRub > d.priceRub
+      ? `\nПо ${fmtRub(d.priceRub)} ₽ столько уже нет, поэтому вся бронь — по ${fmtRub(nw.priceRub)} ₽.`
+      : `\nЕсть место по ${fmtRub(nw.priceRub)} ₽ — бронь по этой цене.`;
+    d = { ...d, waveNo: nw.waveNo, priceRub: nw.priceRub };
+  } else if (!nw) {
+    const left = await seatsLeft(deps.sql, d.eventId);
+    if (left.maxOne > 0) {
+      await setSession(deps.sql, chatId, 'qty', { ...rest, cap: left.maxOne });
+      const more = left.total > left.maxOne ? ` (всего осталось ${left.total} — остальное можно взять второй бронью)` : '';
+      await send(`Столько одной бронью уже нет — можно до ${left.maxOne}${more}. Сколько берёшь?`, {
+        inline_keyboard: [Array.from({ length: Math.min(left.maxOne, 4) }, (_, i) => ({ text: String(i + 1), callback_data: `qty:${i + 1}` }))],
+      });
+      return { done: 'wizard_qty_cap', maxOne: left.maxOne };
+    }
+    await clearSession(deps.sql, chatId);
+    await send(`Все проходки проданы 😔 Если что-то освободится — расскажем в ${SITE.instagramName}.`);
+    return { done: 'wizard_sold_out' };
+  }
+  const sum = `${n} ${plural(n, 'проходка', 'проходки', 'проходок')} × ${fmtRub(d.priceRub)} ₽ = <b>${fmtRub(n * d.priceRub)} ₽</b>.${escHtml(note)}`;
   if (d.phone) {
     await setSession(deps.sql, chatId, 'names', d);
     await send(`${sum}\n\n${escHtml(namesPrompt(n))}`, { remove_keyboard: true }, true);
@@ -670,7 +779,7 @@ async function wizardQty(chatId, deps, s, n) {
   }
   await setSession(deps.sql, chatId, 'phone', d);
   await send(
-    `${sum}\n\nТеперь номер телефона — по нему найдём бронь, если что-то пойдёт не так. Нажми кнопку внизу или напиши номер.`,
+    `${sum}\n\nТеперь телефон — по нему найдём твою бронь и перевод. Жми «Отправить мой номер» внизу или напиши: +7 9…`,
     CONTACT_KEYBOARD,
     true
   );
@@ -678,11 +787,14 @@ async function wizardQty(chatId, deps, s, n) {
 }
 
 // Шаг 3: имена гостей (проходки именные)
-async function wizardPhone(chatId, deps, s, raw) {
+async function wizardPhone(chatId, deps, s, raw, fromContact = false) {
   const send = sender(deps, chatId);
-  const phone = normalizePhone(String(raw || ''));
+  // контакт из Telegram принимаем и не российский (иностранные студенты):
+  // 7–15 цифр по E.164; набранный руками номер — только российский мобильный
+  const digits = String(raw || '').replace(/\D/g, '');
+  const phone = normalizePhone(String(raw || '')) || (fromContact && /^\d{7,15}$/.test(digits) ? `+${digits}` : null);
   if (!phone) {
-    await send('Не похоже на номер. Формат: +7 912 345-67-89 — или нажми кнопку «Отправить мой номер».', CONTACT_KEYBOARD);
+    await send('Не похоже на номер. Напиши в формате +7 912 345-67-89 или нажми «Отправить мой номер».', CONTACT_KEYBOARD);
     return { done: 'wizard_phone_bad' };
   }
   const d = { ...s.data, phone };
@@ -693,9 +805,11 @@ async function wizardPhone(chatId, deps, s, raw) {
 
 // «1. Иван Петров\n2) Мария» / «Иван, Мария» → ['Иван Петров', 'Мария']
 function parseNames(text, qty) {
-  const clean = (x) => x.replace(/^\s*\d+[.)-]?\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  // обрезаем по символам, а не по code units: эмодзи на границе ломало jsonb
+  const clean = (x) => Array.from(x.replace(/^\s*\d+[.)-]?\s*/, '').replace(/\s+/g, ' ').trim()).slice(0, 80).join('');
   let parts = String(text).split(/\n+/).map(clean).filter(Boolean);
   if (parts.length < qty) parts = String(text).split(/\n+|\s*[,;]\s*/).map(clean).filter(Boolean);
+  if (parts.length < qty) parts = String(text).split(/\n+|\s*[,;]\s*|\s+и\s+/).map(clean).filter(Boolean);
   return parts;
 }
 
@@ -706,8 +820,8 @@ async function wizardNames(chatId, deps, s, text) {
   const names = parseNames(text, qty);
   if (names.length !== qty) {
     await send(
-      `Нужно ${qty} ${plural(qty, 'имя', 'имени', 'имён')}, а получилось ${names.length}. ` +
-        (qty > 1 ? 'Напиши ещё раз — каждое имя с новой строки.' : 'Напиши имя и фамилию.')
+      `Насчитали ${names.length}, а нужно ${qty}. ` +
+        (qty > 1 ? 'Напиши ещё раз — каждого с новой строки или через запятую.' : 'Напиши имя и фамилию.')
     );
     return { done: 'wizard_names_bad' };
   }
@@ -725,14 +839,14 @@ async function sendSummary(chatId, deps, d, repricedFrom = null) {
   const origin = originOf(deps);
   const amount = d.qty * d.priceRub;
   const head = repricedFrom
-    ? `⚠️ Пока ты заполнял, проходки по ${fmtRub(repricedFrom)} ₽ разобрали. Сейчас — <b>${fmtRub(d.priceRub)} ₽</b>.\n\n`
+    ? `⚠️ Пока шло оформление, проходки по ${fmtRub(repricedFrom)} ₽ разобрали. Сейчас — <b>${fmtRub(d.priceRub)} ₽</b>.\n\n`
     : '';
   await sender(deps, chatId)(
     `${head}<b>Проверь бронь</b>\n${escHtml(d.title)} · ${escHtml(fmtWhen(d.startsAt))}\n` +
       `${d.qty} × ${fmtRub(d.priceRub)} ₽ = <b>${fmtRub(amount)} ₽</b>\n` +
       `${d.qty === 1 ? 'Гость' : 'Гости'}: ${d.names.map(escHtml).join(', ')}\nТелефон: ${escHtml(d.phone)}\n\n` +
-      `Нажимая «Забронировать», подтверждаешь: всем гостям есть 18 (на входе — паспорт), ` +
-      `<a href="${origin}/offer">условия покупки</a> и <a href="${origin}/rules">правила ночи</a> прочитаны, на <a href="${origin}/privacy#consent">обработку данных</a> согласен.`,
+      `Жмёшь «Забронировать» — значит, всем гостям есть 18 (на входе паспорт), ты принимаешь ` +
+      `<a href="${origin}/offer">условия покупки</a> и <a href="${origin}/rules">правила ночи</a> и даёшь согласие на <a href="${origin}/privacy#consent">обработку данных</a>.`,
     {
       inline_keyboard: [
         [{ text: `✅ Забронировать за ${fmtRub(amount)} ₽`, callback_data: 'book:go' }],
@@ -754,6 +868,16 @@ async function wizardBook(chatId, deps, cb) {
   if (!row) return { done: 'wizard_stale' };
   const d = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
   await dropButtons(cb, deps);
+
+  // не больше двух неоплаченных броней на чат: квота не должна висеть за одним человеком
+  const pendingN = Number(rowsOf(await deps.sql.query(
+    `SELECT count(*)::int AS n FROM tg_links l JOIN orders o ON o.id = l.order_id WHERE l.chat_id = $1 AND o.status = 'pending'`, [chatId]
+  ))[0]?.n || 0);
+  if (pendingN >= 2) {
+    await clearSession(deps.sql, chatId);
+    await send('У тебя уже две неоплаченные брони — оплати их или дождись, пока сгорят. Посмотреть: /tickets');
+    return { done: 'wizard_too_many' };
+  }
 
   const r = await placeOrder(deps.sql, {
     eventId: d.eventId, waveNo: d.waveNo, buyerName: d.names[0], phone: d.phone,
@@ -796,8 +920,9 @@ async function wizardBook(chatId, deps, cb) {
     await send(
       r.error === 'wave_sold_out' ? 'Все проходки проданы 😔'
         : r.error === 'sales_closed' ? 'Продажи на эту ночь закрыты.'
-          : r.error === 'validation' ? `${r.message}. Начни заново: /buy`
-            : 'Не получилось оформить — попробуй через минуту: /buy'
+          : r.error === 'too_many' ? `${r.message}.`
+            : r.error === 'validation' ? `${r.message}. Начни заново: /buy`
+              : 'Не получилось оформить — попробуй через минуту: /buy'
     );
     return { done: 'wizard_failed', error: r.error };
   }
@@ -806,7 +931,7 @@ async function wizardBook(chatId, deps, cb) {
   await deps.sql.query(`INSERT INTO tg_links (chat_id, order_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [chatId, order.id]);
   await deps.sql.query(`UPDATE orders SET tg_chat_id = $1 WHERE id = $2`, [chatId, order.id]);
   await clearSession(deps.sql, chatId);
-  await deps.notify(ownerNotice(event, order, 'бот'));
+  await deps.notify(ownerNotice(event, order, 'бот'), ownerNoticeMarkup(order));
 
   const origin = originOf(deps);
   const what = `${order.qty} ${plural(order.qty, 'проходка', 'проходки', 'проходок')} на ${escHtml(event.title)} · ${escHtml(fmtWhen(event.starts_at))}`;
@@ -820,13 +945,20 @@ async function wizardBook(chatId, deps, cb) {
     );
     return { done: 'booked', order: order.id, paid: true };
   }
-  const lines = transferLines(order.amount, order.code).map(([k, v]) => `${escHtml(k)}: <b>${escHtml(v)}</b>`);
+  const T = SITE.transfer || {};
+  // номер и код — в <code>: тап по ним в Telegram копирует
+  const lines = [
+    `Сумма: <b>${fmtRub(order.amount)} ₽</b>`,
+    T.phone ? `СБП по номеру: <code>${escHtml(T.phone)}</code>${T.bank ? ` (${escHtml(T.bank)})` : ''}` : null,
+    T.recipient ? `Получатель: <b>${escHtml(T.recipient)}</b>` : null,
+    `Код брони в комментарии: <code>${escHtml(order.code)}</code>`,
+  ].filter(Boolean);
   await send(
     `🎟 Бронь <b>${escHtml(order.code)}</b> оформлена\n${what}\n` +
       `${order.qty === 1 ? 'Гость' : 'Гости'}: ${order.names.map(escHtml).join(', ')}\n\n` +
       `${lines.join('\n')}\n\n` +
-      `Бронь держим до <b>${escHtml(fmtWhen(order.expiresAt))}</b>. Переведёшь — нажми кнопку, ` +
-      `и проходки придут сюда, как только владелец увидит перевод.`,
+      `Как перевести: приложение банка → «По номеру телефона» → номер выше${T.bank ? ` → банк ${escHtml(T.bank)}` : ''} → сумма → в комментарии код брони.\n\n` +
+      `Бронь держим до <b>${escHtml(fmtWhen(order.expiresAt))}</b>. Перевёл — жми кнопку, QR придут сюда, как только увидим перевод.`,
     { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${order.id}` }]] },
     true
   );
@@ -836,9 +968,9 @@ async function wizardBook(chatId, deps, cb) {
 // ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, ...(text ? { text } : {}) });
-  const m = /^(pub|skip|cancel|pay|nopay|claim|buy|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  const m = /^(pub|skip|cancel|pay|nopay|drop|claim|buy|more|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
   if (!m || !deps.sql) {
-    await answer('Не получилось');
+    await answer('Кнопка устарела — /start');
     return { done: 'callback_bad' };
   }
   const [, action, arg] = m;
@@ -854,10 +986,14 @@ async function handleCallback(cb, deps) {
     await answer();
     return startWizard(guestChat, deps, arg);
   }
+  if (action === 'more') {
+    await answer();
+    return startWizard(guestChat, deps, arg, { force: true });
+  }
   if (action === 'qty') {
     const s = await getSession(deps.sql, guestChat);
     if (!s || s.state !== 'qty') {
-      await answer('Начни заново: /buy');
+      await answer('Количество уже выбрано — поменять: /buy');
       return { done: 'wizard_stale' };
     }
     await answer();
@@ -888,10 +1024,24 @@ async function handleCallback(cb, deps) {
       await answer('Недоступно');
       return { done: 'claim_denied' };
     }
+    // повторное нажатие в ближайшие минуты не дёргает владельца ещё раз
+    // сгоревшую бронь тоже можно заявить: «Подтвердить» у владельца вернёт места, если они есть
+    const cur = rowsOf(await deps.sql.query(
+      `SELECT status, (claimed_at IS NOT NULL AND claimed_at > now() - interval '10 minutes') AS recent
+       FROM orders WHERE id = $1`, [arg]
+    ))[0];
+    if (!cur || !['pending', 'expired'].includes(cur.status)) {
+      await answer('Бронь уже обработана');
+      return { done: 'claim_noop' };
+    }
+    if (cur.recent) {
+      await answer('Уже передали — как увидим перевод, QR придут сюда');
+      return { done: 'claim_repeat' };
+    }
     const o = rowsOf(await deps.sql.query(
-      `UPDATE orders SET claimed_at = COALESCE(claimed_at, now())
-       WHERE id = $1 AND status = 'pending'
-       RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone`,
+      `UPDATE orders SET claimed_at = now()
+       WHERE id = $1 AND status IN ('pending', 'expired')
+       RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone, status`,
       [arg]
     ))[0];
     if (!o) {
@@ -899,8 +1049,9 @@ async function handleCallback(cb, deps) {
       return { done: 'claim_noop' };
     }
     await deps.notify(
-      `💸 Гость сообщил о переводе (из бота)\n${o.pay_code} · ${o.amount_rub} ₽ · ${o.qty} шт.\n` +
-        `${o.buyer_name}, ${o.buyer_phone}\n\nПроверь поступление в банке и подтверди:`,
+      `💸 ${o.pay_code} · ${fmtRub(o.amount_rub)} ₽ · ${o.qty} шт. — нажал «Я перевёл» в ${fmtTime(new Date(deps.nowMs).toISOString())} (бот)` +
+        (o.status === 'expired' ? '\n⚠️ Бронь уже сгорела: «Подтвердить» вернёт места, если они ещё есть' : '') +
+        `\n${o.buyer_name} · ${o.buyer_phone}\nВ банке ищи: ${fmtRub(o.amount_rub)} ₽ с комментарием ${o.pay_code}`,
       {
         inline_keyboard: [[
           { text: `✅ Подтвердить ${o.pay_code}`, callback_data: `pay:${o.id}` },
@@ -908,22 +1059,33 @@ async function handleCallback(cb, deps) {
         ]],
       }
     );
-    await answer('Передали владельцу');
+    await answer('Передали организатору');
     await dropButtons(cb, deps);
     await deps.tg('sendMessage', {
       chat_id: chatId,
-      text: 'Спасибо! Как только владелец увидит перевод, проходки придут сюда. Обычно это несколько минут.',
+      text: 'Принято! Проверим перевод и пришлём QR сюда — обычно это несколько минут. Если тишина больше часа — напиши сюда, передадим организатору.',
     });
     return { done: 'claimed', order: o.id };
   }
 
-  // остальные кнопки жмёт только владелец (его chat_id из env)
+  // остальные кнопки жмёт только владелец (его chat_id из env); чат
+  // владельца не настроен — кнопки закрыты для всех, а не открыты для всех
   const ownerChat = String(process.env.TELEGRAM_CHAT_ID || '');
-  if (ownerChat && String(cb.from?.id) !== ownerChat && String(cb.message?.chat?.id) !== ownerChat) {
+  if (!ownerChat || (String(cb.from?.id) !== ownerChat && String(cb.message?.chat?.id) !== ownerChat)) {
     await answer('Недоступно');
     return { done: 'callback_denied' };
   }
   const slug = arg;
+
+  // итог остаётся в сообщении владельца: через час видно, что уже обработано
+  const stamp = async (line) => {
+    if (!cb.message?.message_id || !cb.message?.chat?.id) return;
+    await deps.tg('editMessageText', {
+      chat_id: cb.message.chat.id, message_id: cb.message.message_id,
+      text: `${cb.message.text || ''}\n\n${line}`.trim(), disable_web_page_preview: true,
+    });
+  };
+  const at = fmtTime(new Date(deps.nowMs).toISOString());
 
   if (action === 'pay') {
     const o = rowsOf(await deps.sql.query(CONFIRM_SQL, [slug, 'Telegram', 'transfer']))[0];
@@ -933,33 +1095,59 @@ async function handleCallback(cb, deps) {
     }
     await dropButtons(cb, deps);
     const tickets = (typeof o.tickets === 'string' ? JSON.parse(o.tickets) : o.tickets) || [];
+    let delivered = false;
+    let deliveryError = null;
     if (o.tg_chat_id) {
+      const ev = await loadEvent(deps.sql, o.event_id);
+      const where = ev ? [ev.venue, ev.address].filter(Boolean).join(', ') : '';
       const links = ticketLinks(tickets, originOf(deps)).map((t) => `• ${t.holder_name}: ${t.url}`);
-      await deps.tg('sendMessage', {
+      const r = await callOf(deps)('sendMessage', {
         chat_id: o.tg_chat_id,
         disable_web_page_preview: true,
         text: `✅ Оплата подтверждена — проходки у тебя.\n\n${links.join('\n')}\n\n` +
-          `Открой каждую, сделай скриншот QR и перешли друзьям их именные. На входе — паспорт, двери в ${SITE.doorsOpen || '22:00'}.`,
+          (ev ? `${fmtDay(ev.starts_at)} · двери ${SITE.doorsOpen || '22:00'}${where ? ` · ${where}` : ''}\n` : '') +
+          'Открой свою и сделай скриншот QR — сработает без интернета. Друзьям перешли их ссылки: проходки именные, на входе паспорт.',
       });
+      delivered = r.ok;
+      deliveryError = r.ok ? null : r.error;
     }
+    await stamp(`✅ Подтверждено в ${at}${o.was === 'expired' ? ' (бронь была сгоревшей, места списаны снова)' : ''} · ` +
+      (o.tg_chat_id ? (delivered ? 'QR гостю отправлены' : `гостю НЕ доставлено (${deliveryError}) — отправь ссылки из панели`) : 'гость без Telegram — ссылки в панели'));
     await answer(`Подтверждено: ${o.pay_code || slug}`);
-    return { done: 'paid', order: slug, delivered: Boolean(o.tg_chat_id) };
+    return { done: 'paid', order: slug, delivered };
   }
   if (action === 'nopay') {
     const o = rowsOf(await deps.sql.query(
-      `UPDATE orders SET claimed_at = NULL WHERE id = $1 AND status = 'pending' RETURNING tg_chat_id, pay_code`,
+      `UPDATE orders SET claimed_at = NULL WHERE id = $1 AND status IN ('pending', 'expired') RETURNING tg_chat_id, pay_code, amount_rub`,
       [slug]
     ))[0];
     await dropButtons(cb, deps);
     if (o?.tg_chat_id) {
+      const T = SITE.transfer || {};
       await deps.tg('sendMessage', {
         chat_id: o.tg_chat_id,
-        text: `Перевод по брони ${o.pay_code} пока не нашли. Проверь сумму и код в комментарии — и нажми «Я перевёл» ещё раз, когда деньги уйдут.`,
+        text: `Перевод по брони ${o.pay_code} пока не видим. Проверь: ${fmtRub(o.amount_rub)} ₽${T.recipient ? `, получатель ${T.recipient}` : ''}${T.bank ? ` (${T.bank})` : ''}, комментарий ${o.pay_code}. ` +
+          'Если деньги ушли — пришли сюда скрин перевода и нажми «Я перевёл» ещё раз.',
         reply_markup: { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${slug}` }]] },
       });
     }
+    if (o) await stamp(`✖ Не пришло — гостю сообщили в ${at}`);
     await answer(o ? 'Гостю сообщили' : 'Бронь уже обработана');
     return { done: o ? 'nopay' : 'nopay_noop', order: slug };
+  }
+  // drop: владелец снимает неоплаченную бронь прямо из уведомления
+  if (action === 'drop') {
+    const o = rowsOf(await deps.sql.query(CANCEL_SQL, [slug]))[0];
+    await dropButtons(cb, deps);
+    if (o?.tg_chat_id) {
+      await deps.tg('sendMessage', {
+        chat_id: o.tg_chat_id,
+        text: 'Бронь отменена организатором, места вернулись в продажу. Если это ошибка — напиши сюда.',
+      });
+    }
+    if (o) await stamp(`✖ Бронь отменена в ${at}, места возвращены`);
+    await answer(o ? 'Бронь отменена' : 'Отменить можно только неоплаченную бронь');
+    return { done: o ? 'dropped' : 'drop_noop', order: slug };
   }
 
   if (action === 'pub') {

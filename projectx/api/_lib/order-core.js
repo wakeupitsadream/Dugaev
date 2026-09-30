@@ -2,7 +2,8 @@
 // покупку в боте (api/tg-webhook.js). Здесь всё, что не зависит от канала:
 // проверка события и гостей, атомарное списание квоты, генерация кодов,
 // текст уведомления владельцу. Ответ — простой объект, без req/res.
-import { validateAttendees } from '../../assets/ticket-format.js';
+import { validateAttendees, fmtWhen, formatRuPhoneDigits } from '../../assets/ticket-format.js';
+import { fmtRub } from '../../assets/waves.js';
 import { ticketId, orderId, payCode } from './ids.js';
 import { makeToken, primarySecret } from './sign.js';
 import { paymentMode, holdMinutes } from './booking.js';
@@ -12,8 +13,20 @@ const rowsOf = (r) => (r && r.rows) || r || [];
 
 // input: { eventId, waveNo, buyerName, phone, buyerTg, utm, attendees:[{name, minor?}] }
 // → { ok:true, event, order } | { ok:false, status, error, message, extra }
+// До какого момента ночь «живая»: до конца, а без конца — 8 часов после
+// старта. Касса на дверях и сайт продают до этого момента, а не до 22:00.
+export const liveUntilMs = (e) => (e.ends_at
+  ? new Date(e.ends_at).getTime()
+  : new Date(e.starts_at).getTime() + 8 * 3600_000);
+
+// Сколько неоплаченных броней можно держать одновременно: на один телефон и
+// с одного адреса за полчаса. Защита от «забронировать все места скриптом»:
+// квота висит до сгорания брони, и сайт показывал бы «всё продано».
+export const MAX_PENDING_PER_PHONE = 2;
+export const MAX_PENDING_PER_IP = 3;
+
 export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
-  const { eventId, waveNo, buyerName, phone, buyerTg = null, utm = null } = input;
+  const { eventId, waveNo, buyerName, phone, buyerTg = null, utm = null, iph = '' } = input;
   const attendees = Array.isArray(input.attendees) ? input.attendees : [];
 
   let event;
@@ -21,7 +34,7 @@ export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
     // сгоревшие брони освобождают места до того, как мы попробуем занять свои
     await sql.query(EXPIRE_SQL);
     event = rowsOf(await sql.query(
-      `SELECT id, title, city, venue, address, secret, starts_at, age_rating, status FROM events WHERE id = $1`,
+      `SELECT id, title, city, venue, address, secret, starts_at, ends_at, age_rating, status FROM events WHERE id = $1`,
       [eventId]
     ))[0];
   } catch (err) {
@@ -29,8 +42,33 @@ export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
     return { ok: false, status: 503, error: 'db_unavailable', message: 'Онлайн-оформление сейчас недоступно' };
   }
   if (!event) return { ok: false, status: 404, error: 'not_found', message: 'Такой тусовки нет' };
-  if (event.status !== 'onsale' || new Date(event.starts_at).getTime() <= nowMs) {
+  if (event.status !== 'onsale' || liveUntilMs(event) <= nowMs) {
     return { ok: false, status: 410, error: 'sales_closed', message: 'Продажи на эту тусовку закрыты' };
+  }
+
+  // лимиты на неоплаченные брони (только для брони переводом: касса и демо
+  // оплачиваются сразу и квоту не держат)
+  if (paymentMode() === 'transfer') {
+    let caps = { by_phone: 0, by_ip: 0 };
+    try {
+      caps = rowsOf(await sql.query(
+        `SELECT (SELECT count(*) FROM orders WHERE status = 'pending' AND buyer_phone = $1)::int AS by_phone,
+                (SELECT count(*) FROM orders WHERE status = 'pending' AND $2::text <> ''
+                    AND utm->>'iph' = $2 AND created_at > now() - interval '30 minutes')::int AS by_ip`,
+        [phone, iph || '']
+      ))[0] || caps;
+    } catch (err) {
+      console.warn('order: лимиты не проверены:', err.message);
+    }
+    if (Number(caps.by_phone) >= MAX_PENDING_PER_PHONE) {
+      return {
+        ok: false, status: 429, error: 'too_many',
+        message: `На этот номер уже есть ${MAX_PENDING_PER_PHONE} неоплаченные брони — оплати их или дождись, пока они сгорят`,
+      };
+    }
+    if (Number(caps.by_ip) >= MAX_PENDING_PER_IP) {
+      return { ok: false, status: 429, error: 'too_many', message: 'Слишком много броней подряд — попробуй через полчаса или напиши нам в директ' };
+    }
   }
 
   const av = validateAttendees(attendees, Number(event.age_rating));
@@ -64,7 +102,7 @@ export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
     try {
       const r = rowsOf(await sql.query(ORDER_SQL, [
         qty, eventId, waveNo, oid, buyerName, phone, buyerTg,
-        utm ? JSON.stringify(utm) : null, tids, names, ages, provider, hold, code, false,
+        JSON.stringify({ ...(utm || {}), ...(iph ? { iph } : {}) }), tids, names, ages, provider, hold, code, false,
       ]))[0] || {};
       priceRub = r.price_rub === null || r.price_rub === undefined ? null : Number(r.price_rub);
       created = Number(r.created || 0);
@@ -133,10 +171,23 @@ export async function seatsLeft(sql, eventId) {
 // Текст уведомления владельцу о новой брони/продаже. via — откуда пришла
 // («сайт», «бот»), чтобы в чате было видно канал.
 export function ownerNotice(event, order, via = 'сайт') {
-  const who = `${order.buyerName}, ${order.phone}${order.buyerTg ? ', @' + order.buyerTg : ''}`;
+  const nice = (p) => (/^\+7\d{10}$/.test(String(p)) ? `+7 ${formatRuPhoneDigits(String(p).slice(2))}` : String(p));
+  const who = `${order.buyerName} · ${nice(order.phone)}${order.buyerTg ? ' · @' + order.buyerTg : ''}`;
   return order.transfer
-    ? `🕒 Бронь ${order.code}: ${order.qty} × ${order.priceRub} ₽ = ${order.amount} ₽ · ждём перевод (${via})\n` +
-      `${event.title}\nГость: ${who}\nИмена: ${order.names.join(', ')}\nСрок брони: ${order.hold} мин · заказ ${order.id}`
-    : `💸 Продажа: ${order.qty} × ${order.priceRub} ₽ = ${order.amount} ₽ (${via})\n` +
-      `${event.title} · ${event.venue}\nПокупатель: ${who}\nГости: ${order.names.join(', ')}\nЗаказ ${order.id}`;
+    ? `🕒 ${order.code} · ${order.qty} × ${fmtRub(order.priceRub)} = ${fmtRub(order.amount)} ₽ · ждём перевод до ${fmtWhen(order.expiresAt)} (${via})\n` +
+      `${event.title}\n${who}\nГости: ${order.names.join(', ')}\nВ банке ищи: ${fmtRub(order.amount)} ₽ с комментарием ${order.code}\nЗаказ ${order.id}`
+    : `💸 Продажа: ${order.qty} × ${fmtRub(order.priceRub)} = ${fmtRub(order.amount)} ₽ (${via})\n` +
+      `${event.title} · ${event.venue}\n${who}\nГости: ${order.names.join(', ')}\nЗаказ ${order.id}`;
+}
+
+// Кнопки под уведомлением о брони: владелец, увидев перевод в банке раньше
+// гостя, подтверждает одним тапом; лишнюю бронь снимает тем же движением
+export function ownerNoticeMarkup(order) {
+  if (!order.transfer) return undefined;
+  return {
+    inline_keyboard: [[
+      { text: `✅ Пришло ${order.code}`, callback_data: `pay:${order.id}` },
+      { text: '✖ Отменить бронь', callback_data: `drop:${order.id}` },
+    ]],
+  };
 }

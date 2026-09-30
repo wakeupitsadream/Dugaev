@@ -10,6 +10,7 @@ import { SITE } from '../../assets/data/config.js';
 import { makeToken, primarySecret } from './sign.js';
 import { tgApi } from './tg.js';
 import { fmtRub } from '../../assets/waves.js';
+import { fmtWhen } from '../../assets/ticket-format.js';
 
 export function paymentMode() {
   return process.env.PAYMENT_MODE === 'demo' ? 'demo' : 'transfer';
@@ -30,6 +31,10 @@ export function normalizePayCode(raw) {
 }
 
 export const isOrderId = (s) => /^ord_[0-9a-z]{10}$/.test(String(s || ''));
+
+// Маркер тестовых заказов самотеста панели: такие заказы чистит /api/seed
+// (cleanupTest), поэтому с сайта без админ-ключа этот номер не принимается
+export const TEST_PHONE = '+70000000000';
 
 // Реквизиты перевода парами «что — значение»: бот собирает из них и
 // простой текст, и HTML с выделением
@@ -79,14 +84,17 @@ export async function tellGuest(chatId, text, replyMarkup) {
 }
 
 // Гостю: проходки после подтверждения оплаты
-export async function deliverTickets(chatId, order, tickets, origin) {
+export async function deliverTickets(chatId, order, tickets, origin, event = null) {
   if (!chatId) return null;
   const links = ticketLinks(tickets, origin);
   const lines = links.map((t) => `• ${t.holder_name}: ${t.url}`);
+  const where = event ? [event.venue, event.address].filter(Boolean).join(', ') : '';
+  const whenLine = event && event.starts_at
+    ? `${fmtWhen(event.starts_at).replace(/ в \d{1,2}:\d{2}$/, '')} · двери ${SITE.doorsOpen || '22:00'}${where ? ` · ${where}` : ''}\n`
+    : '';
   return tellGuest(
     chatId,
-    `✅ Оплата подтверждена — проходки у тебя.\n\n${lines.join('\n')}\n\n` +
-      `Открой каждую, сделай скриншот QR и перешли друзьям их именные. ` +
-      `На входе — паспорт, двери в ${SITE.doorsOpen || '22:00'}.`
+    `✅ Оплата подтверждена — проходки у тебя.\n\n${lines.join('\n')}\n\n${whenLine}` +
+      'Открой свою и сделай скриншот QR — сработает без интернета. Друзьям перешли их ссылки: проходки именные, на входе паспорт.'
   );
 }

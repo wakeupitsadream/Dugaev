@@ -117,14 +117,20 @@ export function parseEventForm(body, ctx = {}) {
   if (errors.length) return { ok: false, errors };
 
   const { startsAt, endsAt } = buildRange(date, timeStart, timeEnd);
-  if (status === 'onsale' && Date.parse(startsAt) <= nowMs) {
+  // ночь в продаже до своего конца: начавшуюся правят (квоты, описание), закончившуюся — нет
+  if (status === 'onsale' && Date.parse(endsAt || startsAt) <= nowMs) {
     return {
       ok: false,
-      errors: [{ field: 'date', message: 'Дата уже прошла — в продажу такое событие не поставить' }],
+      errors: [{ field: 'date', message: 'Ночь уже закончилась — в продажу такое событие не поставить' }],
     };
   }
 
   const id = String(b.id || '').trim() || makeEventId(title, date);
+  // id уходит в ссылки /e/<id> и в callback-кнопки бота (лимит 64 байта):
+  // только латиница, цифры и дефис
+  if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) {
+    return { ok: false, errors: [{ field: 'id', message: 'Идентификатор: латиница, цифры и дефис, до 40 символов' }] };
+  }
   return {
     ok: true,
     event: {

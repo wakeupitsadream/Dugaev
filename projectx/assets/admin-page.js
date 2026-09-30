@@ -95,6 +95,16 @@ async function boot() {
     return;
   }
   state.events = j.events || [];
+  // ночь «в продаже», но дата прошла: сайт и бот её уже не показывают,
+  // купить нельзя — владелец узнаёт об этом здесь, а не от гостей
+  const stale = state.events.filter((e) => e.status === 'onsale' && Date.parse(toIso(e.starts_at)) < Date.now());
+  const sn = $('stale-note');
+  if (sn) {
+    sn.style.display = stale.length ? 'block' : 'none';
+    sn.textContent = stale.length
+      ? `Внимание: «${stale[0].title}» стоит «в продаже», но её дата уже прошла — на сайте и в боте ночь не видна, купить нельзя. Поставь новую дату в разделе «События» (и замени афишу) или переведи ночь в «прошло».`
+      : '';
+  }
   const sel = $('ev-select');
   sel.innerHTML = state.events
     .map((e) => `<option value="${esc(e.id)}">${esc(e.title)} · ${esc(fmtWhen(toIso(e.starts_at)))}</option>`)
@@ -224,7 +234,9 @@ async function downloadOfflineList() {
   }
   const map = {};
   for (const t of j.tickets) {
-    map[t.id] = { n: t.holder_name, a: t.age_cat, s: t.status, c: t.checked_in_at };
+    // o — заказ: дверь в офлайне принимает наличные за неоплаченную бронь и
+    // при появлении сети подтверждает именно его
+    map[t.id] = { n: t.holder_name, a: t.age_cat, s: t.status, c: t.checked_in_at, o: t.order_id };
   }
   try {
     localStorage.setItem(`th_offline_${state.current}`, JSON.stringify(map));
@@ -244,11 +256,14 @@ function renderGuestsTable(tickets) {
     `<tr><th>Гость</th><th>Проходка</th><th>Статус</th><th>Вошёл</th><th class="no-print"></th></tr>` +
     tickets
       .map((t) => {
-        const editable = (t.status === 'active' || t.status === 'reserved') && !t.checked_in_at;
-        const acts = editable
-          ? `<button class="act-link" data-act="rename" data-id="${esc(t.id)}" data-name="${esc(t.holder_name)}" type="button">переоформить</button>` +
-            `<button class="act-link danger" data-act="void" data-id="${esc(t.id)}" data-name="${esc(t.holder_name)}" type="button">аннулировать</button>`
-          : '';
+        // неоплаченную бронь снимают целиком в «Ожидают подтверждения» — иначе место вернулось бы дважды
+        const canRename = (t.status === 'active' || t.status === 'reserved') && !t.checked_in_at;
+        const canVoid = t.status === 'active' && !t.checked_in_at;
+        const acts = (canRename
+          ? `<button class="act-link" data-act="rename" data-id="${esc(t.id)}" data-name="${esc(t.holder_name)}" type="button">переоформить</button>`
+          : '') + (canVoid
+          ? `<button class="act-link danger" data-act="void" data-id="${esc(t.id)}" data-name="${esc(t.holder_name)}" type="button">аннулировать</button>`
+          : '');
         return `<tr><td>${esc(t.holder_name)}</td><td>${esc(t.id.toUpperCase())}</td>
                 <td>${esc(STATUS_RU[t.status] ?? t.status)}</td>
                 <td>${t.checked_in_at ? esc(fmtTime(t.checked_in_at)) : ''}</td>
@@ -293,22 +308,38 @@ function renderPending(list) {
   const host = $('pending-list');
   if (!host) return;
   if (!list.length) {
+    host.dataset.sig = '';
     host.innerHTML = '<p class="muted">Пока никто не ждёт</p>';
     return;
   }
   const now = Date.now();
+  const leftText = (o) => {
+    const left = o.expires_at ? Math.max(0, Math.round((Date.parse(o.expires_at) - now) / 60000)) : null;
+    return o.claimed_at
+      ? `<span class="pr-claimed">нажал «Я перевёл»</span> ${esc(fmtTime(o.claimed_at))} — проверь банк`
+      : left === null ? '' : left > 0 ? `сгорит через ${left} мин` : 'срок вышел, сгорит при следующем обновлении';
+  };
+  // список не перестраивается под пальцем: если состав и статусы те же,
+  // обновляем только таймеры — иначе новый «Я перевёл» сдвигал бы строки
+  // в момент нажатия «Подтвердить»
+  const sig = list.map((o) => `${o.id}:${o.claimed_at ? 'c' : 'p'}`).join('|');
+  if (host.dataset.sig === sig) {
+    for (const o of list) {
+      const el = host.querySelector(`.pending-row[data-id="${o.id}"] .pr-left`);
+      if (el) el.innerHTML = leftText(o);
+    }
+    return;
+  }
+  host.dataset.sig = sig;
   host.innerHTML = list
     .map((o) => {
-      const left = o.expires_at ? Math.max(0, Math.round((Date.parse(o.expires_at) - now) / 60000)) : null;
       const names = (o.tickets || []).map((t) => t.holder_name).join(', ');
       return `<div class="pending-row ${o.claimed_at ? 'is-claimed' : ''}" data-id="${esc(o.id)}">
         <div class="pr-code">${esc(o.pay_code || '—')}</div>
         <div class="pr-main">
           <b>${esc(o.buyer_name)}</b> · ${esc(o.buyer_phone)}${o.buyer_tg ? ` · @${esc(o.buyer_tg)}` : ''}${o.tg ? ' · в боте' : ''}
           <small>${o.qty} × ${o.amount_rub / o.qty} ₽ = <b>${o.amount_rub} ₽</b> · ${esc(names)}</small>
-          <small>${o.claimed_at
-            ? `<span class="pr-claimed">нажал «Я перевёл»</span> ${esc(fmtTime(o.claimed_at))} — проверь банк`
-            : left === null ? '' : left > 0 ? `сгорит через ${left} мин` : 'срок вышел, сгорит при следующем обновлении'}</small>
+          <small class="pr-left">${leftText(o)}</small>
         </div>
         <div class="pr-acts">
           <button class="btn btn-acid btn-sm" data-act="confirm" type="button">Подтвердить</button>
@@ -326,6 +357,13 @@ function renderPending(list) {
 
 async function pendingAction(act, orderId, row) {
   if (act === 'cancel' && !window.confirm('Отменить бронь? Места вернутся в продажу, гостю в боте придёт сообщение.')) return;
+  if (act === 'confirm') {
+    // одно касание активирует проходки: переспрашиваем с кодом и суммой, чтобы промах по соседней строке не стоил денег
+    const code = row.querySelector('.pr-code')?.textContent?.trim() || orderId;
+    const who = row.querySelector('.pr-main > b')?.textContent?.trim() || '';
+    const sum = row.querySelector('.pr-main small b')?.textContent?.trim() || '';
+    if (!window.confirm(`Подтвердить ${code} · ${sum} · ${who}? Перевод точно пришёл?`)) return;
+  }
   row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
   let j = null;
   try {

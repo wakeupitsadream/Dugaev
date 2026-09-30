@@ -2,11 +2,12 @@
 // с детерминированной демо-симуляцией продаж. Гость ошибок не видит.
 import { EVENTS } from './data/events.js';
 import { demoWaves } from './waves.js';
+import { SITE } from './data/config.js';
 
 export async function loadEvents(nowMs = Date.now()) {
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const timer = setTimeout(() => ctrl.abort(), 12000); // медленный мобильный интернет — не повод показывать сид
     const r = await fetch('/api/events', { signal: ctrl.signal });
     clearTimeout(timer);
     if (r.ok) {
@@ -20,14 +21,21 @@ export async function loadEvents(nowMs = Date.now()) {
   }
   return {
     // Скрытые волны (гостевой список) публике не показываем — как в /api/events
-    events: EVENTS.map((e) => ({ ...e, waves: demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, nowMs) })),
+    // боевой сайт остатки не выдумывает: без API — sold = 0 и никаких «уже идут»
+    events: EVENTS.map((e) => ({
+      ...e,
+      waves: SITE.paymentDemo
+        ? demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, nowMs)
+        : e.waves.filter((w) => w.public !== false).map((w) => ({ ...w, sold: 0 })),
+    })),
     live: false,
   };
 }
 
 export function upcoming(events, nowMs = Date.now()) {
   return events
-    .filter((e) => e.status === 'onsale' && Date.parse(e.endsAt || e.startsAt) > nowMs)
+    // ночь «живая» до своего конца (без конца — 8 часов после старта), как и на сервере
+    .filter((e) => e.status === 'onsale' && (e.endsAt ? Date.parse(e.endsAt) : Date.parse(e.startsAt) + 8 * 3600_000) > nowMs)
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
 }
 

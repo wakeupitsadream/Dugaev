@@ -7,8 +7,6 @@
 // пост (идемпотентность по update_id в вебхуке) — при 1–2 постах в день
 // это единицы рублей в месяц на любой мини-модели.
 // Нет ключей/ошибка — вызывающий код деградирует в «переслать владельцу».
-import Anthropic from '@anthropic-ai/sdk';
-
 const ANTHROPIC_MODEL = 'claude-haiku-4-5';
 const POLZA_DEFAULT_BASE = 'https://api.polza.ai/api/v1';
 const POLZA_DEFAULT_MODEL = 'openai/gpt-4o-mini';
@@ -187,6 +185,9 @@ const TOOL = {
 };
 
 async function extractViaAnthropic(text, knownEvents, nowIso) {
+  // SDK тяжёлый, а нужен только владельцу при разборе постов: грузим лениво,
+  // чтобы холодный старт вебхука не платил за него на каждом сообщении гостя
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ timeout: 20_000, maxRetries: 1 });
   try {
     const response = await client.messages.create({

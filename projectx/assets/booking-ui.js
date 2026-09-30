@@ -3,6 +3,7 @@
 // одинаковый вид, одна логика, одна кнопка «Я перевёл».
 import { SITE } from './data/config.js';
 import { esc } from './events-load.js';
+import { fmtRub } from './waves.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,18 +23,30 @@ export function payBlockHtml(order, bot, opts = {}) {
   const t = SITE.transfer || {};
   const claimed = Boolean(order.claimedAt);
   const link = botLink(bot, order.id);
+  const qty = Number(order.qty || 0);
   return `
   <div class="pay-box ${claimed ? 'is-claimed' : ''}" id="pay-box">
     <div class="pay-kicker">${claimed ? 'Ждём подтверждение' : 'Оплата переводом'}</div>
-    <div class="pay-sum">${esc(String(order.amountRub))} ₽</div>
+    <div class="pay-sum">${fmtRub(order.amountRub)} ₽</div>
+    ${qty > 1 ? `<p class="pay-note">Одним переводом за все ${qty} проходки платит тот, кто бронировал. Если платишь ты — укажи код брони.</p>` : ''}
     <div class="pay-rows">
       <div class="pay-row"><span>СБП по номеру</span><b>${esc(t.phone || '—')}</b></div>
       ${t.bank ? `<div class="pay-row"><span>Банк получателя</span><b>${t.bankKey ? `<i class="bank-badge bank-${esc(t.bankKey)}" aria-hidden="true"></i>` : ''}${esc(t.bank)}</b></div>` : ''}
       ${t.recipient ? `<div class="pay-row"><span>Получатель</span><b>${esc(t.recipient)}</b></div>` : ''}
       <div class="pay-row"><span>Код в комментарии</span><b class="pay-code" id="pay-code">${esc(order.payCode || '')}</b></div>
     </div>
-    <button class="btn btn-ghost btn-block" id="pay-copy" type="button">Скопировать код</button>
-    <p class="pay-note">${esc(t.note || '')}${order.expiresAt && !claimed ? ` Бронь держим до <b>${esc(fmtDeadline(order.expiresAt))}</b>.` : ''}</p>
+    <div class="pay-copy-row">
+      <button class="btn btn-ghost" id="pay-copy" type="button">Скопировать код</button>
+      <button class="btn btn-ghost" id="pay-copy-phone" type="button">Номер</button>
+      <button class="btn btn-ghost" id="pay-copy-sum" type="button">Сумму</button>
+    </div>
+    <ol class="pay-steps">
+      <li>Открой приложение своего банка → Переводы → <b>По номеру телефона</b>.</li>
+      <li>Номер <b>${esc(t.phone || '')}</b>${t.bank ? `, банк получателя <b>${esc(t.bank)}</b>` : ''}${t.recipient ? ` — получатель покажется как <b>${esc(t.recipient)}</b>${/\.$/.test(t.recipient) ? '' : '.'}` : '.'}</li>
+      <li>Сумма <b>${fmtRub(order.amountRub)} ₽</b>. В поле «Сообщение получателю» вставь код <b>${esc(order.payCode || '')}</b>.</li>
+      <li>Вернись сюда и нажми <b>«Я перевёл»</b> — бронь перестанет сгорать по таймеру. Забыл код? Не страшно: найдём по сумме и телефону.</li>
+    </ol>
+    <p class="pay-note">${order.expiresAt && !claimed ? `Бронь держим до <b>${esc(fmtDeadline(order.expiresAt))}</b>.` : ''}</p>
     ${claimed
       ? `<div class="pay-status" id="pay-status">Ты сообщил о переводе — как только мы его увидим, проходка станет активной. Обычно это несколько минут.</div>`
       : `<button class="btn btn-acid btn-block" id="pay-claim" type="button">Я перевёл</button>
@@ -46,16 +59,23 @@ export function payBlockHtml(order, bot, opts = {}) {
 
 // Навешивает копирование кода и «Я перевёл». onClaimed(claimedAt) — коллбек.
 export function bindPayBlock(order, { onClaimed } = {}) {
-  const copy = $('pay-copy');
-  if (copy) copy.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(order.payCode || '');
-      copy.textContent = 'Скопировано';
-    } catch {
-      copy.textContent = 'Выдели код и скопируй';
-    }
-    setTimeout(() => { copy.textContent = 'Скопировать код'; }, 2500);
+  const t = SITE.transfer || {};
+  const copyBtn = (id, value, label, fallback) => {
+    const b = $(id);
+    if (!b) return;
+    b.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+        b.textContent = 'Скопировано';
+      } catch {
+        b.textContent = fallback;
+      }
+      setTimeout(() => { b.textContent = label; }, 2500);
+    };
   };
+  copyBtn('pay-copy', order.payCode || '', 'Скопировать код', 'Выдели код и скопируй');
+  copyBtn('pay-copy-phone', String(t.phone || '').replace(/[^\d+]/g, ''), 'Номер', 'Выдели номер');
+  copyBtn('pay-copy-sum', String(order.amountRub || ''), 'Сумму', 'Выдели сумму');
   const claim = $('pay-claim');
   if (claim) claim.onclick = async () => {
     claim.disabled = true;
@@ -86,7 +106,7 @@ export function bindPayBlock(order, { onClaimed } = {}) {
       ? 'Оплата уже подтверждена — обнови страницу.'
       : j?.status === 'expired' || j?.status === 'cancelled'
         ? 'Бронь уже не активна — забронируй заново.'
-        : 'Не получилось передать. Напиши нам в директ, приложи скрин перевода.';
+        : 'Не получилось передать. Напиши нам в Telegram и приложи скрин перевода.';
     st.classList.remove('hidden');
   };
 }

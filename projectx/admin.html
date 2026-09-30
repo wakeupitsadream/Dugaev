@@ -6,6 +6,7 @@
   <title>Панель — PROJECT X</title>
   <meta name="robots" content="noindex, nofollow" />
   <meta name="theme-color" content="#070707" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/assets/styles.css" />
 </head>
@@ -52,7 +53,7 @@
           <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
             Гость забронировал и переводит по СБП с кодом брони в комментарии. Увидел перевод в банке —
             нажми «Подтвердить»: проходки станут активными, бот пришлёт их гостю. Нет перевода —
-            бронь сгорит сама через 3 часа (в день ночи — через час) или отмени её вручную.
+            бронь сгорит сама через 3 часа (за сутки до ночи — через час) или отмени её вручную.
           </p>
           <div class="pending-list" id="pending-list"><p class="muted">Пока никто не ждёт</p></div>
           <div class="pending-confirm">
@@ -111,7 +112,7 @@
               </div>
               <div class="field">
                 <label for="ee-start">Двери</label>
-                <input type="time" id="ee-start" value="23:00" step="300" />
+                <input type="time" id="ee-start" value="22:00" step="300" />
               </div>
               <div class="field">
                 <label for="ee-end">Финиш</label>
@@ -249,6 +250,7 @@
           <div style="overflow-x: auto;"><table class="admin-table" id="guests-table"></table></div>
         </div>
 
+        <p class="form-note no-print" id="stale-note" style="display: none; color: var(--danger);"></p>
         <p class="form-note no-print" id="db-missing" style="display: none;">
           БД пока не отвечает: подключи Neon Postgres в Vercel (Storage → Neon), сделай Redeploy
           и нажми «Инициализировать БД» в блоке «Сервис». Подробно — BRIEF.md, раздел 7.

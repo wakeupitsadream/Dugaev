@@ -10,9 +10,12 @@
 import { parseToken, formatTicketCode, normalizeManualId, fmtTime, plural } from './ticket-format.js';
 import { enqueue, pendingItems, applyResults } from './outbox.js';
 import { esc, loadEvents, upcoming } from './events-load.js';
+import { fmtRub } from './waves.js';
 
 const $ = (id) => document.getElementById(id);
-const LS_KEY = 'th_admin_key';
+// ключ сканера хранится отдельно от ключа панели: владелец, зайдя в панель на
+// телефоне хостес за офлайн-списком, не оставляет там админский ключ
+const LS_KEY = 'th_door_key';
 const LS_NAME = 'th_admin_name';
 const LS_OUTBOX = 'th_checkin_outbox';
 
@@ -52,7 +55,7 @@ async function renderGuest() {
   }
   stage('neutral', `
     <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
-    <p class="scan-sub" style="margin-top: 10px;">Покажи этот экран на входе — админ отсканирует и впустит.</p>
+    <p class="scan-sub" style="margin-top: 10px;">Это экран сканера на входе. Твоя проходка с QR — по ссылке из брони, её и показывай на дверях.</p>
     ${eventLine ? `<div class="scan-meta-pill">${esc(eventLine)}</div>` : ''}
     ${state.token ? `<div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>` : ''}
   `);
@@ -67,7 +70,8 @@ function renderPin() {
     <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
     <p class="scan-sub" style="margin: 10px 0 18px;">Режим сотрудника</p>
     <div class="pin-panel">
-      <input type="password" id="pin-key" placeholder="Ключ двери или админа" autocomplete="off" />
+      <input type="password" id="pin-key" placeholder="Ключ двери или админа" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <button class="act-link" id="pin-show" type="button">показать ключ</button>
       <input type="text" id="pin-name" placeholder="Твоё имя (видно в отчётах)" autocomplete="off" value="${esc(state.name)}" />
     </div>
   `);
@@ -88,6 +92,11 @@ function renderPin() {
     else renderManualOnly();
   };
   $('pin-cancel').onclick = () => (state.token ? renderGuest() : renderManualOnly());
+  $('pin-show').onclick = () => {
+    const i = $('pin-key');
+    i.type = i.type === 'password' ? 'text' : 'password';
+    $('pin-show').textContent = i.type === 'password' ? 'показать ключ' : 'скрыть ключ';
+  };
 }
 
 // Подсказка над панелью ввода: молчаливый фокус на дверях в темноте
@@ -152,7 +161,7 @@ function renderActive(j) {
   if (braceletWarn) sub = '<p class="scan-sub">Несовершеннолетний гость — браслет обязателен, бар закрыт.</p>';
   else if (ageRating < 18) sub = '<p class="scan-sub">Браслет на входе — как всем: он же пропуск обратно.</p>';
   stage(cls, `
-    <div class="scan-verdict">${braceletWarn ? 'Надеть браслет' : 'Пропустить'}</div>
+    <div class="scan-verdict">${braceletWarn ? 'Надеть браслет' : 'Проходит'}</div>
     ${sub}
     <div class="scan-name">${esc(j.holder_name)}</div>
     <div class="scan-detail">${esc(j.event?.title || '')} · ${esc(j.wave_name || '')} · билет ${formatTicketCode(state.token.id)}</div>
@@ -170,7 +179,7 @@ function renderRepeat(j) {
     <div class="scan-verdict">Уже использован</div>
     <div class="scan-name">${esc(j.holder_name || '')}</div>
     <p class="scan-sub">Вход был в <b>${j.checked_in_at ? fmtTime(j.checked_in_at) : '—'}</b>${j.checked_by ? `, впустил: ${esc(j.checked_by)}` : ''}.
-    Это скриншот или пересланный билет — не пускать.</p>
+    Это скриншот или пересланная проходка — не пускать.</p>
   `);
   foot(scanNextBtn());
   bindScanNext();
@@ -210,11 +219,12 @@ function renderReserved(j) {
   stage('amber', `
     <div class="scan-verdict">Не оплачено</div>
     <div class="scan-name">${esc(j.holder_name || '')}</div>
-    <p class="scan-sub">Бронь <b>${esc(o.pay_code || '')}</b>: ${o.amount_rub} ₽ за ${n} ${plural(n, 'проходку', 'проходки', 'проходок')}.
+    <p class="scan-sub">Бронь <b>${esc(o.pay_code || '')}</b>: ${fmtRub(o.amount_rub)} ₽ за ${n} ${plural(n, 'проходку', 'проходки', 'проходок')}.
     ${claimed ? 'Гость нажал «Я перевёл», но перевод ещё не подтверждён — проверь у админа или возьми наличными.' : 'Перевода не было — возьми наличными и впусти.'}</p>
+    ${n > 1 ? `<p class="scan-sub">Сумма — за всю бронь (${n} ${plural(n, 'проходка', 'проходки', 'проходок')}). Друзья пройдут по своим QR.</p>` : ''}
     ${state.token ? `<div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>` : ''}
   `);
-  foot(`<button class="btn btn-ok btn-block" id="do-confirm" type="button">Принять ${o.amount_rub} ₽ и впустить</button>
+  foot(`<button class="btn btn-ok btn-block" id="do-confirm" type="button">Принять ${fmtRub(o.amount_rub)} ₽ и впустить</button>
         ${scanNextBtn()}`);
   $('do-confirm').onclick = () => doConfirmAtDoor(o);
   bindScanNext();
@@ -241,14 +251,14 @@ async function doConfirmAtDoor(o) {
   } catch { /* ниже */ }
   if (j?.ok) {
     const extra = Number(o.qty || 1) > 1 ? ` · ещё ${Number(o.qty) - 1} из этой брони активны` : '';
-    stageLockOk('Оплачено и впущен', `${o.amount_rub} ₽ принято · выдай браслет${extra}`);
+    stageLockOk('Оплачено и впущен', `${fmtRub(o.amount_rub)} ₽ принято · выдай браслет${extra}`);
     return;
   }
   if (status === 403) return badKey();
   if (j?.error === 'not_pending' && j.status === 'paid') return verifyAndRender(); // админ подтвердил параллельно
   if (j?.error === 'not_pending') return renderExpired({ holder_name: '', status: j.status });
   btn.disabled = false;
-  btn.textContent = `Принять ${o.amount_rub} ₽ и впустить`;
+  btn.textContent = `Принять ${fmtRub(o.amount_rub)} ₽ и впустить`;
   pinHint(j?.message || 'Не получилось — проверь сеть и попробуй ещё раз');
 }
 
@@ -282,8 +292,9 @@ function renderDegraded() {
   let nameHtml = '';
   if (local) {
     nameHtml = `<div class="scan-name">${esc(local.n)}</div>`;
-    if (local.c) sub = `По офлайн-списку билет <b>уже использован</b> (${fmtTime(local.c)}). Не пускать.`;
-    else if (local.s && local.s !== 'active') sub = 'По офлайн-списку билет <b>отозван</b>. Не пускать.';
+    if (local.c) sub = `По офлайн-списку проходка <b>уже использована</b> (${fmtTime(local.c)}). Не пускать.`;
+    else if (local.s === 'reserved') sub = 'По офлайн-списку бронь <b>не оплачена</b>. Возьми наличными и впусти под запись — оплата отметится, когда база оживёт.';
+    else if (local.s && local.s !== 'active') sub = 'По офлайн-списку проходка <b>отозвана</b>. Не пускать.';
     else sub += local.a === 'minor' ? ' По офлайн-списку — несовершеннолетний: браслет.' : ' Есть в офлайн-списке.';
   } else {
     sub += ' В офлайн-списке не найден — сверь номер по печатному списку.';
@@ -295,16 +306,14 @@ function renderDegraded() {
     <div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>
     <div class="scan-meta-pill" id="outbox-pill"></div>
   `);
-  const blocked = local && (local.c || (local.s && local.s !== 'active'));
+  const blocked = local && (local.c || (local.s && local.s !== 'active' && local.s !== 'reserved'));
   foot(`
-    ${blocked ? '' : '<button class="btn btn-ok btn-block" id="do-offline" type="button">Впустить под запись</button>'}
+    ${blocked ? '' : `<button class="btn btn-ok btn-block" id="do-offline" type="button">${offlineAdmitLabel(local)}</button>`}
     ${scanNextBtn()}
   `);
   if (!blocked) {
     $('do-offline').onclick = () => {
-      const list = loadOutbox();
-      saveOutbox(enqueue(list, { ticketId: state.token.id, by: state.name, at: new Date().toISOString() }));
-      markOfflineUsed(state.token.id);
+      enqueueLocal(local);
       stageLockOk('Впущен под запись', 'Синхронизируем с базой, когда она оживёт.');
       syncOutbox();
     };
@@ -319,10 +328,12 @@ function renderOffline() {
   const local = offlineLookup(state.token.id);
   let body;
   if (local) {
-    const blocked = local.c || (local.s && local.s !== 'active');
+    const blocked = local.c || (local.s && local.s !== 'active' && local.s !== 'reserved');
     body = blocked
-      ? `<div class="scan-name">${esc(local.n)}</div><p class="scan-sub">По офлайн-списку билет уже использован или отозван. Не пускать.</p>`
-      : `<div class="scan-name">${esc(local.n)}</div><p class="scan-sub">Есть в офлайн-списке${local.a === 'minor' ? ' — несовершеннолетний, браслет' : ''}. Впусти под запись.</p>`;
+      ? `<div class="scan-name">${esc(local.n)}</div><p class="scan-sub">По офлайн-списку проходка уже использована или отозвана. Не пускать.</p>`
+      : local.s === 'reserved'
+        ? `<div class="scan-name">${esc(local.n)}</div><p class="scan-sub">По офлайн-списку бронь не оплачена. Возьми наличными и впусти под запись — оплата отметится, когда появится сеть.</p>`
+        : `<div class="scan-name">${esc(local.n)}</div><p class="scan-sub">Есть в офлайн-списке${local.a === 'minor' ? ' — несовершеннолетний, браслет' : ''}. Впусти под запись.</p>`;
   } else {
     body = `<p class="scan-sub">Интернета нет, и билета нет в офлайн-списке. Сверь номер по печатному списку гостей.</p>`;
   }
@@ -331,12 +342,11 @@ function renderOffline() {
     ${body}
     <div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>
   `);
-  const canAdmit = local && !local.c && (!local.s || local.s === 'active');
-  foot(`${canAdmit ? '<button class="btn btn-ok btn-block" id="do-offline" type="button">Впустить под запись</button>' : ''}${scanNextBtn()}`);
+  const canAdmit = local && !local.c && (!local.s || local.s === 'active' || local.s === 'reserved');
+  foot(`${canAdmit ? `<button class="btn btn-ok btn-block" id="do-offline" type="button">${offlineAdmitLabel(local)}</button>` : ''}${scanNextBtn()}`);
   if (canAdmit) {
     $('do-offline').onclick = () => {
-      saveOutbox(enqueue(loadOutbox(), { ticketId: state.token.id, by: state.name, at: new Date().toISOString() }));
-      markOfflineUsed(state.token.id);
+      enqueueLocal(local);
       stageLockOk('Впущен под запись', 'Отметка сохранена на этом телефоне и уйдёт в базу при появлении сети.');
     };
   }
@@ -391,18 +401,77 @@ function renderManualOnly() {
     <div class="guest-brand">PRO<span class="lx">X</span>JECT</div>
     <p class="scan-sub" style="margin: 10px 0 18px;">Режим сотрудника · ${esc(state.name)}</p>
     <div class="pin-panel">
-      <input type="text" id="manual-id" placeholder="Номер билета, напр. 7K3F-9QZ2-MX" autocomplete="off" />
+      <input type="text" id="manual-id" placeholder="Номер проходки, напр. 7K3F-9QZ2-MX" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" />
     </div>
     <div class="scan-meta-pill" id="outbox-pill"></div>
+    <div class="scan-meta-pill" id="offline-pill"></div>
   `);
-  foot(`<button class="btn btn-acid" id="manual-go" type="button">Найти билет</button>
+  foot(`<button class="btn btn-acid" id="manual-go" type="button">Найти проходку</button>
         <button class="btn btn-ghost" id="walkin-open" type="button">＋ Гость без проходки</button>
+        <button class="btn btn-ghost" id="offline-refresh" type="button">Обновить офлайн-список</button>
         <button class="btn btn-ghost" id="logout" type="button">Выйти из режима</button>`);
   $('manual-go').onclick = manualLookup;
   $('manual-id').onkeydown = (e) => { if (e.key === 'Enter') manualLookup(); };
   $('walkin-open').onclick = () => renderWalkin('');
+  $('offline-refresh').onclick = refreshOfflineList;
   $('logout').onclick = () => { localStorage.removeItem(LS_KEY); state.key = ''; renderGuest(); };
   updateOutboxPill();
+  updateOfflinePill();
+}
+
+// Офлайн-список гостей ближайшей ночи — прямо со сканера, ключом двери:
+// панель организатора для этого не нужна, а без списка при падении сети
+// дверь работает вслепую. Формат тот же, что кладёт панель (th_offline_<id>).
+async function refreshOfflineList() {
+  const btn = $('offline-refresh');
+  if (btn) { btn.disabled = true; btn.textContent = 'Скачиваю…'; }
+  let note = 'Не получилось — проверь сеть';
+  try {
+    const e = await loadWalkinEvent();
+    if (!e) note = 'Нет ночи в продаже';
+    else {
+      const r = await fetch(`/api/stats?event_id=${encodeURIComponent(e.id)}&list=1`, { headers: adminHeaders() });
+      if (r.status === 403) return badKey();
+      const j = await r.json().catch(() => null);
+      if (j?.ok && j.tickets) {
+        const map = {};
+        for (const t of j.tickets) map[t.id] = { n: t.holder_name, a: t.age_cat, s: t.status, c: t.checked_in_at, o: t.order_id };
+        localStorage.setItem(`th_offline_${e.id}`, JSON.stringify(map));
+        localStorage.setItem('th_offline_at', new Date().toISOString());
+        note = '';
+      }
+    }
+  } catch { /* note уже задан */ }
+  if (btn) { btn.disabled = false; btn.textContent = 'Обновить офлайн-список'; }
+  updateOfflinePill(note);
+}
+
+function updateOfflinePill(err = '') {
+  const pill = $('offline-pill');
+  if (!pill) return;
+  let n = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('th_offline_') && k !== 'th_offline_at') n += Object.keys(JSON.parse(localStorage.getItem(k) || '{}')).length;
+    }
+  } catch { /* ignore */ }
+  const at = localStorage.getItem('th_offline_at');
+  pill.style.display = '';
+  pill.textContent = err || (n ? `офлайн-список: ${n} ${plural(n, 'гость', 'гостя', 'гостей')}${at ? ` · ${fmtTime(at)}` : ''}` : 'офлайн-списка нет — скачай, пока есть сеть');
+}
+
+// что написать на кнопке впуска под запись и что положить в очередь
+function offlineAdmitLabel(local) {
+  return local && local.s === 'reserved' ? 'Принял наличные — впустить под запись' : 'Впустить под запись';
+}
+function enqueueLocal(local) {
+  const cash = Boolean(local && local.s === 'reserved' && local.o);
+  saveOutbox(enqueue(loadOutbox(), {
+    ticketId: state.token.id, by: state.name, at: new Date().toISOString(),
+    ...(cash ? { orderId: local.o, cash: true } : {}),
+  }));
+  markOfflineUsed(state.token.id);
 }
 
 // ---------- Касса на дверях: гость без проходки ----------
@@ -582,6 +651,19 @@ async function syncOutbox() {
   const results = [];
   for (const it of items) {
     try {
+      if (it.cash && it.orderId) {
+        // наличные приняты у двери в офлайне: подтверждаем заказ и сразу отмечаем вход
+        const r = await fetch('/api/walkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+          body: JSON.stringify({ action: 'confirm', order_id: it.orderId, provider: 'door', ticket_id: it.ticketId, by: it.by }),
+        });
+        const j = await r.json().catch(() => null);
+        // уже оплачено кем-то ещё (владелец подтвердил перевод) — тоже доставлено, вход отметим обычным путём
+        const done = Boolean(j && (j.ok || (j.error === 'not_pending' && j.status === 'paid')));
+        if (!done) { results.push({ ticketId: it.ticketId, ok: false }); continue; }
+        if (j.ok && j.checked_in_at) { results.push({ ticketId: it.ticketId, ok: true }); continue; }
+      }
       const r = await fetch('/api/checkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...adminHeaders() },
@@ -632,6 +714,13 @@ function vibrate(pattern) {
   if (navigator.vibrate && navigator.userActivation?.hasBeenActive) navigator.vibrate(pattern);
 }
 let audioCtx = null;
+// iOS даёт звук только после жеста: создаём контекст на первом касании
+document.addEventListener('pointerdown', () => {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { /* звук не критичен */ }
+}, { passive: true });
 function beep(kind) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();

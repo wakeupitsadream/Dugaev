@@ -5,6 +5,7 @@ import { SITE } from './data/config.js';
 import { initChrome, observeReveal } from './chrome.js';
 import { loadEvents, upcoming, esc } from './events-load.js';
 import { ladderText } from './waves.js';
+import { fillRefundUntil } from './blocks.js';
 
 initChrome();
 observeReveal();
@@ -25,7 +26,6 @@ document.querySelectorAll('[data-legal-operator]').forEach((el) => { el.textCont
 document.querySelectorAll('[data-dm]').forEach((a) => { a.href = SITE.instagramDm; });
 document.querySelectorAll('[data-ig-name]').forEach((el) => { el.textContent = SITE.instagramName; });
 document.querySelectorAll('[data-legal-updated]').forEach((el) => { el.textContent = fmtDate(L.policyUpdated); });
-document.querySelectorAll('[data-refund-until]').forEach((el) => { el.textContent = fmtDate(SITE.refundUntil) || 'даты, указанной в FAQ'; });
 document.querySelectorAll('[data-hold-hours]').forEach((el) => { el.textContent = String(SITE.holdHours || 3); });
 
 // реквизиты перевода — те же, что на экране брони
@@ -65,4 +65,5 @@ loadEvents().then(({ events }) => {
   const e = upcoming(events)[0];
   const ladder = e ? ladderText(e.waves) : null;
   document.querySelectorAll('[data-ladder]').forEach((el) => { if (ladder) el.textContent = ladder; });
-}).catch(() => {});
+  fillRefundUntil(e || null); // «до 24 сентября 2026 включительно» — от даты ночи
+}).catch(() => fillRefundUntil(null));

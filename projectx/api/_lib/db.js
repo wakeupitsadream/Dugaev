@@ -22,7 +22,9 @@ export function db() {
 function pgliteAdapter() {
   let ready = null;
   const init = async () => {
-    const { PGlite } = await import('@electric-sql/pglite');
+    // имя модуля собираем из частей: трассировщик Vercel не тянет 26 МБ WASM
+    // в бандл каждой функции ради dev-зависимости
+    const { PGlite } = await import(['@electric-sql', 'pglite'].join('/'));
     return new PGlite();
   };
   return {

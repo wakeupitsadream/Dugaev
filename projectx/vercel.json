@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
+  "functions": {
+    "api/tg-webhook.js": { "maxDuration": 30 },
+    "api/stats.js": { "maxDuration": 15 },
+    "api/seed.js": { "maxDuration": 30 }
+  },
   "rewrites": [
     {
       "source": "/e/:slug",
@@ -35,7 +40,16 @@
       ]
     },
     {
-      "source": "/admin.html",
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()" }
+      ]
+    },
+    {
+      "source": "/(admin|scan|promo)",
       "headers": [
         {
           "key": "X-Robots-Tag",
@@ -44,11 +58,20 @@
       ]
     },
     {
-      "source": "/privacy.html",
+      "source": "/assets/(.*)\\.(js|css)",
       "headers": [
         {
-          "key": "X-Robots-Tag",
-          "value": "noindex"
+          "key": "Cache-Control",
+          "value": "public, max-age=600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/assets/photos/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=604800"
         }
       ]
     },

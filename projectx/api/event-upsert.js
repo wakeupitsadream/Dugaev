@@ -18,7 +18,7 @@ import { parseEventForm } from './_lib/event-form.js';
 import {
   EVENT_UPSERT_SQL,
   WAVE_UPSERT_SQL,
-  WAVES_PRUNE_SQL,
+  WAVES_PRUNE_SQL, WAVES_HIDE_SQL,
   ADMIN_EVENTS_SQL,
 } from './_lib/queries.js';
 
@@ -84,6 +84,17 @@ export default async function handler(req, res) {
   }
   const { event: e, waves, prune, warnings } = parsed;
 
+  // новое событие с таким же названием и датой уже есть — не затираем его молча
+  if (!existing) {
+    try {
+      const dup = rowsOf(await sql.query(`SELECT id FROM events WHERE id = $1`, [e.id]));
+      if (dup.length) return fail(res, 409, 'exists', `Событие ${e.id} уже есть — выбери его в списке и поправь`, { event_id: e.id });
+    } catch (err) {
+      console.error('event dup check failed:', err);
+      return fail(res, 503, 'db_unavailable', 'БД недоступна');
+    }
+  }
+
   try {
     await sql.query(EVENT_UPSERT_SQL, [
       e.id, e.brand, e.title, e.city, e.venue, e.address, e.startsAt, e.endsAt,
@@ -96,7 +107,11 @@ export default async function handler(req, res) {
       if (row) saved.push({ waveNo: Number(row.wave_no), quota: Number(row.quota), sold: Number(row.sold) });
     }
     if (prune.length) {
-      await sql.query(WAVES_PRUNE_SQL, [e.id, waves.map((w) => w.waveNo)]);
+      const keep = waves.map((w) => w.waveNo);
+      await sql.query(WAVES_PRUNE_SQL, [e.id, keep]);
+      // волна с sold = 0, но с историей заказов не удаляется (FK) — прячем её с сайта
+      const hidden = rowsOf(await sql.query(WAVES_HIDE_SQL, [e.id, keep]));
+      if (hidden.length) warnings.push(`Волна ${hidden.map((h) => h.wave_no).join(', ')} скрыта, а не удалена: на неё ссылаются старые брони`);
     }
     return ok(res, {
       event_id: e.id,

@@ -5,12 +5,17 @@ import { demoWaves } from '../assets/waves.js';
 import { addressIsPublic, publicRevealAt } from '../assets/secret-place.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, onlyMethod } from './_lib/respond.js';
+import { EXPIRE_SQL } from './_lib/queries.js';
+import { paymentMode } from './_lib/booking.js';
 
 export default async function handler(req, res) {
   if (!onlyMethod(req, res, 'GET')) return;
 
   if (hasDb()) {
     try {
+      // сгоревшие брони возвращают места до того, как афиша покажет остатки:
+      // иначе «всё продано» висело бы до следующего заказа или открытия панели
+      try { await withTimeout(db().query(EXPIRE_SQL), 2000); } catch { /* не критично для афиши */ }
       const rows = await withTimeout(db().query(
         `SELECT e.id, e.brand, e.title, e.city, e.venue, e.address, e.secret, e.capacity,
                 e.starts_at, e.ends_at, e.age_rating, e.status, e.poster_url, e.descr, e.lineup,
@@ -40,7 +45,10 @@ export default async function handler(req, res) {
       ...e,
       address: !e.secret || addressIsPublic(e) ? e.address : null,
       addressPublicAt: e.secret ? publicRevealAt(e.startsAt) : null,
-      waves: demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, Date.now()),
+      // боевой режим: при недоступной БД остатки не выдумываем — sold = 0
+      waves: paymentMode() === 'demo'
+        ? demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, Date.now())
+        : e.waves.filter((w) => w.public !== false).map((w) => ({ waveNo: w.waveNo, name: w.name, priceRub: w.priceRub, quota: w.quota, sold: 0 })),
     })),
   });
 }

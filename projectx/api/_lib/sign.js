@@ -41,7 +41,11 @@ export function verifyToken(token, secrets) {
 const DEV_SECRET = 'px-dev-secret-replace-me';
 
 export function primarySecret(env = process.env) {
-  if (!env.TICKET_SECRET) console.warn('TICKET_SECRET не задан — используется дев-секрет');
+  if (!env.TICKET_SECRET) {
+    // на боевом домене без секрета QR подделываемы: лучше громко упасть, чем тихо продавать
+    if (env.VERCEL_ENV === 'production') throw new Error('TICKET_SECRET не задан в Vercel — проходки не выпускаются');
+    console.warn('TICKET_SECRET не задан — используется дев-секрет');
+  }
   return env.TICKET_SECRET || DEV_SECRET;
 }
 

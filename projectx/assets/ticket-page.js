@@ -36,7 +36,7 @@ async function init() {
   let data = null;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const timer = setTimeout(() => ctrl.abort(), 15000); // первое открытие на медленной сети — ждём дольше
     const r = await fetch(`/api/ticket?token=${encodeURIComponent(token)}`, { signal: ctrl.signal });
     clearTimeout(timer);
     const j = await r.json().catch(() => null);
@@ -88,7 +88,9 @@ function render(parsed, t) {
   if (!t) {
     // подпись валидна, деталей нет (первое открытие офлайн) — QR всё равно рабочий
     $('t-name').textContent = 'Именная проходка';
-    $('t-meta').textContent = 'Детали подтянутся, когда появится интернет';
+    $('t-meta').innerHTML = 'Детали подтянутся, когда появится интернет. <button class="act-link" id="t-retry" type="button">Обновить</button>';
+    const retry = $('t-retry');
+    if (retry) retry.onclick = () => location.reload();
     return;
   }
   $('t-event').textContent = t.event.title;
@@ -230,10 +232,19 @@ function savePng(parsed, t) {
     ctx.font = '32px sans-serif';
     if (t) ctx.fillText(`${t.holderName} · ${fmtTicketWhen(t.event.startsAt)}`, canvas.width / 2, canvas.height - 40);
     URL.revokeObjectURL(url);
-    const a = document.createElement('a');
-    a.download = `projectx-${parsed.id}.png`;
-    a.href = canvas.toDataURL('image/png');
-    a.click();
+    const name = `projectx-${parsed.id}.png`;
+    // системный «Поделиться» умеет «Сохранить изображение» и работает во
+    // встроенных браузерах Instagram и Telegram, где download молча игнорируется
+    canvas.toBlob(async (blob) => {
+      const file = blob ? new File([blob], name, { type: 'image/png' }) : null;
+      if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Проходка PROJECT X' }); return; } catch { /* отмена — покажем картинку */ }
+      }
+      const a = document.createElement('a');
+      a.download = name;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    }, 'image/png');
   };
   img.src = url;
 }

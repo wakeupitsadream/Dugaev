@@ -122,9 +122,10 @@ const adminName = (req) => staffName(req);
 async function logScan(ticketId, result, by) {
   if (!hasDb()) return;
   try {
-    await db().query(
+    // журнал не должен ни ломать, ни задерживать вход: секунда — и отвечаем
+    await withTimeout(db().query(
       `INSERT INTO scan_log (ticket_id, result, scanned_by) VALUES ($1, $2, $3)`,
       [ticketId, result, by]
-    );
+    ), 1000);
   } catch { /* лог не должен ломать вход */ }
 }

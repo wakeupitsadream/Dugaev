@@ -1,7 +1,7 @@
 User-agent: *
 Allow: /
-Disallow: /admin.html
-Disallow: /scan.html
+Disallow: /admin
+Disallow: /scan
 Disallow: /promo
 Disallow: /t/
 Disallow: /s/

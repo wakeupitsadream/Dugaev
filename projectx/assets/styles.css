@@ -199,7 +199,7 @@ body::after {
   position: relative; overflow: hidden;
   padding-top: calc(var(--header-h) + 56px);
   padding-bottom: 40px;
-  min-height: 92svh;
+  min-height: 92vh; min-height: 92svh;
   display: flex; flex-direction: column; justify-content: center;
 }
 .hero-bg {
@@ -415,7 +415,7 @@ body.sheet-dragging, body.sheet-dragging .sheet { user-select: none; -webkit-use
 body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hidden; }
 .sheet {
   position: fixed; inset-inline: 0; bottom: 0; z-index: 81;
-  max-height: 88svh; overflow-y: auto; overscroll-behavior: contain;
+  max-height: 88vh; max-height: 88svh; overflow-y: auto; overscroll-behavior: contain;
   background: var(--bg-2); border-top: 1px solid var(--line);
   border-radius: 20px 20px 0 0;
   padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
@@ -564,7 +564,7 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 /* ============================================================
    Билет гостя (/t/)
    ============================================================ */
-.ticket-wrap { min-height: 100svh; display: flex; align-items: center; justify-content: center; padding: 26px 16px 40px; }
+.ticket-wrap { min-height: 100vh; min-height: 100svh; display: flex; align-items: center; justify-content: center; padding: 26px 16px 40px; }
 .ticket-card {
   width: 100%; max-width: 400px; border-radius: 22px; overflow: hidden;
   background: var(--bg-2); border: 1px solid var(--line);
@@ -601,7 +601,7 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 /* ============================================================
    Страница сканирования (/s/) — светофор для админа
    ============================================================ */
-.scan-body { min-height: 100svh; display: flex; flex-direction: column; }
+.scan-body { min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; }
 .scan-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 28px 20px; transition: background 0.25s ease; }
 .scan-stage .sc-icon { font-family: var(--font-display); font-weight: 900; font-size: 3rem; line-height: 1; margin-bottom: 10px; }
 .scan-verdict { font-family: var(--font-display); font-weight: 900; font-size: clamp(1.9rem, 9vw, 3.2rem); text-transform: uppercase; line-height: 1.05; margin-bottom: 12px; }
@@ -619,7 +619,7 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 .stage-neutral { background: var(--bg); }
 .scan-foot { padding: 16px 20px calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 10px; }
 .scan-foot .btn { min-height: 60px; font-size: 1rem; }
-.btn-ok { background: var(--ok); color: var(--ink); }
+.btn-ok { background: var(--ok); color: #04240f; } /* тёмный текст на зелёном: 8:1 вместо 2:1 */
 .btn-danger-ghost { background: transparent; border-color: var(--danger); color: var(--danger); }
 .scan-meta-pill {
   display: inline-flex; gap: 8px; align-items: center; margin-top: 18px;
@@ -685,7 +685,7 @@ body.scroll-locked { position: fixed; inset-inline: 0; width: 100%; overflow: hi
 .dot-bad { background: var(--danger); } .dot-degraded { background: var(--amber); }
 .admin-select {
   background: var(--bg-3); border: 1px solid var(--line); color: var(--text);
-  border-radius: var(--radius-s); padding: 12px 14px; font-family: inherit; font-size: 0.95rem;
+  border-radius: var(--radius-s); padding: 12px 14px; font-family: inherit; font-size: 1rem; /* 16px — iOS не зумит поле */
   max-width: 100%;
 }
 .admin-section { margin-bottom: 34px; }
@@ -1171,8 +1171,8 @@ h2 { line-height: 1.1; }
 .pay-box .pay-sum { font-family: var(--font-display); font-weight: 900; font-size: 2rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .pay-rows { display: grid; gap: 6px; margin-top: 4px; }
 .pay-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; border-bottom: 1px dashed var(--line); padding: 8px 0; font-size: 0.92rem; }
-.pay-row span { color: var(--muted); }
-.pay-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.pay-row span { color: var(--muted); flex: 0 1 auto; }
+.pay-row b { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: auto; }
 /* Мини-логотип банка перед названием: фирменный цвет и буква, без чужих файлов */
 .bank-badge { display: inline-block; width: 18px; height: 18px; border-radius: 5px; vertical-align: -4px; margin-right: 7px; position: relative; background: #555; }
 .bank-badge::after { content: ''; position: absolute; inset: 0; color: #fff; font: 700 12px/18px Arial, sans-serif; text-align: center; }
@@ -1185,7 +1185,8 @@ h2 { line-height: 1.1; }
 .pay-box .btn { margin: 0; }
 .ticket-status-strip.reserved { background: var(--amber-bg); color: var(--amber); }
 .ticket-status-strip.expired { background: var(--danger-bg); color: var(--danger); }
-.ticket-card.is-reserved .tc-qr-zone { opacity: 0.35; filter: grayscale(1); }
+/* неоплаченный QR не гасим: дверь сканирует именно его, чтобы принять наличные — статус говорит полоска */
+.ticket-card.is-reserved .tc-qr-zone { opacity: 1; }
 .ticket-card.is-dead .tc-qr-zone { opacity: 0.15; filter: grayscale(1); }
 .ticket-card .tc-pay { padding: 0 22px 8px; }
 .ticket-card .tc-pay .pay-box { margin: 0 0 12px; }
@@ -1207,7 +1208,7 @@ h2 { line-height: 1.1; }
 .pending-confirm { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
 .pending-confirm input { flex: 1 1 160px; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; font: inherit; text-transform: uppercase; letter-spacing: 0.08em; }
 .pending-confirm input:focus { outline: none; border-color: var(--acid); }
-.act-link { background: none; border: 0; color: var(--acid); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+.act-link { background: none; border: 0; color: var(--acid-text); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 10px 0; min-height: 44px; text-decoration: underline; text-underline-offset: 3px; }
 .act-link.danger { color: var(--danger); }
 .act-link + .act-link { margin-left: 10px; }
 .sources-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
@@ -1218,3 +1219,15 @@ h2 { line-height: 1.1; }
   .pending-row { grid-template-columns: 1fr; }
   .pending-row .pr-acts { justify-content: flex-start; }
 }
+
+/* --- ревью перед запуском: контраст мелкого акцентного текста, экран оплаты, строка над афишей --- */
+:root { --acid-text: #ff474d; } /* 6:1 на чёрном для мелкого текста; заливки остаются --acid */
+.kicker, .pay-kicker, .check a, .st-open, .buy-left b { color: var(--acid-text); }
+.pay-copy-row { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 8px; margin: 10px 0 12px; }
+.pay-copy-row .btn { margin: 0; padding-inline: 10px; }
+.pay-steps { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 6px; font-size: 0.92rem; color: var(--text); }
+.pay-steps li { line-height: 1.4; }
+.eh-strip { display: none; margin: 0 0 12px; font-weight: 700; letter-spacing: 0.02em; font-size: 0.95rem; }
+@media (max-width: 760px) { .eh-strip { display: block; } }
+.map-link { color: var(--acid-text); text-decoration: underline; text-underline-offset: 3px; }
+.eh-meta-item .v a { color: var(--acid-text); }

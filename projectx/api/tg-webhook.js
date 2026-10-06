@@ -21,12 +21,19 @@ import { isAdmin } from './_lib/auth.js';
 import { notifyOwner, tgApi, tgCall, tgBotUsername } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
-import { isOrderId, transferText, transferLines, ticketLinks, siteOrigin } from './_lib/booking.js';
+import { isOrderId, transferText, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer } from './_lib/booking.js';
 import { placeOrder, nextWaveOf, nextWaveFor, seatsLeft, ownerNotice, ownerNoticeMarkup, liveUntilMs } from './_lib/order-core.js';
 import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL } from './_lib/queries.js';
 import { normalizePhone, fmtTime } from '../assets/ticket-format.js';
 import { ladderText, fmtRub } from '../assets/waves.js';
 import { SITE } from '../assets/data/config.js';
+import {
+  rowsOf, fmtWhen, fmtTimeOnly, plural, originOf, fmtDay, escHtml, sender, callOf, posterUrl,
+  loadEvent, nearestEvent, eventWaves, isOwnerChat,
+} from './_lib/bot-kit.js';
+import { ownerMessage, ownerCallback, draftFromPost, OWNER_COMMANDS } from './_lib/bot-owner.js';
+import { subscribe, unsubscribe, SUB_BUTTON, runBroadcast, broadcastStatus, subsCount } from './_lib/broadcast.js';
+import { parsePost } from '../assets/post-parse.js';
 
 export default async function handler(req, res) {
   noStore(res);
@@ -58,6 +65,26 @@ export default async function handler(req, res) {
       welcome: guestDeps.sql ? (chatId) => sendWelcome(chatId, guestDeps, { intro: true }) : null,
     });
     return r.ok ? ok(res, r) : fail(res, 400, r.error, r.message, r);
+  }
+
+  // Панель → «Разослать анонс»: одна порция рассылки за вызов, панель зовёт
+  // повторно, пока не done. Статус — без отправки.
+  if (req.body?.action === 'broadcast' || req.body?.action === 'broadcast_status') {
+    if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен ключ администратора');
+    if (!hasDb()) return fail(res, 503, 'db_unavailable', 'БД не настроена');
+    const sql = db();
+    await ensureSchema(sql);
+    const eventId = String(req.body.event_id || '');
+    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(eventId)) return fail(res, 400, 'validation', 'Некорректный id мероприятия');
+    if (req.body.action === 'broadcast_status') {
+      return ok(res, { ...(await broadcastStatus(sql, eventId)), subs: await subsCount(sql), bot: Boolean(process.env.TELEGRAM_BOT_TOKEN) });
+    }
+    if (!process.env.TELEGRAM_BOT_TOKEN) return fail(res, 503, 'not_configured', 'Бот не подключён: нет TELEGRAM_BOT_TOKEN');
+    const r = await runBroadcast({
+      sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req),
+      assetOrigin: req.headers?.host ? `https://${req.headers.host}` : null,
+    }, eventId);
+    return r.ok ? ok(res, r) : fail(res, 409, 'broadcast_failed', r.message);
   }
 
   const secret = process.env.TG_WEBHOOK_SECRET || '';
@@ -112,6 +139,7 @@ export default async function handler(req, res) {
 export const BOT_COMMANDS = [
   { command: 'buy', description: 'Забронировать проходки' },
   { command: 'tickets', description: 'Мои проходки' },
+  { command: 'notify', description: 'Узнавать о новых ночах первым' },
   { command: 'cancel', description: 'Отменить оформление' },
 ];
 
@@ -179,6 +207,10 @@ export async function setupBot({ tg, call, origin, token, secret, username, prob
     drop_pending_updates: !sameUrl,
   });
   await step('команды', 'setMyCommands', { commands: BOT_COMMANDS });
+  // владельцу — свои команды: сводка, брони, мероприятие из поста
+  if (ownerChat) {
+    await step('команды владельца', 'setMyCommands', { commands: OWNER_COMMANDS, scope: { type: 'chat', chat_id: Number(ownerChat) } });
+  }
   await step('кнопка меню', 'setChatMenuButton', { menu_button: { type: 'commands' } });
   await step('описание', 'setMyDescription', {
     description: `Проходки на ночи ${SITE.brandName}: бронь за минуту прямо здесь, оплата переводом по СБП, именной QR приходит в чат.`,
@@ -246,6 +278,8 @@ export async function handleUpdate(update, deps) {
   // сгоревшие брони списываются и от активности в боте, не только от заказов и панели
   if (deps.sql && (update.message || update.callback_query)) {
     try { await deps.sql.query(EXPIRE_SQL); } catch { /* не критично */ }
+    // брошенный мастер брони стирается через 12 часов — как обещает политика
+    try { await deps.sql.query(`DELETE FROM tg_sessions WHERE updated_at < now() - interval '12 hours'`); } catch { /* не критично */ }
   }
   if (update.callback_query) return handleCallback(update.callback_query, deps);
   if (update.message) return handleMessage(update.message, deps);
@@ -263,11 +297,16 @@ export async function handleUpdate(update, deps) {
     : null;
   if (text.length < 8 && !photoId) return { done: 'empty' };
 
-  // без LLM-ключа — честная деградация: переслать владельцу на ручную правку
+  // без LLM-ключа пост разбирают правила: есть дата — владельцу приходит
+  // черновик с кнопкой «Опубликовать», нет — сам пост на ручную правку
   if (!deps.extractAvailable) {
+    const owner = String(process.env.TELEGRAM_CHAT_ID || '');
+    if (deps.sql && owner && parsePost(text, { nowMs: deps.nowMs }).draft.date) {
+      return draftFromPost(deps, owner, text, photoId);
+    }
     await deps.notify(
-      `Новый пост в канале (анализ выключен — нет ANTHROPIC_API_KEY).\n` +
-      `Если это афиша — обнови сайт вручную.\n\n${text.slice(0, 500)}`
+      `Новый пост в канале — дату ночи в нём не нашёл.\n` +
+      `Если это афиша — создай ночь в панели вручную (текст поста можно вставить туда).\n\n${text.slice(0, 500)}`
     );
     return { done: 'forwarded' };
   }
@@ -365,30 +404,6 @@ export async function handleUpdate(update, deps) {
   return { done: 'draft_created', slug, status };
 }
 
-const rowsOf = (r) => (r && r.rows) || r || [];
-const fmtWhen = (iso) =>
-  new Date(iso).toLocaleString('ru-RU', {
-    timeZone: SITE.tz || 'Asia/Yekaterinburg', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
-  });
-const plural = (n, one, few, many) => {
-  const a = Math.abs(n) % 100; const b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b > 1 && b < 5) return few;
-  if (b === 1) return one;
-  return many;
-};
-const originOf = (deps) => String(deps.origin || process.env.SITE_ORIGIN || 'https://proxject.ru').replace(/\/+$/, '');
-// «10 октября» без времени: время дверей пишем отдельно, чтобы не дублировать
-const fmtDay = (iso) => fmtWhen(iso).replace(/ в \d{1,2}:\d{2}$/, '');
-const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-// send(text, replyMarkup, html): html=true — разметка <b>/<a> (все данные гостя экранируются)
-const sender = (deps, chatId) => (text, markup, html = false) => deps.tg('sendMessage', {
-  chat_id: chatId,
-  text,
-  disable_web_page_preview: true,
-  ...(html ? { parse_mode: 'HTML' } : {}),
-  ...(markup ? { reply_markup: markup } : {}),
-});
 const CONTACT_KEYBOARD = {
   keyboard: [[{ text: '📱 Отправить мой номер', request_contact: true }]],
   resize_keyboard: true,
@@ -415,6 +430,30 @@ async function handleMessage(msg, deps) {
       await send(r.ok ? 'Отправлено гостю.' : `Не доставлено: ${r.error}`);
       return { done: r.ok ? 'owner_reply' : 'owner_reply_failed' };
     }
+  }
+
+  // владелец: сводка, брони, мероприятие из присланного поста
+  if (isOwnerChat(chatId)) {
+    const r = await ownerMessage(msg, deps);
+    if (r) return r;
+  }
+
+  // подписка на анонсы: только по явному согласию, отписка — /stop
+  if (/^\/(?:notify|start\s+notify)(?:@\w+)?$/i.test(text) || /^\/start(?:@\w+)?\s+notify$/i.test(text)) {
+    await clearSession(deps.sql, chatId);
+    const r = await subscribe(deps.sql, chatId, /start/i.test(text) ? 'site' : 'bot');
+    await send(
+      r.created
+        ? '🔔 Готово — напишем сюда, как только откроем продажи следующей ночи. Ранняя волна всегда дешевле.\n\nНе присылать анонсы — /stop'
+        : '🔔 Ты уже в списке — напишем, как откроем продажи. Не присылать анонсы — /stop'
+    );
+    return { done: 'subscribed', created: r.created };
+  }
+  if (/^\/stop(?:@\w+)?$/i.test(text)) {
+    await clearSession(deps.sql, chatId);
+    const was = await unsubscribe(deps.sql, chatId);
+    await send(was ? 'Ок, анонсы больше не пришлём. Проходки и брони работают как раньше. Передумаешь — /notify' : 'Анонсы и так не приходят. Захочешь узнавать о ночах первым — /notify');
+    return { done: 'unsubscribed', was };
   }
 
   const start = /^\/start(?:@\w+)?(?:\s+(\S+))?$/i.exec(text);
@@ -542,7 +581,7 @@ async function sendOrderStatus(o, chatId, deps) {
     const links = ticketLinks(tickets, origin).map((t) => `• ${t.holder_name}: ${t.url}`);
     // оплатившим адрес показываем всегда — и на SECRET PLACE тоже
     const where = [o.venue, o.address].filter(Boolean).join(', ');
-    const addr = where ? `\n\n📍 ${fmtDay(o.starts_at)} · двери ${SITE.doorsOpen || '22:00'} · ${where}` : '';
+    const addr = where ? `\n\n📍 ${fmtDay(o.starts_at)} · двери ${fmtTimeOnly(o.starts_at)} · ${where}` : '';
     await send(`✅ Оплачено: ${what}\n\n${links.join('\n') || 'Проходки уже использованы или отозваны.'}${addr}`);
     return;
   }
@@ -560,7 +599,7 @@ async function sendOrderStatus(o, chatId, deps) {
 // ---------- покупка в боте: мастер брони ----------
 // Состояние между сообщениями — строка в tg_sessions (одна на чат):
 // qty → phone → names → confirm → (booking). Любая команда сбрасывает мастер,
-// сессия старше двух часов считается брошенной.
+// сессия старше 12 часов считается брошенной и стирается.
 const SESSION_TTL_MS = 12 * 3600_000; // брошенный мастер живёт полсуток — чтобы имена, набранные после паузы, не встречала афиша
 
 async function getSession(sql, chatId) {
@@ -577,42 +616,6 @@ async function setSession(sql, chatId, state, data) {
 }
 const clearSession = (sql, chatId) => sql.query(`DELETE FROM tg_sessions WHERE chat_id = $1`, [chatId]);
 
-async function loadEvent(sql, id) {
-  return rowsOf(await sql.query(
-    `SELECT id, title, venue, address, secret, starts_at, ends_at, status, poster_url FROM events WHERE id = $1`, [id]
-  ))[0] || null;
-}
-// Ближайшая ночь в продаже
-async function nearestEvent(sql, nowMs) {
-  return rowsOf(await sql.query(
-    `SELECT id, title, venue, address, secret, starts_at, ends_at, status, poster_url FROM events
-     WHERE status = 'onsale' AND COALESCE(ends_at, starts_at + interval '8 hours') > $1 ORDER BY starts_at LIMIT 1`,
-    [new Date(nowMs).toISOString()]
-  ))[0] || null;
-}
-async function eventWaves(sql, eventId) {
-  return rowsOf(await sql.query(
-    `SELECT wave_no, name, price_rub, quota, sold, public FROM price_waves WHERE event_id = $1 ORDER BY wave_no`, [eventId]
-  )).map((w) => ({
-    waveNo: Number(w.wave_no), name: w.name, priceRub: Number(w.price_rub),
-    quota: Number(w.quota), sold: Number(w.sold), public: w.public !== false,
-  }));
-}
-
-// Абсолютный адрес афиши для sendPhoto: Telegram качает её сам
-const posterUrl = (p, deps) => {
-  if (!p) return null;
-  if (/^https?:\/\//.test(p)) return p;
-  const base = String(deps.assetOrigin || originOf(deps)).replace(/\/+$/, '');
-  return `${base}${p.startsWith('/') ? '' : '/'}${p}`;
-};
-
-// Вызов Bot API с текстом ошибки: deps.call, а без него — обёртка над deps.tg
-const callOf = (deps) => deps.call || (async (method, payload) => {
-  const r = await deps.tg(method, payload);
-  return r === null ? { ok: false, error: 'нет ответа' } : { ok: true, result: r };
-});
-
 // Приветствие — карточка ночи: афиша, дата, место, цена и меню кнопок.
 // Без афиши (или если Telegram её не принял) — тот же текст сообщением.
 // Возвращает, чем кончилось: { via: 'photo'|'text'|'none', error?, photo_error? }
@@ -628,8 +631,8 @@ async function sendWelcome(chatId, deps, { intro }) {
       disable_web_page_preview: true,
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }],
-          [{ text: '🌐 Сайт', url: `${origin}/?src=tgbot` }],
+          [SUB_BUTTON],
+          [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }, { text: '🌐 Сайт', url: `${origin}/?src=tgbot` }],
         ],
       },
     });
@@ -940,7 +943,7 @@ async function wizardBook(chatId, deps, cb) {
     const lines = order.tickets.map((t) => `• ${escHtml(t.holder_name)}: ${origin}${t.url}`);
     await send(
       `✅ Проходки у тебя: ${what}\n\n${lines.join('\n')}\n\n` +
-        `Открой каждую, сделай скриншот QR и перешли друзьям их именные. На входе — паспорт, двери в ${SITE.doorsOpen || '22:00'}.`,
+        `Открой каждую, сделай скриншот QR и перешли друзьям их именные. На входе — паспорт, двери в ${fmtTimeOnly(event.starts_at)}.`,
       null, true
     );
     return { done: 'booked', order: order.id, paid: true };
@@ -968,7 +971,7 @@ async function wizardBook(chatId, deps, cb) {
 // ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, ...(text ? { text } : {}) });
-  const m = /^(pub|skip|cancel|pay|nopay|drop|claim|buy|more|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  const m = /^(pub|skip|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
   if (!m || !deps.sql) {
     await answer('Кнопка устарела — /start');
     return { done: 'callback_bad' };
@@ -989,6 +992,17 @@ async function handleCallback(cb, deps) {
   if (action === 'more') {
     await answer();
     return startWizard(guestChat, deps, arg, { force: true });
+  }
+  if (action === 'sub') {
+    if (arg === 'off') {
+      await unsubscribe(deps.sql, guestChat);
+      await answer('Анонсы больше не придут');
+      return { done: 'unsubscribed' };
+    }
+    const r = await subscribe(deps.sql, guestChat, 'button');
+    await answer(r.created ? 'Готово — напишем о следующей ночи первым' : 'Ты уже подписан');
+    if (r.created) await sender(deps, guestChat)('🔔 Подписка на анонсы включена. Не присылать — /stop');
+    return { done: 'subscribed', created: r.created };
   }
   if (action === 'qty') {
     const s = await getSession(deps.sql, guestChat);
@@ -1099,14 +1113,13 @@ async function handleCallback(cb, deps) {
     let deliveryError = null;
     if (o.tg_chat_id) {
       const ev = await loadEvent(deps.sql, o.event_id);
-      const where = ev ? [ev.venue, ev.address].filter(Boolean).join(', ') : '';
-      const links = ticketLinks(tickets, originOf(deps)).map((t) => `• ${t.holder_name}: ${t.url}`);
+      let markup = null;
+      try { markup = await subOffer(deps.sql, o.tg_chat_id); } catch { /* без кнопки */ }
       const r = await callOf(deps)('sendMessage', {
         chat_id: o.tg_chat_id,
         disable_web_page_preview: true,
-        text: `✅ Оплата подтверждена — проходки у тебя.\n\n${links.join('\n')}\n\n` +
-          (ev ? `${fmtDay(ev.starts_at)} · двери ${SITE.doorsOpen || '22:00'}${where ? ` · ${where}` : ''}\n` : '') +
-          'Открой свою и сделай скриншот QR — сработает без интернета. Друзьям перешли их ссылки: проходки именные, на входе паспорт.',
+        text: paidMessage(tickets, originOf(deps), ev),
+        ...(markup ? { reply_markup: markup } : {}),
       });
       delivered = r.ok;
       deliveryError = r.ok ? null : r.error;
@@ -1150,14 +1163,9 @@ async function handleCallback(cb, deps) {
     return { done: o ? 'dropped' : 'drop_noop', order: slug };
   }
 
-  if (action === 'pub') {
-    const rows = await deps.sql.query(
-      `UPDATE events SET status = 'onsale' WHERE id = $1 AND status = 'draft' RETURNING id`,
-      [slug]
-    );
-    const okRow = (rows.rows || rows).length > 0;
-    await answer(okRow ? 'Опубликовано — уже на сайте' : 'Уже обработано');
-    return { done: okRow ? 'published' : 'noop', slug };
+  if (['pub', 'del', 'bc', 'own'].includes(action)) {
+    const r = await ownerCallback(action, slug, cb, deps, answer);
+    if (r) return r;
   }
   if (action === 'skip') {
     await deps.sql.query(`DELETE FROM price_waves WHERE event_id = $1 AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.event_id = $1)`, [slug]);

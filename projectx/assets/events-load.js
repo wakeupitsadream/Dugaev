@@ -22,14 +22,22 @@ export async function loadEvents(nowMs = Date.now()) {
   return {
     // Скрытые волны (гостевой список) публике не показываем — как в /api/events
     // боевой сайт остатки не выдумывает: без API — sold = 0 и никаких «уже идут»
-    events: EVENTS.map((e) => ({
+    events: EVENTS.map((e) => withDerivedStatus({
       ...e,
       waves: SITE.paymentDemo
         ? demoWaves({ ...e, waves: e.waves.filter((w) => w.public !== false) }, nowMs)
         : e.waves.filter((w) => w.public !== false).map((w) => ({ ...w, sold: 0 })),
-    })),
+    }, nowMs)),
     live: false,
   };
+}
+
+// Ночь закончилась, а в данных она «в продаже» (сид без базы, кэш):
+// для гостя это уже прошлое — как derivedStatus на сервере
+export function withDerivedStatus(e, nowMs = Date.now()) {
+  if (e.status !== 'onsale' && e.status !== 'soldout') return e;
+  const end = e.endsAt ? Date.parse(e.endsAt) : Date.parse(e.startsAt) + 8 * 3600_000;
+  return Number.isFinite(end) && end <= nowMs ? { ...e, status: 'past' } : e;
 }
 
 export function upcoming(events, nowMs = Date.now()) {

@@ -1,10 +1,11 @@
 // Дымовой e2e боевого сценария на локальном стенде (scripts/devserver.mjs,
 // DEV_PGLITE=1). Запуск из projectx:
 //   NODE_PATH=<папка с playwright-core> node scripts/e2e-smoke.mjs
-// Проверяет то, без чего нельзя принимать деньги: бронь на сайте → экран
-// перевода с реквизитами из конфига → «Я перевёл» → подтверждение в панели
-// → проходка активна → дверь по ключу двери; плюс страницы условий и
-// политики с реквизитами продавца, честный счётчик и 404.
+// Проверяет то, без чего нельзя принимать деньги: ночь создаётся в панели
+// из текста поста и публикуется → страница ночи с превью ссылки → бронь на
+// сайте → экран перевода с реквизитами из конфига → «Я перевёл» →
+// подтверждение во вкладке «Брони» → проходка активна → дверь по ключу
+// двери; плюс страницы условий и политики, честный счётчик и 404.
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -12,7 +13,7 @@ const { chromium } = require('playwright-core');
 const B = `http://localhost:${process.env.PORT || 8791}`;
 const KEY = process.env.ADMIN_KEY || 'test-admin-123';
 const DOOR = process.env.DOOR_KEY || 'test-door-456';
-const NIGHT = 'px-260926';
+let NIGHT = '';
 let pass = 0; let fail = 0;
 const step = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); ok ? pass++ : fail++; };
 const api = async (path, opts = {}) => {
@@ -31,6 +32,68 @@ page.on('pageerror', (e) => errors.push(`${page.url()}: ${e.message}`));
 // ---- сид ----
 const seed = await api('/api/seed', { method: 'POST', headers: admin, body: JSON.stringify({ demoSold: false }) });
 step('сид афиши', seed.j?.ok === true, `событий ${seed.j?.seeded}`);
+
+// ---- панель: новая ночь из текста поста ----
+// дата — через 10 дней в поясе площадки, чтобы ночь всегда была впереди
+const day = new Date(Date.now() + 10 * 86400_000).toLocaleDateString('ru-RU', { timeZone: 'Asia/Yekaterinburg', day: '2-digit', month: '2-digit' });
+const POST = `PROJECT X: SMOKE NIGHT
+${day} · двери 22:00, финиш 05:00
+📍 Арт-локация «Режиссёр», ул. Волгоградская, 46/3
+Первые 50 проходок — 1000₽, дальше 1200₽
+Лайн-ап: ARTURQUE, VANULA
+
+Что тебя ждёт:
+— лазер-шоу и дым
+— фотозона с неоном
+— welcome-шот на входе`;
+const adm = await ctx.newPage();
+adm.on('pageerror', (e) => errors.push(`${adm.url()}: ${e.message}`));
+await adm.goto(`${B}/admin`, { waitUntil: 'load' });
+await adm.fill('#gate-key', KEY);
+await adm.fill('#gate-name', 'Тест');
+await adm.click('#gate-go');
+await adm.waitForSelector('#app:not([hidden])', { timeout: 10000 });
+step('панель: вход по ключу', true);
+await adm.goto(`${B}/admin#events/new`);
+await adm.waitForSelector('#ed-post', { state: 'visible' });
+await adm.fill('#ed-post', POST);
+await adm.click('#ed-analyze');
+await adm.waitForSelector('#ed-found:not([hidden]) .fc', { timeout: 10000 });
+const form = await adm.evaluate(() => ({
+  title: document.querySelector('[data-k="title"]').value,
+  date: document.querySelector('[data-k="date"]').value,
+  start: document.querySelector('[data-k="timeStart"]').value,
+  end: document.querySelector('[data-k="timeEnd"]').value,
+  venue: document.querySelector('[data-k="venue"]').value,
+  address: document.querySelector('[data-k="address"]').value,
+  waves: [...document.querySelectorAll('[data-wk="priceRub"]')].map((i) => i.value),
+  program: [...document.querySelectorAll('[data-pk="title"]')].map((i) => i.value),
+  lineup: [...document.querySelectorAll('#ed-lineup .tg')].map((t) => t.textContent.trim()),
+  miss: [...document.querySelectorAll('.fc.is-miss')].map((c) => c.textContent.trim()),
+}));
+step('панель: пост разобран — название, дата, время, место, цены, лайн-ап, программа',
+  form.title === 'PROJECT X: SMOKE NIGHT' && /^\d{4}-\d{2}-\d{2}$/.test(form.date) && form.start === '22:00' && form.end === '05:00'
+  && /Режиссёр/.test(form.venue) && /Волгоградская/.test(form.address) && form.waves.join() === '1000,1200'
+  && form.program.length === 3 && form.lineup.length === 2 && !form.miss.length,
+  `${form.date} ${form.venue}; цены ${form.waves.join('/')}; пропущено: ${form.miss.join(', ') || 'ничего'}`);
+await adm.setInputFiles('#ed-file', new URL('../assets/photos/poster-halloween.jpg', import.meta.url).pathname);
+await adm.waitForFunction(() => /Загружено/.test(document.getElementById('ed-poster-note')?.textContent || ''), null, { timeout: 15000 });
+step('панель: афиша загружена в базу', true);
+await adm.click('#ed-publish');
+await adm.waitForSelector('dialog[open] .dlg-a .b-primary');
+await adm.click('dialog[open] .dlg-a .b-primary');
+await adm.waitForFunction(() => /Ночь в продаже/.test(document.querySelector('dialog[open]')?.textContent || ''), null, { timeout: 15000 });
+NIGHT = decodeURIComponent((await adm.evaluate(() => location.hash)).replace('#events/', ''));
+await adm.keyboard.press('Escape');
+const live = await api('/api/events');
+const ev = (live.j?.events || []).find((e) => e.id === NIGHT);
+step('панель: ночь опубликована — в афише, с программой, лайн-апом и афишей',
+  Boolean(ev && ev.status === 'onsale' && ev.program.length === 3 && ev.lineup.length === 2 && /^\/api\/poster\?id=/.test(ev.posterUrl || '')), NIGHT);
+
+// ---- превью ссылки: страница ночи с её мета-тегами ----
+const html = await (await fetch(`${B}/e/${NIGHT}`)).text();
+step('страница ночи: свой og:title, афиша в og:image, данные вшиты',
+  /<meta property="og:title" content="PROJECT X: SMOKE NIGHT · /.test(html) && /og:image" content="[^"]*\/api\/poster\?id=/.test(html) && html.includes('id="ev-data"'));
 
 // ---- страница ночи: без выдуманного счётчика, цены из волн ----
 await page.goto(`${B}/e/${NIGHT}`, { waitUntil: 'load' });
@@ -61,12 +124,23 @@ await page.click('#pay-claim');
 await page.waitForFunction(() => /Спасибо/.test(document.getElementById('pay-status')?.textContent || ''), null, { timeout: 10000 });
 step('«Я перевёл» принят', true);
 
-// ---- панель: бронь ждёт, подтверждаем по коду ----
+// ---- панель: бронь ждёт во вкладке «Брони», подтверждаем кнопкой ----
 const pending = await api(`/api/stats?event_id=${NIGHT}`, { headers: admin });
 const mine = (pending.j?.pending || []).find((o) => o.pay_code === payCode.trim());
 step('панель видит бронь в ожидающих с отметкой «я перевёл»', Boolean(mine && mine.claimed_at), mine ? mine.buyer_name : JSON.stringify(pending.j).slice(0, 80));
-const confirm = await api('/api/walkin', { method: 'POST', headers: admin, body: JSON.stringify({ action: 'confirm', pay_code: payCode.trim() }) });
-step('подтверждение по коду', confirm.j?.ok === true, confirm.j?.message || '');
+await adm.goto(`${B}/admin#orders`);
+await adm.reload();
+const row = `.pend[data-code="${payCode.trim()}"]`;
+await adm.waitForSelector(row, { timeout: 15000 });
+step('вкладка «Брони»: строка с кодом, «нажал Я перевёл» и бейдж', /Я перевёл/.test(await adm.textContent(row)) && (await adm.textContent('.nav [data-badge="pending"]')).trim() === '1');
+await adm.click(`${row} [data-act="confirm"]`);
+await adm.waitForSelector('dialog[open] .dlg-a .b-ok');
+await adm.click('dialog[open] .dlg-a .b-ok');
+await adm.waitForFunction((sel) => !document.querySelector(sel), row, { timeout: 15000 });
+const after = await api(`/api/stats?event_id=${NIGHT}`, { headers: admin });
+step('подтверждение кнопкой в панели', !(after.j?.pending || []).some((o) => o.pay_code === payCode.trim()) && after.j?.sold >= 1, `продано ${after.j?.sold}`);
+const again = await api('/api/walkin', { method: 'POST', headers: admin, body: JSON.stringify({ action: 'confirm', pay_code: payCode.trim() }) });
+step('повторное подтверждение по коду не проходит', again.status === 409, again.j?.message || '');
 
 // ---- проходка ожила, дверь по ключу двери ----
 const ticketUrl = await page.evaluate(() => document.querySelector('#success-list a, #saved-list a, a[href^="/t/"]')?.getAttribute('href'));

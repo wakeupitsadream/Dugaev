@@ -13,7 +13,8 @@ observeReveal();
 
 function renderContacts() {
   const cards = [
-    { kind: 'Instagram', val: SITE.instagramName, note: 'Анонсы, афиши и афтер-муви — тут раньше всех', href: SITE.instagram },
+    { kind: 'Telegram', val: `@${SITE.telegramBot}`, note: 'Проходки, брони и вопросы — без VPN. Подпишись на анонсы новых ночей', href: `${SITE.telegramUrl}?start=notify` },
+    { kind: 'Instagram', val: SITE.instagramName, note: 'Анонсы, афиши и афтер-муви', href: SITE.instagram },
     { kind: 'Директ', val: 'Написать организаторам', note: 'Вопросы по проходкам, столам и возвратам', href: SITE.instagramDm },
     { kind: 'Сотрудничество', val: 'Партнёрам и площадкам', note: 'Реклама, интеграции, свои города', href: SITE.instagramDm },
   ];

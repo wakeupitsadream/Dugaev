@@ -5,259 +5,444 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Панель — PROJECT X</title>
   <meta name="robots" content="noindex, nofollow" />
-  <meta name="theme-color" content="#070707" />
+  <meta name="theme-color" content="#09090b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PX Панель" />
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070707'/%3E%3Cpath d='M16 14 L48 50 M48 14 L16 50' stroke='%23e51a20' stroke-width='11' stroke-linecap='round'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="preload" href="/assets/fonts/manrope-cyrillic-600-normal.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/assets/admin.css?v=14" />
 </head>
-<body>
-  <header class="site-header no-print">
-    <div class="container">
-      <a class="logo" href="/">PRO<span class="lx">X</span>JECT</a>
-      <span class="muted" style="font-size: 0.85rem;">панель организатора</span>
-    </div>
-  </header>
+<body data-view="">
+  <!-- ===== Вход ===== -->
+  <div id="gate" class="gate" hidden>
+    <form class="gate-card" id="gate-form" autocomplete="on" novalidate>
+      <div class="logo gate-logo">PRO<span class="x">X</span>JECT</div>
+      <h1>Панель организатора</h1>
+      <p class="muted small">Брони, гости, ночи и продажи — в одном месте.</p>
+      <label class="f">
+        <span class="f-l">Ключ администратора</span>
+        <input class="in" type="password" id="gate-key" autocomplete="current-password" />
+      </label>
+      <label class="f">
+        <span class="f-l">Твоё имя <small>— подпишет подтверждения и вход</small></span>
+        <input class="in" type="text" id="gate-name" autocomplete="nickname" placeholder="Например, Максим" />
+      </label>
+      <button class="b b-primary b-lg b-block" id="gate-go" type="submit">Войти</button>
+      <p class="gate-err" id="gate-err" hidden>Ключ не подошёл</p>
+      <p class="gate-note">Ключ двери сюда не подходит — он открывает только <a href="/scan">сканер на входе</a>.</p>
+    </form>
+  </div>
 
-  <main class="admin-wrap">
-    <div class="container">
-      <h1 class="visually-hidden">Панель организатора — PROJECT X</h1>
-      <!-- PIN-гейт -->
-      <div id="gate" class="pin-panel" style="margin-top: 60px;" hidden>
-        <div class="guest-brand" style="text-align: center; margin-bottom: 16px;">PRO<span class="lx">X</span>JECT</div>
-        <input type="password" id="gate-key" placeholder="Ключ администратора" autocomplete="off" />
-        <input type="text" id="gate-name" placeholder="Твоё имя" autocomplete="off" />
-        <button class="btn btn-acid btn-block" id="gate-go" type="button">Войти</button>
-        <p class="form-note" id="gate-err" style="color: var(--danger); display: none; margin-top: 10px;">Ключ не подошёл</p>
-        <p class="form-note" style="margin-top: 12px;">Ключ двери сюда не подходит — он открывает только сканер на входе.</p>
+  <!-- ===== Приложение ===== -->
+  <div id="app" hidden>
+    <aside class="side" aria-label="Разделы">
+      <a class="logo side-logo" href="#overview"><span>PRO<span class="x">X</span>JECT</span><small>панель</small></a>
+      <a class="b b-primary side-cta" href="#events/new"><i data-ic="plus"></i>Новая ночь</a>
+      <nav class="nav">
+        <a href="#overview" data-nav="overview"><i data-ic="chart"></i>Сводка</a>
+        <a href="#orders" data-nav="orders"><i data-ic="ticket"></i>Брони<span class="badge" data-badge="pending" hidden></span></a>
+        <a href="#guests" data-nav="guests"><i data-ic="users"></i>Гости</a>
+        <a href="#events" data-nav="events"><i data-ic="calendar"></i>Ночи</a>
+        <a href="#promo" data-nav="promo"><i data-ic="megaphone"></i>Продвижение</a>
+        <a href="#service" data-nav="service"><i data-ic="sliders"></i>Сервис</a>
+      </nav>
+      <div class="side-foot">
+        <div class="who"><span class="avatar" id="who-av">?</span><div style="min-width:0"><div class="who-n" id="who-name">—</div><div class="who-r">организатор</div></div></div>
+        <div class="side-links">
+          <a class="b b-quiet b-sm" href="/scan" target="_blank" rel="noopener"><i data-ic="scan"></i>Сканер</a>
+          <a class="b b-quiet b-sm" href="/" target="_blank" rel="noopener"><i data-ic="external"></i>Сайт</a>
+          <button class="b b-quiet b-sm" type="button" data-logout><i data-ic="logout"></i>Выйти</button>
+        </div>
       </div>
+    </aside>
 
-      <!-- Дашборд -->
-      <div id="dash" hidden>
-        <!-- Выбор ивента -->
-        <div class="admin-toolbar no-print">
-          <select class="admin-select" id="ev-select" aria-label="Выбор вечеринки"></select>
-          <button class="btn btn-ghost" id="btn-offline" type="button">Список гостей и офлайн-копия</button>
-          <button class="btn btn-ghost" id="btn-print" type="button">Версия для печати</button>
-          <button class="btn btn-ghost" id="btn-export" type="button" title="Оплаченные заказы ночи — для чеков в «Мой налог» и сверки с выпиской">Оплаты (CSV)</button>
-          <button class="btn btn-ghost" id="btn-logout" type="button">Выйти</button>
-          <span class="muted" id="offline-note" style="font-size: 0.82rem;"></span>
+    <div class="main">
+      <header class="top">
+        <a class="logo top-logo" href="#overview">P<span class="x">X</span></a>
+        <button class="np" id="night-pick" type="button" aria-haspopup="dialog" aria-label="Выбрать ночь">
+          <span class="np-th" id="np-th"></span>
+          <span class="np-tx"><span class="np-t" id="np-t">Загрузка…</span><span class="np-s" id="np-s"></span></span>
+          <i data-ic="chevron"></i>
+        </button>
+        <div class="top-acts">
+          <button class="b b-quiet b-icon" id="btn-refresh" type="button" title="Обновить" aria-label="Обновить данные"><i data-ic="refresh"></i></button>
+          <a class="b b-ghost hide-m" href="/scan" target="_blank" rel="noopener"><i data-ic="scan"></i>Сканер входа</a>
         </div>
+      </header>
 
-        <!-- Ключевые цифры -->
-        <div class="tiles" id="tiles"></div>
+      <div class="banner" id="banner" role="status" hidden></div>
 
-        <!-- Брони, ожидающие подтверждения оплаты -->
-        <div class="admin-panel no-print" id="pending-panel">
-          <div class="ap-kicker">Оплата переводом</div>
-          <h3>Ожидают подтверждения</h3>
-          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
-            Гость забронировал и переводит по СБП с кодом брони в комментарии. Увидел перевод в банке —
-            нажми «Подтвердить»: проходки станут активными, бот пришлёт их гостю. Нет перевода —
-            бронь сгорит сама через 3 часа (за сутки до ночи — через час) или отмени её вручную.
-          </p>
-          <div class="pending-list" id="pending-list"><p class="muted">Пока никто не ждёт</p></div>
-          <div class="pending-confirm">
-            <input type="text" id="pc-code" placeholder="Код брони, напр. PX-7F3K" autocomplete="off" />
-            <button class="btn btn-ghost" id="pc-confirm" type="button">Подтвердить по коду</button>
-            <span class="muted" id="pc-note" style="font-size: 0.84rem;"></span>
-          </div>
-        </div>
-
-        <!-- Касса -->
-        <div class="admin-panel no-print" id="walkin-panel">
-          <div class="ap-kicker">Касса на входе</div>
-          <h3>Добавить гостя вручную</h3>
-          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
-            Гость платит на дверях — оформи проходку здесь: квота волны спишется,
-            продажа попадёт в статистику как «касса».
-          </p>
-          <div class="walkin-form">
-            <div class="field" style="margin: 0;">
-              <input type="text" id="wi-name" placeholder="Имя и фамилия гостя" autocomplete="off" />
-              <div class="err" id="err-wi-name">Как зовут гостя?</div>
+      <main class="views" id="views">
+        <!-- ===== Сводка ===== -->
+        <section class="view" data-view="overview" hidden>
+          <div class="card" id="ov-hero"></div>
+          <div class="kpis" id="ov-kpis"></div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-h"><h2>Продажи по дням</h2><span class="card-sub" id="ov-days-sum"></span></div>
+              <div id="ov-days"></div>
             </div>
-            <select class="admin-select" id="wi-wave" aria-label="Волна/цена"></select>
-            <label class="check" style="margin: 0;">
-              <input type="checkbox" id="wi-checkin" checked />
-              <span>сразу впустить</span>
-            </label>
-            <button class="btn btn-acid" id="wi-add" type="button">Оформить</button>
+            <div class="card">
+              <div class="card-h"><h2>Волны</h2><span class="card-sub" id="ov-fill-sub"></span></div>
+              <div id="ov-waves"></div>
+            </div>
           </div>
-          <div class="scan-feed" id="walkin-log" style="margin-top: 12px;"></div>
-        </div>
+          <div class="grid-2" id="ov-door">
+            <div class="card">
+              <div class="card-h"><h2>Вход по времени</h2><span class="card-sub">по 10 минут</span></div>
+              <div id="ov-curve"></div>
+            </div>
+            <div class="card">
+              <div class="card-h"><h2>Живая лента входа</h2><a class="b b-quiet b-sm" href="/scan" target="_blank" rel="noopener"><i data-ic="scan"></i>Сканер</a></div>
+              <div class="feed" id="ov-feed"></div>
+            </div>
+          </div>
+        </section>
 
-        <!-- События: создание и правка афиши -->
-        <div class="admin-panel no-print" id="events-panel">
-          <div class="ap-kicker">Афиша</div>
-          <h3>События</h3>
-          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
-            Создай вечеринку или поправь существующую — сайт обновится сразу, без разработчика.
-            Черновики видно только здесь; в продажу событие уходит статусом «в продаже».
-          </p>
-          <div class="admin-toolbar" style="margin: 0 0 14px;">
-            <select class="admin-select" id="ee-select" aria-label="Событие для правки"></select>
-            <button class="btn btn-ghost" id="ee-new" type="button">Новое событие</button>
+        <!-- ===== Брони ===== -->
+        <section class="view" data-view="orders" hidden>
+          <div class="view-h">
+            <div>
+              <h1>Брони</h1>
+              <p>Гость переводит по СБП с кодом брони в комментарии. Увидел перевод в банке — подтверди: проходки станут активными, бот пришлёт их гостю. Нет перевода — бронь сгорит сама.</p>
+            </div>
+            <div class="acts">
+              <button class="b b-ghost" id="btn-export" type="button" title="Оплаченные заказы ночи — для чеков в «Мой налог» и сверки с выпиской"><i data-ic="download"></i>Оплаты в CSV</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h2>Ждут подтверждения <span class="count" id="pend-count">0</span></h2><span class="card-sub" id="pend-sum"></span></div>
+            <div class="pend-list" id="pending-list"></div>
+          </div>
+          <div class="card">
+            <h2>Подтвердить по коду</h2>
+            <p class="card-p">Перевод пришёл, а брони в списке нет — сгорела или оформлена в другой день? Введи код из комментария к переводу: бронь восстановится, если места остались.</p>
+            <div class="inline">
+              <input class="in" type="text" id="pc-code" placeholder="Код брони, напр. PX-7F3K" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              <button class="b b-primary" id="pc-confirm" type="button"><i data-ic="check"></i>Подтвердить</button>
+            </div>
+            <p class="note" id="pc-note" style="margin-top:10px"></p>
+          </div>
+        </section>
+
+        <!-- ===== Гости ===== -->
+        <section class="view" data-view="guests" hidden>
+          <div class="view-h no-print">
+            <div>
+              <h1>Гости</h1>
+              <p>Список проходок ночи, касса на входе и копия списка для сканера без интернета.</p>
+            </div>
+            <div class="acts">
+              <button class="b b-ghost" id="btn-offline" type="button" title="Сканер на этом телефоне найдёт гостя даже без сети"><i data-ic="download"></i>Офлайн-копия</button>
+              <button class="b b-ghost" id="btn-print" type="button"><i data-ic="print"></i>Печать</button>
+            </div>
+          </div>
+          <div class="card no-print">
+            <h2>Касса: добавить гостя</h2>
+            <p class="card-p">Гость платит на входе — оформи проходку здесь: квота волны спишется, продажа попадёт в статистику как «касса».</p>
+            <div class="walkin">
+              <label class="f" id="f-wi-name">
+                <span class="vh">Имя и фамилия гостя</span>
+                <input class="in" type="text" id="wi-name" placeholder="Имя и фамилия гостя" autocomplete="off" />
+                <span class="f-err" id="err-wi-name">Как зовут гостя?</span>
+              </label>
+              <label class="f"><span class="vh">Волна и цена</span><select class="in" id="wi-wave"></select></label>
+              <label class="sw"><input type="checkbox" id="wi-checkin" checked /><span>сразу впустить</span></label>
+              <button class="b b-primary" id="wi-add" type="button"><i data-ic="plus"></i>Оформить</button>
+            </div>
+            <div class="feed" id="walkin-log" style="margin-top:10px"></div>
+          </div>
+          <div class="card">
+            <div class="print-head" id="print-head"></div>
+            <div class="card-h no-print">
+              <h2>Список гостей <span class="count" id="g-count">0</span></h2>
+              <label class="search"><i data-ic="search"></i><span class="vh">Поиск гостя</span><input class="in" type="search" id="g-search" placeholder="Имя или номер проходки" autocomplete="off" /></label>
+            </div>
+            <div class="chips no-print" id="g-filter" style="margin-bottom:8px"></div>
+            <div class="gl" id="guests-table"></div>
+            <p class="note no-print" id="offline-note" style="margin-top:10px"></p>
+          </div>
+        </section>
+
+        <!-- ===== Ночи: список ===== -->
+        <section class="view" data-view="events" hidden>
+          <div class="view-h">
+            <div>
+              <h1>Ночи</h1>
+              <p>Афиша сайта и бота. Вставь пост из Telegram — дата, место, цены и программа заполнятся сами.</p>
+            </div>
+            <div class="acts">
+              <a class="b b-primary" href="#events/new"><i data-ic="plus"></i>Новая ночь</a>
+            </div>
+          </div>
+          <div class="chips" id="ev-filter"></div>
+          <div class="ev-grid" id="ev-list"></div>
+        </section>
+
+        <!-- ===== Ночь: создание и правка ===== -->
+        <section class="view" data-view="editor" hidden>
+          <div class="ed-top">
+            <a class="back" href="#events"><i data-ic="back"></i>Ночи</a>
+          </div>
+          <div class="view-h">
+            <div>
+              <h1 id="ed-h">Новая ночь</h1>
+              <p id="ed-sub">Заполни из поста или вручную — справа видно, как страницу увидят гости.</p>
+            </div>
+            <div class="acts" id="ed-head-acts"></div>
           </div>
 
-          <form class="event-form" id="event-form" novalidate>
-            <input type="hidden" id="ee-id" />
-            <div class="ef-grid">
-              <div class="field">
-                <label for="ee-title">Название</label>
-                <input type="text" id="ee-title" placeholder="PROJECT X — OPENING" autocomplete="off" />
-              </div>
-              <div class="field">
-                <label for="ee-date">Дата</label>
-                <input type="date" id="ee-date" />
-              </div>
-              <div class="field">
-                <label for="ee-start">Двери</label>
-                <input type="time" id="ee-start" value="22:00" step="300" />
-              </div>
-              <div class="field">
-                <label for="ee-end">Финиш</label>
-                <input type="time" id="ee-end" value="06:00" step="300" />
-              </div>
-              <div class="field">
-                <label for="ee-age">Возраст</label>
-                <select class="admin-select" id="ee-age">
-                  <option value="18" selected>18+</option>
-                  <option value="16">16+</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="ee-status">Статус</label>
-                <select class="admin-select" id="ee-status">
-                  <option value="draft">черновик</option>
-                  <option value="onsale" selected>в продаже</option>
-                  <option value="past">прошедшее</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="ee-venue">Площадка</label>
-                <input type="text" id="ee-venue" placeholder="клуб / лофт" autocomplete="off" />
-              </div>
-              <div class="field">
-                <label for="ee-address">Адрес</label>
-                <input type="text" id="ee-address" placeholder="Оренбург, ул. ..." autocomplete="off" />
+          <!-- из поста -->
+          <div class="card magic" id="ed-magic">
+            <div class="magic-h">
+              <span class="magic-ic"><i data-ic="sparkles"></i></span>
+              <div>
+                <h2>Заполнить из поста</h2>
+                <p>Вставь текст анонса из Telegram — разберу дату, время, место, цены, лайн-ап и программу. Афишу можно перетащить или вставить рядом.</p>
               </div>
             </div>
-            <label class="check" style="margin: 4px 0 12px;">
-              <input type="checkbox" id="ee-secret" />
-              <span>SECRET PLACE: адрес публике только за сутки до ночи (купившим — сразу в проходке)</span>
-            </label>
-            <div class="field">
-              <label for="ee-descr">Описание для афиши</label>
-              <textarea id="ee-descr" rows="3" placeholder="Два диджея, шоу-свет, лазеры и танцпол до утра."></textarea>
+            <div class="magic-row">
+              <label class="f"><span class="vh">Текст поста</span><textarea class="in" id="ed-post" placeholder="PROJECT X: OPENING&#10;10.10 · двери 22:00&#10;📍 Лофт «Фабрика», ул. Советская 10&#10;Первые 50 — 700₽, дальше 900₽&#10;Лайн-ап: …"></textarea></label>
+              <div class="drop magic-drop" id="ed-drop2" role="button" tabindex="0" aria-label="Загрузить афишу">
+                <div class="drop-tx"><i data-ic="image"></i><b>Афиша</b><span>перетащи или нажми</span></div>
+              </div>
             </div>
-
-            <div class="ef-waves-head">
-              <span>Волны цен</span>
-              <button class="btn btn-ghost btn-sm" id="ee-wave-add" type="button">+ волна</button>
+            <div class="magic-acts">
+              <button class="b b-primary" id="ed-analyze" type="button"><i data-ic="sparkles"></i>Разобрать пост</button>
+              <button class="b b-quiet" id="ed-skip" type="button">Заполню вручную</button>
+              <span class="note" id="ed-engine"></span>
             </div>
-            <div id="ee-waves"></div>
+            <div class="found" id="ed-found" hidden></div>
+          </div>
 
-            <div class="ef-actions">
-              <button class="btn btn-acid" id="ee-save" type="button">Сохранить</button>
-              <span class="muted" id="ee-note" style="font-size: 0.84rem;"></span>
+          <div class="ed-grid">
+            <form class="ed-form" id="ed-form" novalidate>
+              <div class="card">
+                <div class="sec-h"><h2><span class="n">1</span>Главное</h2></div>
+                <div class="gf">
+                  <label class="f c4" data-f="title">
+                    <span class="f-l">Название</span>
+                    <input class="in" type="text" data-k="title" maxlength="60" placeholder="PROJECT X: OPENING" autocomplete="off" />
+                    <span class="f-err"></span>
+                  </label>
+                  <label class="f c2" data-f="date">
+                    <span class="f-l">Дата</span>
+                    <input class="in" type="date" data-k="date" />
+                    <span class="f-err"></span>
+                  </label>
+                  <label class="f" data-f="timeStart">
+                    <span class="f-l">Двери</span>
+                    <input class="in" type="time" data-k="timeStart" step="300" />
+                    <span class="f-err"></span>
+                  </label>
+                  <label class="f" data-f="timeEnd">
+                    <span class="f-l">Финиш</span>
+                    <input class="in" type="time" data-k="timeEnd" step="300" />
+                    <span class="f-err"></span>
+                  </label>
+                  <div class="f c4" data-f="ageRating">
+                    <span class="f-l">Возраст</span>
+                    <div class="seg" id="ed-age" role="group" aria-label="Возрастное ограничение">
+                      <button type="button" data-age="18" aria-pressed="true">18+</button>
+                      <button type="button" data-age="16" aria-pressed="false">16+</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="sec-h"><h2><span class="n">2</span>Место</h2></div>
+                <div class="gf">
+                  <label class="f c2" data-f="venue">
+                    <span class="f-l">Площадка</span>
+                    <input class="in" type="text" data-k="venue" maxlength="80" placeholder="Лофт «Фабрика»" autocomplete="off" />
+                    <span class="f-err"></span>
+                  </label>
+                  <label class="f c2" data-f="address">
+                    <span class="f-l">Адрес</span>
+                    <input class="in" type="text" data-k="address" maxlength="120" placeholder="ул. Советская, 10" autocomplete="off" />
+                    <span class="f-err"></span>
+                  </label>
+                  <div class="f c3">
+                    <label class="sw"><input type="checkbox" data-k="secret" /><span><b>SECRET PLACE</b> — адрес публике за сутки до ночи, купившим сразу в проходке</span></label>
+                  </div>
+                  <label class="f" data-f="capacity">
+                    <span class="f-l">Вместимость <small>необяз.</small></span>
+                    <input class="in" type="number" inputmode="numeric" data-k="capacity" min="0" max="20000" placeholder="—" />
+                    <span class="f-err"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="sec-h"><h2><span class="n">3</span>Афиша</h2></div>
+                <div class="poster-row">
+                  <div class="drop" id="ed-drop" role="button" tabindex="0" aria-label="Загрузить афишу">
+                    <div class="drop-tx"><i data-ic="image"></i><b>Загрузить афишу</b><span>JPG, PNG или WebP · вертикальная 4:5</span></div>
+                  </div>
+                  <div class="poster-side">
+                    <p class="small muted">Афиша встанет на страницу ночи, в превью ссылки в Telegram и VK и в анонс бота. Большие картинки уменьшаются автоматически.</p>
+                    <div class="inline">
+                      <button class="b b-ghost b-sm" type="button" id="ed-poster-pick"><i data-ic="upload"></i>Выбрать файл</button>
+                      <button class="b b-quiet b-sm" type="button" id="ed-poster-del" hidden><i data-ic="trash"></i>Убрать</button>
+                    </div>
+                    <p class="note" id="ed-poster-note"></p>
+                  </div>
+                </div>
+                <input type="file" id="ed-file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden />
+              </div>
+
+              <div class="card">
+                <div class="sec-h"><h2><span class="n">4</span>Описание и программа</h2></div>
+                <div class="stack">
+                  <label class="f" data-f="descr">
+                    <span class="f-l">Описание <small>пара фраз о ночи</small></span>
+                    <textarea class="in" data-k="descr" maxlength="1500" rows="4" placeholder="Большой танцпол до утра, шоу-свет и лазеры. Строго 18+, фейс-контроль."></textarea>
+                  </label>
+                  <div class="f">
+                    <span class="f-l">Лайн-ап <small>Enter — добавить</small></span>
+                    <div class="tags-in" id="ed-lineup"><input type="text" id="ed-lineup-in" placeholder="Имя диджея или MC" maxlength="60" autocomplete="off" /></div>
+                  </div>
+                  <div class="f">
+                    <span class="f-l">Программа <small>блоки на странице ночи</small></span>
+                    <div class="pg" id="ed-program"></div>
+                    <div class="sugg" id="ed-sugg"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" data-f="waves">
+                <div class="sec-h">
+                  <h2><span class="n">5</span>Проходки и цены</h2>
+                  <button class="b b-ghost b-sm" type="button" id="ed-wave-add"><i data-ic="plus"></i>Волна</button>
+                </div>
+                <p class="card-p" style="margin-top:-6px">Волны продаются по порядку: следующая открывается, когда закончилась предыдущая. Выключи «на сайте» для гостевого списка или цены на входе — их продаёт только касса.</p>
+                <div class="wl" id="ed-waves"></div>
+                <div class="wl-sum" id="ed-wave-sum" style="margin-top:10px"></div>
+                <span class="f-err" id="ed-waves-err" style="margin-top:6px"></span>
+              </div>
+
+              <div class="card" id="ed-status-card" hidden>
+                <div class="sec-h"><h2><span class="n">6</span>Статус</h2></div>
+                <div class="pubs" id="ed-status"></div>
+              </div>
+              <div class="ed-pad"></div>
+            </form>
+
+            <aside class="ed-pv" aria-label="Превью страницы">
+              <div class="ed-pv-l"><span>Так увидят гости</span><a class="link" id="ed-open" href="#" target="_blank" rel="noopener" hidden>Открыть ↗</a></div>
+              <div class="pv" id="ed-pv"></div>
+            </aside>
+          </div>
+
+          <div class="ed-bar" id="ed-bar">
+            <button class="b b-ghost ed-pv-btn" id="ed-pv-btn" type="button" aria-label="Превью страницы"><i data-ic="eye"></i><span class="lbl">Превью</span></button>
+            <span class="grow" id="ed-note"></span>
+            <button class="b b-ghost" id="ed-save" type="button">Сохранить черновик</button>
+            <button class="b b-primary" id="ed-publish" type="button">Опубликовать</button>
+          </div>
+        </section>
+
+        <!-- ===== Продвижение ===== -->
+        <section class="view" data-view="promo" hidden>
+          <div class="view-h">
+            <div>
+              <h1>Продвижение</h1>
+              <p>Ссылки с метками для промоутеров и пабликов, QR-постеры и анонс подписчикам бота.</p>
             </div>
-          </form>
-        </div>
-
-        <!-- Продажи по дням -->
-        <div class="admin-panel" id="sales-panel" hidden>
-          <div class="ap-kicker">Динамика</div>
-          <h3>Продажи по дням (последние 14)</h3>
-          <div style="overflow-x: auto;">
-            <table class="admin-table" id="sales-table"></table>
           </div>
-        </div>
-
-        <!-- Волны -->
-        <div class="admin-panel">
-          <div class="ap-kicker">Ценообразование</div>
-          <h3>Волны</h3>
-          <div style="overflow-x: auto;">
-            <table class="admin-table" id="waves-table"></table>
+          <div class="grid-2">
+            <div class="card">
+              <h2>Ссылка на ночь</h2>
+              <p class="card-p">Её превью в Telegram и VK покажет афишу, дату и цену этой ночи.</p>
+              <div class="linkbox"><code id="pr-link">—</code><button class="b b-sm" type="button" id="pr-copy"><i data-ic="copy"></i>Копировать</button></div>
+              <hr class="sep" />
+              <h2>Метки источников</h2>
+              <p class="card-p">У каждого промоутера, общаги и паблика — своя метка. Брони по ней видны в таблице ниже.</p>
+              <div class="inline">
+                <input class="in" type="text" id="src-tag" placeholder="метка, напр. promo-lev" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="inline" style="margin-top:8px">
+                <button class="b b-ghost" id="src-copy" type="button"><i data-ic="copy"></i>Ссылка с меткой</button>
+                <button class="b b-primary" id="src-qr" type="button"><i data-ic="qr"></i>QR-постер</button>
+              </div>
+              <p class="note" id="src-note" style="margin-top:10px"></p>
+            </div>
+            <div class="card">
+              <h2>Анонс в Telegram</h2>
+              <p class="card-p">Анонс с афишей и кнопкой брони получат те, кто нажал в боте «Сообщать о новых ночах». Одна рассылка на ночь.</p>
+              <div class="bc-box">
+                <div class="bc-stat"><b id="bc-subs">0</b><span class="muted" id="bc-subs-l">подписчиков</span></div>
+                <div class="bc-prog" id="bc-prog" hidden><div class="meter is-ok"><i style="width:0%"></i></div><span class="small muted" id="bc-prog-t"></span></div>
+                <div class="inline"><button class="b b-primary" id="bc-go" type="button"><i data-ic="send"></i>Разослать анонс</button></div>
+                <p class="note" id="bc-note"></p>
+                <p class="small muted">Собирай подписчиков ссылкой <code id="bc-link">t.me/…?start=notify</code> — в постах, сторис и на сайте.</p>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <!-- Источники продаж -->
-        <div class="admin-panel no-print" id="sources-panel">
-          <div class="ap-kicker">Откуда гости</div>
-          <h3>Продажи по источникам</h3>
-          <p class="muted" style="font-size: 0.86rem; margin: 4px 0 14px;">
-            Метка ставится ссылкой вида <code>/e/ночь?src=метка</code>: у каждого промоутера, общаги и паблика — своя.
-            Так видно, что продаёт. QR-постер с меткой можно скачать здесь же.
-          </p>
-          <div style="overflow-x: auto;">
-            <table class="admin-table" id="sources-table"></table>
+          <div class="card">
+            <div class="card-h"><h2>Откуда гости</h2><span class="card-sub">брони по меткам ссылок</span></div>
+            <div class="scroll-x" id="sources-table"></div>
           </div>
-          <div class="sources-tools">
-            <input type="text" id="src-tag" placeholder="метка, напр. promo-lev или obshaga-ogu-3" autocomplete="off" />
-            <button class="btn btn-ghost" id="src-copy" type="button">Скопировать ссылку</button>
-            <button class="btn btn-acid" id="src-qr" type="button">Скачать QR-постер</button>
-            <span class="muted" id="src-note" style="font-size: 0.84rem;"></span>
-          </div>
-        </div>
+        </section>
 
-        <!-- Кривая входа -->
-        <div class="admin-panel" id="curve-section" hidden>
-          <div class="ap-kicker">Вход</div>
-          <h3>Кривая входа (по 10 минут)</h3>
-          <div style="overflow-x: auto;">
-            <table class="admin-table" id="curve-table"></table>
+        <!-- ===== Сервис ===== -->
+        <section class="view" data-view="service" hidden>
+          <div class="view-h"><div><h1>Сервис</h1><p>Настройка бота, проверка боевой связки и обслуживание базы.</p></div></div>
+          <div class="grid-2">
+            <div class="card">
+              <h2>Разбор постов</h2>
+              <div class="svc-ai" id="svc-ai" style="margin-top:12px"></div>
+            </div>
+            <div class="card">
+              <h2>Telegram-бот</h2>
+              <p class="card-p">Вебхук, команды и описание — одной кнопкой. Нужны TELEGRAM_BOT_TOKEN и TG_WEBHOOK_SECRET в Vercel.</p>
+              <button class="b b-ghost" id="svc-bot" type="button"><i data-ic="send"></i>Настроить бота</button>
+              <p class="note" id="bot-note" style="margin-top:10px"></p>
+            </div>
+            <div class="card">
+              <h2>Боевой самотест</h2>
+              <p class="card-p">Полный цикл: бронь → подтверждение → проходка → скан → повторный скан → статистика → уборка. Тестовые данные удаляются.</p>
+              <button class="b b-ghost" id="svc-selftest" type="button"><i data-ic="check"></i>Запустить самотест</button>
+              <p class="note" id="svc-note" style="margin-top:10px"></p>
+              <div class="feed" id="selftest-list"></div>
+            </div>
+            <div class="card">
+              <h2>База данных</h2>
+              <p class="card-p">Применить схему и засеять ночи из кода. Безопасно повторять: данные броней не трогаются.</p>
+              <div class="stack" style="gap:12px">
+                <label class="sw"><input type="checkbox" id="svc-demo" /><span>посеять демо-продажи (только для демо-стенда)</span></label>
+                <div><button class="b b-ghost" id="svc-seed" type="button"><i data-ic="refresh"></i>Инициализировать БД</button></div>
+              </div>
+              <p class="note" id="seed-note" style="margin-top:10px"></p>
+            </div>
           </div>
-        </div>
-
-        <!-- Сканы -->
-        <div class="admin-panel no-print">
-          <div class="ap-kicker">Живая лента</div>
-          <h3>Последние сканы</h3>
-          <div class="scan-feed" id="scan-feed"><p class="muted">Пока пусто</p></div>
-        </div>
-
-        <!-- Сервис -->
-        <div class="admin-panel no-print">
-          <div class="ap-kicker">Сервис</div>
-          <h3>Обслуживание</h3>
-          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
-            <button class="btn btn-acid" id="svc-seed" type="button">Инициализировать БД</button>
-            <label class="check" style="margin: 0;">
-              <input type="checkbox" id="svc-demo" />
-              <span>посеять демо-продажи (только для демо-стенда, на боевой базе не включать)</span>
-            </label>
+          <div class="card">
+            <h2>Это устройство</h2>
+            <p class="card-p" id="svc-who"></p>
+            <div class="inline">
+              <a class="b b-ghost" href="/scan" target="_blank" rel="noopener"><i data-ic="scan"></i>Сканер входа</a>
+              <button class="b b-danger" type="button" data-logout><i data-ic="logout"></i>Выйти из панели</button>
+            </div>
           </div>
-          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
-            <button class="btn btn-ghost" id="svc-selftest" type="button">Боевой самотест</button>
-            <span class="muted" id="svc-note" style="font-size: 0.84rem;"></span>
-          </div>
-          <div class="scan-feed" id="selftest-list" style="margin-top: 12px;"></div>
-          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 14px;">
-            <button class="btn btn-ghost" id="svc-bot" type="button">Настроить бота</button>
-            <span class="muted" id="bot-note" style="font-size: 0.84rem;">
-              Telegram: вебхук, команды и описание одной кнопкой. Нужны TELEGRAM_BOT_TOKEN и TG_WEBHOOK_SECRET в Vercel.
-            </span>
-          </div>
-        </div>
-
-        <!-- Печатный список гостей -->
-        <div class="admin-panel" id="print-list" hidden>
-          <h3>Список гостей</h3>
-          <p class="muted no-print" style="font-size: 0.86rem; margin: 4px 0 10px;">
-            Переоформить — сменить имя, QR останется тем же. Аннулировать — проходка перестанет проходить вход, место вернётся в продажу.
-          </p>
-          <div style="overflow-x: auto;"><table class="admin-table" id="guests-table"></table></div>
-        </div>
-
-        <p class="form-note no-print" id="stale-note" style="display: none; color: var(--danger);"></p>
-        <p class="form-note no-print" id="db-missing" style="display: none;">
-          БД пока не отвечает: подключи Neon Postgres в Vercel (Storage → Neon), сделай Redeploy
-          и нажми «Инициализировать БД» в блоке «Сервис». Подробно — BRIEF.md, раздел 7.
-        </p>
-      </div>
+        </section>
+      </main>
     </div>
-  </main>
-  <script type="module" src="/assets/admin-page.js"></script>
+
+    <!-- нижние вкладки на телефоне -->
+    <nav class="tabbar" aria-label="Разделы">
+      <a class="tab" href="#overview" data-nav="overview"><i data-ic="chart"></i>Сводка</a>
+      <a class="tab" href="#orders" data-nav="orders"><i data-ic="ticket"></i>Брони<span class="badge" data-badge="pending" hidden></span></a>
+      <a class="tab" href="#guests" data-nav="guests"><i data-ic="users"></i>Гости</a>
+      <a class="tab" href="#events" data-nav="events"><i data-ic="calendar"></i>Ночи</a>
+      <button class="tab" type="button" id="tab-more" data-nav="more"><i data-ic="more"></i>Ещё</button>
+    </nav>
+  </div>
+
+  <dialog class="dlg" id="dlg"></dialog>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script type="module" src="/assets/admin-page.js?v=14"></script>
 </body>
 </html>

@@ -1,28 +1,28 @@
-// Афиша из админки: создать/отредактировать событие и его волны цен.
-// У PROJECT X нет Telegram-канала, поэтому источник афиши — эта форма,
-// а не TG-конвейер. Защищено ADMIN_KEY.
+// Мероприятия из панели. Защищено ADMIN_KEY.
 //
-// GET  /api/event-upsert            → список событий ВКЛЮЧАЯ черновики
-//   (обычная /api/events их прячет — иначе черновик пропадал бы навсегда)
-// POST /api/event-upsert  body: { id?, title, date, timeStart, timeEnd,
-//   ageRating, venue, address?, descr?, status, secret?,
-//   waves: [{waveNo,name,priceRub,quota,public?}] }
+// GET  /api/event-upsert → { events (включая черновики), ai, subs }
+//   ai — подключён ли ИИ для разбора постов, subs — подписчиков анонсов в боте
+// POST /api/event-upsert
+//   { action: 'analyze', text }   → черновик формы из текста поста
+//   { action: 'delete', id }      → удалить мероприятие без броней
+//   { id?, title, date, timeStart, timeEnd, ageRating, status, venue,
+//     address?, secret?, descr?, capacity?, posterUrl?, lineup?, program?,
+//     waves: [{waveNo,name,priceRub,quota,public?}] } → сохранить
 //
 // Инварианты: цену/квоту читает и пишет только сервер; id существующего
 // события не меняется (иначе оборвутся выданные QR); квота не опускается
 // ниже проданного; волна с продажами не удаляется.
-import { db, hasDb } from './_lib/db.js';
+import { db, hasDb, ensureSchema, withTimeout } from './_lib/db.js';
 import { isAdmin } from './_lib/auth.js';
 import { ok, fail, noStore } from './_lib/respond.js';
 import { parseEventForm } from './_lib/event-form.js';
-import {
-  EVENT_UPSERT_SQL,
-  WAVE_UPSERT_SQL,
-  WAVES_PRUNE_SQL, WAVES_HIDE_SQL,
-  ADMIN_EVENTS_SQL,
-} from './_lib/queries.js';
+import { ADMIN_EVENTS_SQL } from './_lib/queries.js';
+import { loadExisting, saveEvent, deleteEvent, publishCheck } from './_lib/event-store.js';
+import { analyzePost } from './_lib/analyze.js';
+import { extractorAvailable } from './_lib/extract.js';
 
 const rowsOf = (r) => r.rows || r;
+const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
 
 export default async function handler(req, res) {
   noStore(res);
@@ -31,47 +31,98 @@ export default async function handler(req, res) {
     return fail(res, 405, 'method_not_allowed', 'Метод не поддерживается');
   }
   if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен админ-ключ');
+
+  const action = req.method === 'POST' ? String(req.body?.action || 'save') : 'list';
+  // разбор поста работает и без базы: правила — чистая функция
+  if (action === 'analyze') return analyze(req, res);
   if (!hasDb()) return fail(res, 503, 'db_unavailable', 'DATABASE_URL не настроен');
 
   const sql = db();
+  try {
+    await ensureSchema(sql); // колонки программы и таблица афиш появились после первого «Инициализировать БД»
+  } catch { /* ensureSchema сам глушит ошибки по стейтментам */ }
 
-  if (req.method === 'GET') {
-    try {
-      const rows = rowsOf(await sql.query(ADMIN_EVENTS_SQL));
-      return ok(res, {
-        events: rows.map((r) => ({
-          id: r.id,
-          title: r.title,
-          city: r.city,
-          venue: r.venue,
-          address: r.address,
-          startsAt: new Date(r.starts_at).toISOString(),
-          endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : null,
-          ageRating: Number(r.age_rating),
-          status: r.status,
-          descr: r.descr,
-          secret: Boolean(r.secret),
-          capacity: r.capacity == null ? null : Number(r.capacity),
-          waves: typeof r.waves === 'string' ? JSON.parse(r.waves) : r.waves,
-        })),
-      });
-    } catch (err) {
-      console.error('event list failed:', err);
-      return fail(res, 503, 'db_unavailable', 'БД недоступна');
-    }
+  if (action === 'list') return list(res, sql);
+  if (action === 'delete') return remove(req, res, sql);
+  if (action === 'check') {
+    const r = await publishCheck(sql, String(req.body?.id || ''));
+    return r.ok ? ok(res, {}) : fail(res, 409, 'not_publishable', r.message);
   }
+  return save(req, res, sql);
+}
 
-  // ---- POST: сохранение ----
+async function list(res, sql) {
+  try {
+    const rows = rowsOf(await withTimeout(sql.query(ADMIN_EVENTS_SQL), 8000));
+    let subs = 0;
+    try {
+      subs = Number(rowsOf(await sql.query(`SELECT count(*)::int AS n FROM tg_subs WHERE active`))[0]?.n || 0);
+    } catch { /* таблицы ещё нет — подписчиков ноль */ }
+    return ok(res, {
+      ai: extractorAvailable(),
+      subs,
+      events: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        city: r.city,
+        venue: r.venue,
+        address: r.address,
+        startsAt: new Date(r.starts_at).toISOString(),
+        endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : null,
+        ageRating: Number(r.age_rating),
+        status: r.status,
+        descr: r.descr,
+        secret: Boolean(r.secret),
+        capacity: r.capacity == null ? null : Number(r.capacity),
+        posterUrl: r.poster_url || null,
+        lineup: json(r.lineup) || [],
+        program: json(r.program) || [],
+        pending: Number(r.pending || 0),
+        revenue: Number(r.revenue || 0),
+        waves: json(r.waves) || [],
+      })),
+    });
+  } catch (err) {
+    console.error('event list failed:', err);
+    return fail(res, 503, 'db_unavailable', 'БД недоступна');
+  }
+}
+
+async function analyze(req, res) {
+  const text = String(req.body?.text || '').slice(0, 5000);
+  if (text.trim().length < 10) return fail(res, 400, 'validation', 'Вставь текст поста — хотя бы пару строк');
+  let known = [];
+  if (hasDb()) {
+    try {
+      const rows = rowsOf(await withTimeout(db().query(
+        `SELECT id, title, starts_at FROM events WHERE status IN ('onsale','draft') ORDER BY starts_at LIMIT 20`
+      ), 3000));
+      known = rows.map((r) => ({ id: r.id, title: r.title, startsAt: r.starts_at }));
+    } catch { /* не критично */ }
+  }
+  const r = await analyzePost(text, { nowMs: Date.now(), known });
+  return ok(res, { draft: r.draft, found: r.found, notes: r.notes, engine: r.engine, ai_failed: Boolean(r.aiFailed) });
+}
+
+async function remove(req, res, sql) {
+  const id = String(req.body?.id || '').trim();
+  if (!id) return fail(res, 400, 'validation', 'Нужен id мероприятия');
+  try {
+    const r = await deleteEvent(sql, id);
+    return r.ok ? ok(res, { deleted: id }) : fail(res, 409, 'not_deletable', r.message);
+  } catch (err) {
+    console.error('event delete failed:', err);
+    return fail(res, 503, 'db_unavailable', 'БД недоступна');
+  }
+}
+
+async function save(req, res, sql) {
   const wantedId = String(req.body?.id || '').trim();
   let existing = null;
   if (wantedId) {
     try {
-      const evRows = rowsOf(await sql.query(`SELECT id FROM events WHERE id = $1`, [wantedId]));
-      if (!evRows.length) return fail(res, 404, 'not_found', 'Такого события нет');
-      const wRows = rowsOf(
-        await sql.query(`SELECT wave_no, sold FROM price_waves WHERE event_id = $1`, [wantedId])
-      );
-      existing = { id: wantedId, waves: wRows.map((w) => ({ waveNo: Number(w.wave_no), sold: Number(w.sold) })) };
+      existing = await loadExisting(sql, wantedId);
+      if (!existing) return fail(res, 404, 'not_found', 'Такого события нет');
     } catch (err) {
       console.error('event load failed:', err);
       return fail(res, 503, 'db_unavailable', 'БД недоступна');
@@ -82,7 +133,7 @@ export default async function handler(req, res) {
   if (!parsed.ok) {
     return fail(res, 400, 'validation', parsed.errors[0].message, { fields: parsed.errors });
   }
-  const { event: e, waves, prune, warnings } = parsed;
+  const e = parsed.event;
 
   // новое событие с таким же названием и датой уже есть — не затираем его молча
   if (!existing) {
@@ -96,29 +147,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    await sql.query(EVENT_UPSERT_SQL, [
-      e.id, e.brand, e.title, e.city, e.venue, e.address, e.startsAt, e.endsAt,
-      e.ageRating, e.status, null, e.descr, null, e.secret,
-    ]);
-    const saved = [];
-    for (const w of waves) {
-      const r = rowsOf(await sql.query(WAVE_UPSERT_SQL, [e.id, w.waveNo, w.name, w.priceRub, w.quota, w.public]));
-      const row = r[0];
-      if (row) saved.push({ waveNo: Number(row.wave_no), quota: Number(row.quota), sold: Number(row.sold) });
-    }
-    if (prune.length) {
-      const keep = waves.map((w) => w.waveNo);
-      await sql.query(WAVES_PRUNE_SQL, [e.id, keep]);
-      // волна с sold = 0, но с историей заказов не удаляется (FK) — прячем её с сайта
-      const hidden = rowsOf(await sql.query(WAVES_HIDE_SQL, [e.id, keep]));
-      if (hidden.length) warnings.push(`Волна ${hidden.map((h) => h.wave_no).join(', ')} скрыта, а не удалена: на неё ссылаются старые брони`);
-    }
+    const r = await saveEvent(sql, parsed);
     return ok(res, {
       event_id: e.id,
       created: !existing,
       status: e.status,
-      waves: saved,
-      warnings,
+      published: e.status === 'onsale' && (!existing || existing.status !== 'onsale'),
+      waves: r.waves,
+      warnings: r.warnings,
     });
   } catch (err) {
     console.error('event upsert failed:', err);

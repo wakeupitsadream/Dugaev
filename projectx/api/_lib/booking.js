@@ -11,6 +11,7 @@ import { makeToken, primarySecret } from './sign.js';
 import { tgApi } from './tg.js';
 import { fmtRub } from '../../assets/waves.js';
 import { fmtWhen } from '../../assets/ticket-format.js';
+import { SUB_BUTTON, isSubscribed } from './broadcast.js';
 
 export function paymentMode() {
   return process.env.PAYMENT_MODE === 'demo' ? 'demo' : 'transfer';
@@ -83,18 +84,29 @@ export async function tellGuest(chatId, text, replyMarkup) {
   }, 3000);
 }
 
-// Гостю: проходки после подтверждения оплаты
-export async function deliverTickets(chatId, order, tickets, origin, event = null) {
-  if (!chatId) return null;
-  const links = ticketLinks(tickets, origin);
-  const lines = links.map((t) => `• ${t.holder_name}: ${t.url}`);
+// Текст «оплата подтверждена» — один для панели и для кнопки в Telegram.
+// Время дверей — из самой ночи, а не из общего конфига: у ночей оно разное.
+export function paidMessage(tickets, origin, event = null) {
+  const links = ticketLinks(tickets, origin).map((t) => `• ${t.holder_name}: ${t.url}`);
   const where = event ? [event.venue, event.address].filter(Boolean).join(', ') : '';
   const whenLine = event && event.starts_at
-    ? `${fmtWhen(event.starts_at).replace(/ в \d{1,2}:\d{2}$/, '')} · двери ${SITE.doorsOpen || '22:00'}${where ? ` · ${where}` : ''}\n`
+    ? `${fmtWhen(event.starts_at).replace(/ · (\d{1,2}:\d{2})$/, ' · двери $1')}${where ? ` · ${where}` : ''}\n`
     : '';
-  return tellGuest(
-    chatId,
-    `✅ Оплата подтверждена — проходки у тебя.\n\n${lines.join('\n')}\n\n${whenLine}` +
-      'Открой свою и сделай скриншот QR — сработает без интернета. Друзьям перешли их ссылки: проходки именные, на входе паспорт.'
-  );
+  return `✅ Оплата подтверждена — проходки у тебя.\n\n${links.join('\n')}\n\n${whenLine}` +
+    'Открой свою и сделай скриншот QR — сработает без интернета. Друзьям перешли их ссылки: проходки именные, на входе паспорт.';
+}
+
+// Под проходками — предложение подписаться на анонсы (только тем, кто ещё
+// не подписан: согласие на рассылку даёт сам гость, нажатием)
+export async function subOffer(sql, chatId) {
+  if (!sql || !chatId) return null;
+  return (await isSubscribed(sql, chatId)) ? null : { inline_keyboard: [[SUB_BUTTON]] };
+}
+
+// Гостю: проходки после подтверждения оплаты
+export async function deliverTickets(chatId, order, tickets, origin, event = null, { sql = null } = {}) {
+  if (!chatId) return null;
+  let markup = null;
+  try { markup = await subOffer(sql, chatId); } catch { /* без кнопки */ }
+  return tellGuest(chatId, paidMessage(tickets, origin, event), markup);
 }

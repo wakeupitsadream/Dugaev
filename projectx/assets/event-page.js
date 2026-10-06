@@ -1,7 +1,6 @@
 // Страница ивента + чекаут. Состояние формы живёт в store (переживает
 // перерисовки), экран успеха держится флагом showingDone.
 import { SITE } from './data/config.js';
-import { SHOW_PROGRAM } from './data/events.js';
 import { makeSheetDraggable } from './sheet-drag.js';
 import { initChrome, closeMenu, trafficSource } from './chrome.js';
 import { track } from './metrika.js';
@@ -36,10 +35,33 @@ function slug() {
   return new URLSearchParams(location.search).get('id');
 }
 
+// Ночь закончилась, а во вшитых данных она «в продаже» (кэш CDN): для
+// гостя это уже прошлое. Своя копия, а не импорт: после выкладки в кэше
+// браузера ещё может лежать прежний events-load.js без этой функции.
+function withDerivedStatus(e, nowMs = Date.now()) {
+  if (e.status !== 'onsale' && e.status !== 'soldout') return e;
+  const end = e.endsAt ? Date.parse(e.endsAt) : Date.parse(e.startsAt) + 8 * 3600_000;
+  return Number.isFinite(end) && end <= nowMs ? { ...e, status: 'past' } : e;
+}
+
+// Страница /e/<id> приходит с данными ночи внутри (api/events.js вшивает
+// их в <script id="ev-data">): рисуем сразу, без ожидания /api/events.
+// Свежие остатки волн догружаются следом.
+function embedded() {
+  try {
+    const el = document.getElementById('ev-data');
+    const e = el ? JSON.parse(el.textContent) : null;
+    return e && e.id === slug() && Array.isArray(e.waves) ? withDerivedStatus(e) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function init() {
   initChrome();
-  const { events } = await loadEvents();
-  const e = events.find((x) => x.id === slug());
+  let e = embedded();
+  const fresh = loadEvents().then(({ events }) => events.find((x) => x.id === slug()) || null);
+  if (!e) e = await fresh;
   if (!e) {
     $('event-missing').hidden = false;
     $('sticky-cta').classList.add('hidden');
@@ -54,6 +76,13 @@ async function init() {
   bindSheet();
   bindForm();
   renderSavedTickets();
+  // вшитые данные могли устареть на пару минут (кэш CDN) — остатки
+  // и статус берём свежие, как только ответит API
+  fresh.then((f) => {
+    if (!f || f === e || document.body.classList.contains('sheet-open') || store.sending) return;
+    store.event = { ...store.event, status: f.status, waves: f.waves, address: f.address ?? store.event.address };
+    renderWaves();
+  });
   // Счётчик волн живой, но пока человек заполняет форму или ждёт ответа,
   // цена и надпись на кнопке под ним меняться не должны — это его сделка.
   setInterval(() => {
@@ -66,7 +95,7 @@ function renderEvent() {
   const e = store.event;
   // Данные пришли — только теперь кнопки могут что-то обещать
   for (const id of ['buy-open', 'sticky-buy']) $(id).disabled = false;
-  document.title = `${e.title} · проходки · PROJECT X Оренбург`;
+  document.title = e.status === 'past' ? `${e.title} · PROJECT X Оренбург` : `${e.title} · проходки · PROJECT X Оренбург`;
   // канонический адрес ночи — для поисковиков и шаринга
   let canon = document.querySelector('link[rel="canonical"]');
   if (!canon) { canon = document.createElement('link'); canon.rel = 'canonical'; document.head.appendChild(canon); }
@@ -103,9 +132,9 @@ function renderEvent() {
       : esc(`в проходке сразу после покупки${addressIsPublic(e) ? '' : ' · всем остальным за сутки до ночи'}`)],
     ['Возраст', esc(`${ageLabel(e.ageRating)}${e.ageRating < 18 ? ' · без алкоголя' : ' · по паспорту'}`)],
   ];
-  // Финиш — из endsAt ночи; без него — «до утра»
+  // Двери и финиш — из самой ночи; без финиша — «до утра»
   const finish = e.endsAt ? `до ${fmtTime(e.endsAt)}` : 'до утра';
-  rows.push(['Регламент', esc(`двери ${SITE.doorsOpen} · старт ${SITE.showStart} · ${finish}`)]);
+  rows.push(['Регламент', esc(`двери ${fmtTime(e.startsAt)} · ${finish}`)]);
   $('eh-meta').innerHTML = rows
     .map(([k, v]) => `<div class="eh-meta-item"><span class="k">${k}</span><span class="v">${v}</span></div>`)
     .join('');
@@ -114,7 +143,7 @@ function renderEvent() {
   if (strip) {
     const a = activeWave(e.waves);
     strip.textContent = [
-      `${db.day} ${db.mon}`, e.venue, `двери ${SITE.doorsOpen}`, a ? `от ${fmtRub(a.priceRub)} ₽` : null,
+      `${db.day} ${db.mon}`, e.venue, `двери ${fmtTime(e.startsAt)}`, a ? `от ${fmtRub(a.priceRub)} ₽` : null,
     ].filter(Boolean).join(' · ');
     strip.hidden = false;
   }
@@ -123,14 +152,15 @@ function renderEvent() {
 }
 
 // ---------- Что внутри ----------
-// Программа ночи из сида (SHOW_PROGRAM): комнаты, игровая, диджеи. Только
-// для ночи в продаже — у архива свой текст в descr.
+// Программа ночи — из панели (блоки «что будет»). Только для ночи в
+// продаже: у архива свой текст в descr.
 function renderProgram(e) {
   const box = $('ev-program');
   if (!box) return;
-  if (e.status === 'past' || !SHOW_PROGRAM.length) { box.hidden = true; return; }
-  $('ev-program-grid').innerHTML = SHOW_PROGRAM
-    .map((p) => `<article class="evp-item"><h3>${esc(p.title)}</h3><p>${esc(p.text)}</p></article>`)
+  const items = (Array.isArray(e.program) ? e.program : []).filter((p) => p && p.title);
+  if (e.status === 'past' || !items.length) { box.hidden = true; return; }
+  $('ev-program-grid').innerHTML = items
+    .map((p) => `<article class="evp-item"><h3>${esc(p.title)}</h3>${p.text ? `<p>${esc(p.text)}</p>` : ''}</article>`)
     .join('');
   box.hidden = false;
 }
@@ -689,7 +719,7 @@ function showSuccess(j) {
         ? `<li><b>Нажми «Я перевёл»</b> или открой бота в Telegram — проходки придут туда сразу после подтверждения.</li>`
         : `<li><b>Нажми «Я перевёл»</b> — мы проверим перевод и подтвердим бронь.</li>`) +
       `<li><b>Проходки ниже</b> станут активными после подтверждения. Открой каждую и сохрани QR — ссылки остаются на этой странице.</li>` +
-      `<li><b>На дверях</b> паспорт с собой, двери в ${esc(SITE.doorsOpen)}. Друзьям — перешли их именные проходки.</li>`;
+      `<li><b>На дверях</b> паспорт с собой, двери в ${esc(fmtTime(store.event.startsAt))}. Друзьям — перешли их именные проходки.</li>`;
   } else {
     $('success-title').textContent = 'Проходки у тебя';
     $('success-note').textContent = SITE.paymentDemo
@@ -699,7 +729,7 @@ function showSuccess(j) {
     steps.innerHTML =
       `<li><b>Сохрани.</b> Открой проходку и сделай скриншот — QR сработает на входе даже без интернета. Ссылки остаются на этой странице.</li>` +
       `<li><b>Адрес.</b> Если ночь — SECRET PLACE, адрес уже в проходке.</li>` +
-      `<li><b>На дверях.</b> Паспорт с собой, двери в ${esc(SITE.doorsOpen)}. Друзьям — перешли их именные проходки.</li>`;
+      `<li><b>На дверях.</b> Паспорт с собой, двери в ${esc(fmtTime(store.event.startsAt))}. Друзьям — перешли их именные проходки.</li>`;
   }
   // Дубликат ссылок на случай, если лист закроют: единственный экземпляр
   // «моих проходок» на сайте не должен исчезать вместе со шторкой.

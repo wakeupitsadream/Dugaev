@@ -34,7 +34,11 @@ const FIELDS_DOC = `{
     "timeEnd": "HH:MM или null",
     "ageRating": "16 или 18 (число, у бренда почти всегда 18) или null",
     "prices": [{ "name": "название тарифа/волны", "priceRub": 300 }],
-    "descr": "короткое описание для афиши из поста (1-2 предложения) или null",
+    "descr": "описание для страницы ночи из поста (2-4 предложения, без цен и ссылок) или null",
+    "address": "улица и дом, например «Волгоградская, 46/3», или null",
+    "secret": "true, если адрес держат в секрете (SECRET PLACE), иначе false",
+    "lineup": ["имена диджеев и артистов, как в посте"],
+    "program": [{ "title": "короткий пункт программы", "text": "одно предложение подробнее или пустая строка" }],
     "targetSlug": "для update/cancellation: слаг существующего события или null"
   }
 }`;
@@ -45,8 +49,10 @@ function systemPrompt(knownEvents, nowIso) {
     .join('\n');
   return (
     `Ты анализируешь посты канала организатора вечеринок PROJECT X ` +
-    `(ночные вечеринки строго 18+ в Оренбурге: двери 23:00, финиш под утро, обычно 23:00-06:00; ` +
-    `вход по паспорту). ` +
+    `(ночные вечеринки строго 18+ в Оренбурге: двери обычно 22:00, старт 23:00, финиш 04:00-06:00; ` +
+    `вход по паспорту). timeStart — время открытия дверей (если указано «двери»/«сбор»), иначе старта. ` +
+    `prices — только цены входа для всех (волны по порядку); цены для девушек/парней, депозиты, столы и промокоды не включай. ` +
+    `program — пункты «что будет» из поста (до 10), lineup — только имена. ` +
     `Сегодня ${nowIso}. Классификация kind: announcement — анонс новой вечеринки с датой; ` +
     `update — изменение цен/условий/места уже анонсированной; cancellation — отмена или перенос; ` +
     `other — всё остальное (фотоотчёты, мемы, розыгрыши, опросы). ` +
@@ -94,6 +100,15 @@ export function coerceExtracted(raw) {
             .filter((p) => p.priceRub !== null)
         : [],
       descr: str(ev.descr),
+      address: str(ev.address),
+      secret: ev.secret === true,
+      lineup: Array.isArray(ev.lineup) ? ev.lineup.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 10) : [],
+      program: Array.isArray(ev.program)
+        ? ev.program
+            .filter((p) => p && typeof p === 'object' && String(p.title || '').trim())
+            .map((p) => ({ title: String(p.title).trim().slice(0, 60), text: String(p.text || '').trim().slice(0, 400) }))
+            .slice(0, 12)
+        : [],
       targetSlug: str(ev.targetSlug),
     },
   };
@@ -115,7 +130,7 @@ async function extractViaPolza(text, knownEvents, nowIso) {
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: 700,
+        max_tokens: 1200,
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -158,7 +173,7 @@ const TOOL = {
       event: {
         type: 'object',
         additionalProperties: false,
-        required: ['title', 'city', 'venue', 'date', 'timeStart', 'timeEnd', 'ageRating', 'prices', 'descr', 'targetSlug'],
+        required: ['title', 'city', 'venue', 'date', 'timeStart', 'timeEnd', 'ageRating', 'prices', 'descr', 'address', 'secret', 'lineup', 'program', 'targetSlug'],
         properties: {
           title: { type: ['string', 'null'] },
           city: { type: ['string', 'null'] },
@@ -177,6 +192,18 @@ const TOOL = {
             },
           },
           descr: { type: ['string', 'null'] },
+          address: { type: ['string', 'null'] },
+          secret: { type: 'boolean' },
+          lineup: { type: 'array', items: { type: 'string' } },
+          program: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['title', 'text'],
+              properties: { title: { type: 'string' }, text: { type: 'string' } },
+            },
+          },
           targetSlug: { type: ['string', 'null'] },
         },
       },
@@ -192,7 +219,7 @@ async function extractViaAnthropic(text, knownEvents, nowIso) {
   try {
     const response = await client.messages.create({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1024,
+      max_tokens: 1500,
       system: systemPrompt(knownEvents, nowIso),
       messages: [{ role: 'user', content: `Пост канала:\n\n${String(text).slice(0, 3000)}` }],
       tools: [TOOL],

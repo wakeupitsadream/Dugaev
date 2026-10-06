@@ -16,8 +16,10 @@ async function init() {
   mountAftermovie('aftermovie-host');
   observeReveal();
   const { events } = await loadEvents();
-  fillEventCopy(upcoming(events)[0] || null); // правило SECRET PLACE: открыт ли адрес ближайшей ночи
-  pointBuyLinks(upcoming(events)[0] || null);
+  const nearest = upcoming(events)[0] || null;
+  renderBands('band-1', 'band-2', nearest); // программа и лайн-ап ближайшей ночи, если они есть
+  fillEventCopy(nearest); // правило SECRET PLACE: открыт ли адрес ближайшей ночи
+  pointBuyLinks(nearest);
 }
 
 // Таймлайн ночи: вертикальная линия заливается вслед за прокруткой, остановки

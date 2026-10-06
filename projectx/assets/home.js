@@ -15,6 +15,9 @@ import { SITE } from './data/config.js';
 
 const $ = (id) => document.getElementById(id);
 const state = { events: [], nearest: null };
+// подписка на анонсы в боте (своя копия: в кэше браузера после выкладки
+// может ещё лежать прежний blocks.js)
+const notifyUrl = () => `${SITE.telegramUrl || `https://t.me/${SITE.telegramBot}`}?start=notify`;
 
 init();
 
@@ -34,8 +37,9 @@ async function init() {
   state.nearest = upcoming(events)[0] || null;
   renderNext();
   renderAfisha('afisha-grid', upcoming(state.events));
-  renderCta();
+  renderBands('band-1', 'band-2', state.nearest);
   pointBuyLinks(state.nearest);
+  renderCta(); // после ссылок: без ночи кнопка внизу ведёт в бот, а не на афишу
   startCountdown();
 
   // раз в минуту подтягиваем остатки волн — лестница не должна врать
@@ -59,7 +63,7 @@ function renderNext() {
     $('ne-mon').textContent = '';
     $('ne-title').textContent = t.when || 'Следующая ночь готовится';
     $('ne-meta').textContent = t.note || 'Дата и площадка объявляются позже.';
-    $('ne-link').textContent = 'Позовите меня';
+    $('ne-link').textContent = 'Узнать первым';
     card.href = '#afisha';
     card.hidden = false;
     $('countdown').hidden = true;
@@ -71,7 +75,7 @@ function renderNext() {
   $('ne-mon').textContent = db.mon;
   $('ne-title').textContent = e.title;
   $('ne-meta').innerHTML = `<b>${esc(e.venue || 'SECRET PLACE')}</b> · ${esc(fmtWhen(e.startsAt))} · ${esc(ageLabel(e.ageRating))}`;
-  $('ne-link').textContent = price ? `Взять проходку · от ${price} ₽` : 'Подробнее';
+  $('ne-link').textContent = price ? `Взять проходку · от ${fmtRub(price)} ₽` : 'Подробнее';
   card.href = `/e/${e.id}`;
   // Данные пришли позже лесенки входа — карточка не ждёт свою очередь
   if (performance.now() > 700) card.style.animationDelay = '0ms';
@@ -82,9 +86,11 @@ function renderCta() {
   const e = state.nearest;
   fillSecretNote(e);
   if (!e) {
-    $('cta-lead').textContent = 'Следующую ночь объявим здесь. Оставь контакт на афише — напишем первым, пока действует ранняя волна.';
-    $('cta-buy').textContent = 'Оставить контакт';
-    $('cta-buy').href = '#afisha';
+    $('cta-lead').textContent = 'Следующую ночь объявим здесь и в боте. Подпишись — анонс придёт в Telegram первым, пока действует ранняя волна.';
+    $('cta-buy').textContent = '🔔 Узнать первым в Telegram';
+    $('cta-buy').href = notifyUrl();
+    $('cta-buy').target = '_blank';
+    $('cta-buy').rel = 'noopener';
     return;
   }
   const price = fromPrice(e.waves);

@@ -202,24 +202,28 @@ FROM price_waves WHERE event_id = $1 AND public`;
 
 // Событие: создать или обновить. Один стейтмент на два сценария — сид афиши
 // (/api/seed) и правка из админки (/api/event-upsert).
-// COALESCE на poster_url/descr/lineup: форма админки этих полей не знает,
-// присланный null означает «не менять», а не «стереть».
+// null в poster_url/descr/lineup/program/capacity означает «не менять»
+// (старые клиенты этих полей не знают), пустая строка в poster_url и 0 в
+// capacity — «убрать».
 // Параметры: $1 id, $2 brand, $3 title, $4 city, $5 venue, $6 address,
 // $7 starts_at, $8 ends_at, $9 age_rating, $10 status, $11 poster_url,
-// $12 descr, $13 lineup json (null → сохранить прежний),
-// $14 secret (bool: SECRET PLACE — адрес публике только за сутки)
+// $12 descr, $13 lineup json, $14 secret (bool: SECRET PLACE — адрес
+// публике только за сутки), $15 capacity (int), $16 program json
 export const EVENT_UPSERT_SQL = `
 INSERT INTO events (id, brand, title, city, venue, address, starts_at, ends_at,
-                    age_rating, status, poster_url, descr, lineup, secret)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13::jsonb,'[]'::jsonb),COALESCE($14::bool,false))
+                    age_rating, status, poster_url, descr, lineup, secret, capacity, program)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11::text,''),$12,COALESCE($13::jsonb,'[]'::jsonb),
+        COALESCE($14::bool,false), NULLIF($15::int, 0), $16::jsonb)
 ON CONFLICT (id) DO UPDATE SET
   brand=EXCLUDED.brand, title=EXCLUDED.title, city=EXCLUDED.city,
   venue=EXCLUDED.venue, address=EXCLUDED.address, starts_at=EXCLUDED.starts_at,
   ends_at=EXCLUDED.ends_at, age_rating=EXCLUDED.age_rating, status=EXCLUDED.status,
-  poster_url=COALESCE(EXCLUDED.poster_url, events.poster_url),
+  poster_url=CASE WHEN $11::text IS NULL THEN events.poster_url ELSE NULLIF($11::text,'') END,
   descr=COALESCE(EXCLUDED.descr, events.descr),
   lineup=COALESCE($13::jsonb, events.lineup),
-  secret=COALESCE($14::bool, events.secret)
+  secret=COALESCE($14::bool, events.secret),
+  capacity=CASE WHEN $15::int IS NULL THEN events.capacity ELSE NULLIF($15::int, 0) END,
+  program=COALESCE($16::jsonb, events.program)
 RETURNING id`;
 
 // Волна: создать или обновить. Квоту нельзя опустить ниже уже проданного —
@@ -257,7 +261,9 @@ RETURNING wave_no`;
 // Афиша для админки: все события, включая черновики (на сайте их не видно).
 export const ADMIN_EVENTS_SQL = `
 SELECT e.id, e.title, e.city, e.venue, e.address, e.starts_at, e.ends_at,
-       e.age_rating, e.status, e.descr, e.secret, e.capacity,
+       e.age_rating, e.status, e.descr, e.secret, e.capacity, e.poster_url, e.lineup, e.program,
+       (SELECT count(*) FROM orders o WHERE o.event_id = e.id AND o.status = 'pending')::int AS pending,
+       (SELECT coalesce(sum(o.amount_rub), 0) FROM orders o WHERE o.event_id = e.id AND o.status = 'paid')::int AS revenue,
        COALESCE(json_agg(json_build_object(
          'waveNo', w.wave_no, 'name', w.name, 'priceRub', w.price_rub,
          'quota', w.quota, 'sold', w.sold, 'public', w.public

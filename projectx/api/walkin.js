@@ -175,7 +175,7 @@ async function confirm(req, res, b, by, role) {
   if (o.tg_chat_id) {
     try { ev = rowsOf(await q(sql, `SELECT title, starts_at, venue, address FROM events WHERE id = $1`, [o.event_id]))[0] || null; } catch { /* без даты в сообщении */ }
   }
-  await deliverTickets(o.tg_chat_id, o, tickets, origin, ev);
+  await deliverTickets(o.tg_chat_id, o, tickets, origin, ev, { sql });
 
   ok(res, {
     order_id: o.id,

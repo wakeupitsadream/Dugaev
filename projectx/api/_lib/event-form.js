@@ -4,6 +4,9 @@ import { translitSlug } from './post-normalize.js';
 
 const TZ_OFFSET = '+05:00'; // Оренбург
 const STATUSES = ['draft', 'onsale', 'past'];
+// афиша — только своя: загруженная в базу (/api/poster?id=…), присланная
+// боту (/api/poster?fid=…) или лежащая в репозитории (/assets/photos/…)
+const POSTER_RE = /^\/(?:api\/poster\?(?:id=[0-9a-f]{24}|fid=[A-Za-z0-9_-]{20,150})|assets\/photos\/[\w.-]+\.(?:jpe?g|png|webp))$/;
 const AGES = [16, 18];
 
 const isDate = (v) => {
@@ -71,9 +74,38 @@ export function parseEventForm(body, ctx = {}) {
   const venue = String(b.venue || '').trim().slice(0, 80) || 'площадка придёт в билете';
   const descr = String(b.descr || '').trim().slice(0, 1500) || null; // абзац с программой ночи не влезал в 400
 
+  // ---- афиша, вместимость, лайн-ап, программа (необязательные) ----
+  // undefined — поле не прислано (старый клиент): в БД остаётся как было
+  let posterUrl;
+  if (b.posterUrl !== undefined) {
+    posterUrl = String(b.posterUrl || '').trim();
+    if (posterUrl && !POSTER_RE.test(posterUrl)) {
+      errors.push({ field: 'posterUrl', message: 'Афиша — только загруженная через панель картинка' });
+    }
+  }
+  let capacity;
+  if (b.capacity !== undefined && b.capacity !== null && b.capacity !== '') {
+    capacity = Number(b.capacity);
+    if (!Number.isInteger(capacity) || capacity < 0 || capacity > 20000) {
+      errors.push({ field: 'capacity', message: 'Вместимость — целое число гостей' });
+    }
+  } else if (b.capacity === '' || b.capacity === null) {
+    capacity = 0; // поле очистили — вместимость убрать
+  }
+  const lineup = Array.isArray(b.lineup)
+    ? b.lineup.map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 10)
+    : undefined;
+  const program = Array.isArray(b.program)
+    ? b.program
+        .map((p) => ({ title: String(p?.title || '').trim().slice(0, 60), text: String(p?.text || '').trim().slice(0, 400) }))
+        .filter((p) => p.title)
+        .slice(0, 16)
+    : undefined;
+
   // ---- волны ----
-  const rawWaves = Array.isArray(b.waves) ? b.waves.slice(0, 6) : [];
-  if (!rawWaves.length) errors.push({ field: 'waves', message: 'Нужна хотя бы одна волна цен' });
+  const rawWaves = Array.isArray(b.waves) ? b.waves.slice(0, 8) : [];
+  // черновик можно сохранить без цен (пост без цен из бота), в продажу — нет
+  if (!rawWaves.length && status !== 'draft') errors.push({ field: 'waves', message: 'Нужна хотя бы одна волна цен' });
   const soldByNo = new Map((existing?.waves || []).map((w) => [Number(w.waveNo), Number(w.sold) || 0]));
   const waves = [];
   rawWaves.forEach((w, i) => {
@@ -100,6 +132,9 @@ export function parseEventForm(body, ctx = {}) {
   });
   if (new Set(waves.map((w) => w.waveNo)).size !== waves.length) {
     errors.push({ field: 'waves', message: 'Номера волн повторяются' });
+  }
+  if (status === 'onsale' && rawWaves.length && !waves.some((w) => w.public)) {
+    errors.push({ field: 'waves', message: 'В продаже нужна хотя бы одна волна, видная на сайте' });
   }
 
   // волны, убранные из формы: снести можно только непроданные
@@ -147,6 +182,10 @@ export function parseEventForm(body, ctx = {}) {
       descr,
       // SECRET PLACE: адрес публике только за сутки до ночи; по умолчанию адрес открыт
       secret: Boolean(b.secret),
+      posterUrl,
+      capacity,
+      lineup,
+      program,
     },
     waves,
     prune: doomed.map((w) => Number(w.waveNo)),

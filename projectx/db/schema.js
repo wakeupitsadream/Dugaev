@@ -116,4 +116,46 @@ export const SCHEMA = [
     data       jsonb NOT NULL DEFAULT '{}'::jsonb,
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+
+  // v8: программа ночи — карточки «что внутри» у каждого мероприятия своя
+  // (раньше была одна на весь сайт в assets/data/events.js)
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS program jsonb`,
+
+  // Афиши, загруженные из панели или присланные боту. Файлового хранилища
+  // нет, а постеров — десятки по 150–400 КБ: живут в базе, отдаются через
+  // /api/poster?id=… с вечным кэшем CDN (id — хеш содержимого).
+  `CREATE TABLE IF NOT EXISTS media (
+    id         text PRIMARY KEY,
+    mime       text NOT NULL,
+    data       bytea NOT NULL,
+    bytes      integer NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+
+  // Подписка на анонсы в боте — только по явному согласию (кнопка «Сообщать
+  // о новых ночах» или ссылка ?start=notify), отписка — /stop. Храним только
+  // id чата: ни имени, ни ника для рассылки не нужно.
+  `CREATE TABLE IF NOT EXISTS tg_subs (
+    chat_id    bigint PRIMARY KEY,
+    active     boolean NOT NULL DEFAULT true,
+    source     text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  // Рассылка анонса: идёт порциями (лимиты Telegram и время функции),
+  // курсор — последний обработанный chat_id; lock_until не даёт двум
+  // вызовам слать одно и то же одновременно.
+  `CREATE TABLE IF NOT EXISTS broadcasts (
+    id         text PRIMARY KEY,
+    event_id   text,
+    cursor     bigint NOT NULL DEFAULT 0,
+    sent       integer NOT NULL DEFAULT 0,
+    failed     integer NOT NULL DEFAULT 0,
+    total      integer NOT NULL DEFAULT 0,
+    done       boolean NOT NULL DEFAULT false,
+    photo_id   text,
+    lock_until timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ];

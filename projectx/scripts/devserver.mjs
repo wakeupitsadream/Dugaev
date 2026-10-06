@@ -68,8 +68,13 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = decodeURIComponent(url.pathname);
 
+  // ---- /e/:slug → /api/events?page=:slug (как rewrites в vercel.json) ----
+  const ev = /^\/e\/([^/]+)$/.exec(pathname);
+  const apiPath = ev ? '/api/events' : pathname;
+  if (ev) url.searchParams.set('page', ev[1]);
+
   // ---- API через шим ----
-  if (API[pathname]) {
+  if (API[apiPath]) {
     req.query = Object.fromEntries(url.searchParams);
     req.body = await readBody(req);
     let code = 200;
@@ -81,7 +86,7 @@ http.createServer(async (req, res) => {
       end(body) { res.statusCode = code; res.end(body); },
     };
     try {
-      await API[pathname](req, shim);
+      await API[apiPath](req, shim);
     } catch (e) {
       console.error(pathname, e);
       if (!res.headersSent) { res.statusCode = 500; res.end('shim error: ' + e.message); }

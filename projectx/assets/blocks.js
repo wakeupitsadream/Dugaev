@@ -4,9 +4,9 @@
 import { SITE } from './data/config.js';
 import { GALLERY, SHOW_PROGRAM, AFTERMOVIE } from './data/events.js';
 import { esc } from './events-load.js';
-import { waveStates, fromPrice, totalSold, ladderText } from './waves.js';
+import { waveStates, fromPrice, totalSold, ladderText, fmtRub } from './waves.js';
 import { goingCount } from './social.js';
-import { plural, dateBox, fmtWhen, ageLabel } from './ticket-format.js';
+import { plural, dateBox, fmtWhen, fmtTime, ageLabel } from './ticket-format.js';
 import { faceControl, shareText } from './facecontrol.js';
 import { addressIsPublic } from './secret-place.js';
 import { springTo, projectMomentum, velocityFrom } from './spring.js';
@@ -32,7 +32,7 @@ export function nightCard(e) {
     : '';
   const priceHtml = price === null
     ? '<span class="badge badge-soldout">sold out</span>'
-    : `<span class="nc-price"><small>от</small>${price} ₽</span>`;
+    : `<span class="nc-price"><small>от</small>${fmtRub(price)} ₽</span>`;
   const leftHtml = active
     ? `<span class="nc-left">${esc(active.name.toLowerCase())} · осталось <b>${active.left}</b> ${plural(active.left, 'проходка', 'проходки', 'проходок')}</span>`
     : '';
@@ -48,7 +48,7 @@ export function nightCard(e) {
         <div class="nc-meta">
           <span><b>${esc(e.venue || 'SECRET PLACE')}</b>${e.address ? ` · ${esc(e.address)}` : ''}</span>
           ${e.address ? '' : `<span class="nc-secret">Адрес — в проходке сразу после покупки${addressIsPublic(e) ? '' : ', остальным за сутки до ночи'}</span>`}
-          <span>${esc(fmtWhen(e.startsAt).replace(/·\s*\d{2}:\d{2}$/, '').trim())} · двери ${esc(SITE.doorsOpen)} · старт ${esc(SITE.showStart)}</span>
+          <span>${esc(fmtWhen(e.startsAt).replace(/·\s*\d{2}:\d{2}$/, '').trim())} · двери ${esc(fmtTime(e.startsAt))}${e.endsAt ? ` · до ${esc(fmtTime(e.endsAt))}` : ''}</span>
           ${going === null ? '' : `<span>уже идут <b>${going}</b></span>`}
         </div>
         <div class="nc-foot">
@@ -77,6 +77,9 @@ export function renderAfisha(gridId, list) {
 // ---------- Пустое состояние: следующая ночь готовится ----------
 // Показывается там, где обычно карточки афиши. Форма шлёт заявку в тот же
 // /api/cityrequest (kind: notify) — новых serverless-функций не заводим.
+// Подписка на анонсы в боте: одно касание вместо формы
+export const notifyUrl = () => `${SITE.telegramUrl || `https://t.me/${SITE.telegramBot}`}?start=notify`;
+
 export function renderNextTeaser(host) {
   const t = SITE.nextTeaser || {};
   host.innerHTML = `
@@ -86,8 +89,11 @@ export function renderNextTeaser(host) {
         <b>${esc(t.when || 'Готовится')}</b>
         <p>${esc(t.note || 'Дата и площадка объявляются позже. Ранняя волна всегда дешевле.')}</p>
       </div>
-      <form class="teaser-form" id="notify-form" novalidate>
-        <label class="tf-label" for="nf-contact">Напишем тебе первым</label>
+      <div class="teaser-form">
+        <a class="btn btn-acid btn-block" href="${esc(notifyUrl())}" target="_blank" rel="noopener">🔔 Узнать первым в Telegram</a>
+        <p class="form-note" style="margin: 8px 0 18px;">Бот пришлёт анонс, как только откроется продажа. Отписка — /stop.</p>
+      <form id="notify-form" novalidate>
+        <label class="tf-label" for="nf-contact">Нет Telegram? Оставь контакт</label>
         <div class="field">
           <input type="text" id="nf-contact" placeholder="@ник в Telegram или телефон" autocomplete="off" aria-label="Ник или телефон" />
           <div class="err" role="alert" id="err-nf-contact">Оставь ник или телефон</div>
@@ -100,9 +106,10 @@ export function renderNextTeaser(host) {
           <span>Согласен на обработку данных — <a href="/privacy#consent" target="_blank" rel="noopener">политика</a></span>
         </label>
         <div class="err" role="alert" id="err-nf-consent" style="margin: -8px 0 10px;">Без согласия не сможем принять заявку</div>
-        <button class="btn btn-acid btn-block" id="nf-send" type="submit">Позовите меня</button>
+        <button class="btn btn-ghost btn-block" id="nf-send" type="submit">Позовите меня</button>
         <p class="form-note" id="nf-note">Одно сообщение, когда откроется продажа. Без спама.</p>
       </form>
+      </div>
     </div>`;
   bindNotifyForm();
 }
@@ -314,13 +321,24 @@ export function initNightScene(sectionId = 'night') {
 }
 
 // ---------- Программа: две ленты навстречу ----------
-export function renderBands(id1 = 'band-1', id2 = 'band-2') {
+// Верхняя лента — программа ближайшей ночи из панели (если в ней хотя бы
+// три пункта), иначе — то, из чего обычно состоит ночь PROJECT X. Нижняя —
+// лайн-ап ближайшей ночи впереди резидентов.
+export function renderBands(id1 = 'band-1', id2 = 'band-2', e = null) {
   const row = (arr) => {
     const half = arr.map((t) => `<span>${esc(t)}</span><span class="x">✕</span>`).join('');
     return half + half; // две копии — бесшовный цикл на -50%
   };
-  if ($(id1)) $(id1).innerHTML = row(SHOW_PROGRAM.map((p) => p.title));
-  if ($(id2)) $(id2).innerHTML = row(RESIDENTS);
+  const program = (e && Array.isArray(e.program) ? e.program : []).map((p) => p && p.title).filter(Boolean);
+  const lineup = (e && Array.isArray(e.lineup) ? e.lineup : []).map((n) => String(n).toUpperCase());
+  const people = [...new Set([...lineup, ...RESIDENTS])];
+  const top = program.length >= 3 ? program : SHOW_PROGRAM.map((p) => p.title);
+  for (const [id, list] of [[id1, top], [id2, people]]) {
+    const el = $(id);
+    if (!el) continue;
+    const html = row(list);
+    if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+  }
 }
 
 // ---------- Фейсконтроль ----------
@@ -376,12 +394,22 @@ export function pointBuyLinks(nearest) {
   const short = nearest ? ladderText(nearest.waves, { short: true }) : null;
   if (full) document.querySelectorAll('[data-ladder]').forEach((el) => { el.textContent = full; });
   if (short) document.querySelectorAll('[data-ladder-short]').forEach((el) => { el.textContent = short; });
+  if (nearest) document.querySelectorAll('[data-doors]').forEach((el) => { el.textContent = `двери ${fmtTime(nearest.startsAt)}`; });
   for (const id of ['header-buy', 'menu-buy', 'sticky-buy', 'cta-buy', 'am-buy']) {
     const el = $(id);
     if (!el) continue;
     el.href = href;
     if (id === 'sticky-buy' || id === 'menu-buy') {
-      el.textContent = price ? `Проходки от ${price} ₽` : 'Позовите меня на следующую';
+      if (nearest) {
+        el.textContent = price ? `Проходки от ${fmtRub(price)} ₽` : 'Подробнее о ночи';
+        el.removeAttribute('target');
+      } else {
+        // ночи в продаже нет: нижняя кнопка подписывает на анонс в боте
+        el.textContent = '🔔 Узнать первым о ночи';
+        el.href = notifyUrl();
+        el.target = '_blank';
+        el.rel = 'noopener';
+      }
     }
   }
 }
@@ -464,6 +492,10 @@ export function fillSecretNote(e) {
     ? (e.address && !e.secret
       ? `Ближайшая ночь — с открытым адресом: ${e.venue}, ${e.address}.`
       : 'Ближайшая ночь — SECRET PLACE: адрес придёт в проходку.')
-    : '';
-  document.querySelectorAll('[data-secret-note]').forEach((el) => { el.textContent = note; });
+    : null;
+  // без ближайшей ночи — исходный текст из разметки, а не пустое место
+  document.querySelectorAll('[data-secret-note]').forEach((el) => {
+    if (el.dataset.secretDefault === undefined) el.dataset.secretDefault = el.textContent;
+    el.textContent = note ?? el.dataset.secretDefault;
+  });
 }

@@ -22,18 +22,19 @@ async function init() {
   observeReveal();
 }
 
-// Стена постеров: прошедшие ночи из базы (со ссылкой на страницу ночи) плюс
-// афиши из архива, которых в базе нет. Каждый постер — карточка-объект:
-// на мыши наклоняется к курсору, на телефоне просто ложится в сетку.
+// Стена постеров: прошедшие ночи из базы (свежие первыми, со ссылкой на
+// страницу ночи) плюс афиши из архива, которых в базе нет. Каждый постер —
+// карточка-объект: на мыши наклоняется к курсору, на телефоне ложится в сетку.
 function renderWall(events) {
   const wall = $('poster-wall');
-  const past = pastEvents(events);
-  const byPoster = new Map(past.map((e) => [e.posterUrl, e]));
-  const items = GALLERY.map((g) => {
-    const ev = byPoster.get(g.src);
-    const db = ev ? dateBox(ev.startsAt) : null;
-    return { src: g.src, title: g.title, note: ev ? `${fmtWhen(ev.startsAt)} · ${ev.venue}` : g.note, href: ev ? `/e/${ev.id}` : null, day: db?.day, mon: db?.mon };
+  const past = pastEvents(events).filter((e) => e.posterUrl);
+  const fromDb = past.map((ev) => {
+    const db = dateBox(ev.startsAt);
+    const g = GALLERY.find((x) => x.src === ev.posterUrl);
+    return { src: ev.posterUrl, title: g ? g.title : ev.title, note: `${fmtWhen(ev.startsAt)} · ${ev.venue}`, href: `/e/${ev.id}`, day: db.day, mon: db.mon };
   });
+  const shown = new Set(fromDb.map((x) => x.src));
+  const items = [...fromDb, ...GALLERY.filter((g) => !shown.has(g.src)).map((g) => ({ src: g.src, title: g.title, note: g.note, href: null }))];
   wall.innerHTML = items.map((it) => {
     const tag = it.href ? 'a' : 'div';
     const href = it.href ? ` href="${esc(it.href)}"` : '';

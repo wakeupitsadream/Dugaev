@@ -120,11 +120,11 @@ const upsertEvent = (over = {}) => {
     id: 'px-sql-1', brand: 'projectx', title: 'SQL PARTY', city: 'orenburg',
     venue: 'клуб', address: 'Оренбург', startsAt: '2026-10-10T23:00:00+05:00',
     endsAt: '2026-10-11T06:00:00+05:00', ageRating: 18, status: 'onsale',
-    posterUrl: null, descr: 'первое описание', lineup: null, secret: null, ...over,
+    posterUrl: null, descr: 'первое описание', lineup: null, secret: null, capacity: null, program: null, ...over,
   };
   return pg.query(EVENT_UPSERT_SQL, [
     e.id, e.brand, e.title, e.city, e.venue, e.address, e.startsAt, e.endsAt,
-    e.ageRating, e.status, e.posterUrl, e.descr, e.lineup, e.secret,
+    e.ageRating, e.status, e.posterUrl, e.descr, e.lineup, e.secret, e.capacity, e.program,
   ]);
 };
 
@@ -209,4 +209,59 @@ test('secret и скрытые волны: UPSERT хранит флаги, null 
   const waves = typeof adm.waves === 'string' ? JSON.parse(adm.waves) : adm.waves;
   assert.equal(waves.find((x) => x.waveNo === 9).public, false);
   assert.equal(adm.secret, true);
+});
+
+// ---------- v8: афиша, вместимость, лайн-ап, программа ----------
+import { saveEvent, loadExisting, publishCheck, deleteEvent } from '../api/_lib/event-store.js';
+
+test('форма: афиша только своя, вместимость числом, лайн-ап и программа чистятся и режутся', () => {
+  const r = parseEventForm(form({
+    posterUrl: '/api/poster?id=0123456789abcdef01234567', capacity: '220',
+    lineup: [' DJ SHENDI ', '', 'MC X'], program: [{ title: 'Танцпол', text: 'до утра' }, { title: '' }],
+  }), { nowMs: NOW });
+  assert.equal(r.ok, true);
+  assert.equal(r.event.posterUrl, '/api/poster?id=0123456789abcdef01234567');
+  assert.equal(r.event.capacity, 220);
+  assert.deepEqual(r.event.lineup, ['DJ SHENDI', 'MC X']);
+  assert.deepEqual(r.event.program, [{ title: 'Танцпол', text: 'до утра' }]);
+  const bad = parseEventForm(form({ posterUrl: 'https://evil.example/x.jpg' }), { nowMs: NOW });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.errors[0].field, 'posterUrl');
+  // старый клиент полей не шлёт — undefined, в базе ничего не меняется
+  const legacy = parseEventForm(form(), { nowMs: NOW });
+  assert.equal(legacy.event.posterUrl, undefined);
+  assert.equal(legacy.event.program, undefined);
+});
+
+test('черновик без цен сохраняется, в продажу без цен — нет', () => {
+  assert.equal(parseEventForm(form({ status: 'draft', waves: [] }), { nowMs: NOW }).ok, true);
+  const onsale = parseEventForm(form({ status: 'onsale', waves: [] }), { nowMs: NOW });
+  assert.equal(onsale.ok, false);
+  const hiddenOnly = parseEventForm(form({ waves: [{ waveNo: 1, name: 'Гости', priceRub: 0, quota: 10, public: false }] }), { nowMs: NOW });
+  assert.equal(hiddenOnly.ok, false);
+});
+
+test('saveEvent пишет афишу, программу и вместимость; пустая афиша убирает её; publishCheck и удаление', async () => {
+  const p = parseEventForm(form({
+    title: 'Восьмая версия', date: '2026-10-20', status: 'draft', capacity: 150,
+    posterUrl: '/assets/photos/poster-260926.jpg', lineup: ['DJ A'], program: [{ title: 'Бар', text: '' }],
+  }), { nowMs: NOW });
+  await saveEvent(pg, p);
+  let ev = (await pg.query(`SELECT poster_url, capacity, lineup, program, status FROM events WHERE id = $1`, [p.event.id])).rows[0];
+  assert.equal(ev.poster_url, '/assets/photos/poster-260926.jpg');
+  assert.equal(ev.capacity, 150);
+  assert.deepEqual(ev.lineup, ['DJ A']);
+  assert.deepEqual(ev.program, [{ title: 'Бар', text: '' }]);
+  assert.equal((await publishCheck(pg, p.event.id, NOW)).ok, true);
+  assert.equal((await publishCheck(pg, p.event.id, Date.parse('2027-01-01'))).ok, false, 'прошедшую не публикуем');
+  // правка: афишу убрали, вместимость очистили, программу не прислали — осталась
+  const existing = await loadExisting(pg, p.event.id);
+  const p2 = parseEventForm(form({ id: p.event.id, title: 'Восьмая версия', date: '2026-10-20', status: 'draft', posterUrl: '', capacity: '' }), { nowMs: NOW, existing });
+  await saveEvent(pg, p2);
+  ev = (await pg.query(`SELECT poster_url, capacity, program FROM events WHERE id = $1`, [p.event.id])).rows[0];
+  assert.equal(ev.poster_url, null);
+  assert.equal(ev.capacity, null);
+  assert.deepEqual(ev.program, [{ title: 'Бар', text: '' }]);
+  assert.equal((await deleteEvent(pg, p.event.id)).ok, true);
+  assert.equal((await pg.query(`SELECT 1 FROM events WHERE id = $1`, [p.event.id])).rows.length, 0);
 });

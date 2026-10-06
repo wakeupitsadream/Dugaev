@@ -582,7 +582,7 @@ test('setupBot: вебхук с секретом и нужными апдейт�
   assert.deepEqual(wh.allowed_updates, ['message', 'callback_query', 'channel_post']);
   assert.equal(wh.drop_pending_updates, false); // адрес вебхука не менялся — очередь гостей не сбрасываем
   const cmds = calls.find((c) => c.method === 'setMyCommands').payload.commands.map((c) => c.command);
-  assert.deepEqual(cmds, ['buy', 'tickets', 'cancel']);
+  assert.deepEqual(cmds, ['buy', 'tickets', 'notify', 'cancel']);
   assert.ok(calls.some((c) => c.method === 'setMyDescription'));
   assert.ok(r.steps.every((s) => s.ok));
 
@@ -688,4 +688,174 @@ test('ensureSchema: пропавшая таблица бота создаётс�
   await ensureSchema(pg);
   await assert.rejects(pg.query(`SELECT 1 FROM tg_sessions`), /does not exist/);
   for (const stmt of SCHEMA) await pg.query(stmt); // вернуть для порядка
+});
+
+// ---------- v8: бот владельца — мероприятие из поста, публикация, рассылка ----------
+const OWNER = { id: 1, type: 'private' };
+// минимальный JPEG: SOI + JFIF — его узнаёт sniffMime
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1]), Buffer.alloc(64, 7)]);
+const POST = `PROJECT X: OPENING 2030
+📅 10.10
+⏰ 22:00–05:00
+📍 Клуб «Гигант Холл», ул. Терешковой 10
+1 волна — 700₽ (100 шт)
+2 волна — 900₽
+Лайн-ап: ARTURQUE, VANULA
+
+Что тебя ждёт:
+— большой танцпол до утра
+— фотозона с неоном`;
+
+function ownerDeps(over = {}) {
+  return guestDeps({
+    nowMs: Date.parse('2030-09-01T12:00:00+05:00'),
+    extractAvailable: false,
+    fetchFile: async () => JPEG,
+    sleep: async () => {},
+    ...over,
+  });
+}
+
+test('владелец: пересланный пост с афишей → черновик с афишей в базе, программой и карточкой с кнопками', async () => {
+  sent.length = 0;
+  const r = await handleUpdate({
+    update_id: 9001,
+    message: { message_id: 50, chat: OWNER, from: { id: 1 }, forward_origin: { type: 'channel' }, caption: POST, photo: [{ file_id: 'small' }, { file_id: 'BIG-FILE-ID-1234567890' }] },
+  }, ownerDeps());
+  assert.equal(r.done, 'draft_from_post');
+  const ev = (await pg.query(`SELECT * FROM events WHERE id = $1`, [r.slug])).rows[0];
+  assert.equal(ev.status, 'draft');
+  assert.equal(ev.title, 'PROJECT X: OPENING 2030');
+  assert.match(ev.poster_url, /^\/api\/poster\?id=[0-9a-f]{24}$/);
+  const media = (await pg.query(`SELECT mime, bytes FROM media WHERE id = $1`, [ev.poster_url.split('=')[1]])).rows[0];
+  assert.deepEqual([media.mime, media.bytes], ['image/jpeg', JPEG.length]);
+  assert.deepEqual(ev.lineup, ['ARTURQUE', 'VANULA']);
+  assert.equal(ev.program.length, 2);
+  const waves = (await pg.query(`SELECT wave_no, price_rub, quota FROM price_waves WHERE event_id = $1 ORDER BY wave_no`, [r.slug])).rows;
+  assert.deepEqual(waves.map((w) => [w.price_rub, w.quota]), [[700, 100], [900, 100]]);
+  const card = sent.find((x) => x.method === 'sendPhoto' || (x.method === 'sendMessage' && /Черновик готов/.test(x.payload.text || '')));
+  assert.ok(card, 'карточка черновика');
+  const kb = card.payload.reply_markup.inline_keyboard;
+  assert.equal(kb[0][0].callback_data, `pub:${r.slug}`);
+  assert.equal(kb[0][1].callback_data, `del:${r.slug}`);
+  assert.equal(kb[1][0].url, `https://px.test/admin#events/${r.slug}`);
+});
+
+test('владелец: пост без даты — подсказка, черновика нет; гостю пересланный пост не разбирается', async () => {
+  sent.length = 0;
+  const before = (await pg.query(`SELECT count(*)::int AS n FROM events`)).rows[0].n;
+  const r = await handleUpdate({ update_id: 9002, message: { message_id: 51, chat: OWNER, forward_origin: { type: 'user' }, text: 'Скоро большая ночь, следите за анонсами! Вход 700₽' } }, ownerDeps());
+  assert.equal(r.done, 'post_no_date');
+  assert.match(sent.at(-1).payload.text, /дату/);
+  assert.equal((await pg.query(`SELECT count(*)::int AS n FROM events`)).rows[0].n, before);
+  const g = await handleUpdate({ update_id: 9003, message: { message_id: 52, chat: { id: 707, type: 'private' }, forward_origin: { type: 'channel' }, text: POST } }, ownerDeps());
+  assert.notEqual(g.done, 'draft_from_post');
+});
+
+test('владелец: «Опубликовать» без цен — отказ; с ценами — в продаже и предложение разослать подписчикам', async () => {
+  const slug = (await pg.query(`SELECT id FROM events WHERE title = 'PROJECT X: OPENING 2030'`)).rows[0].id;
+  await pg.query(`INSERT INTO events (id, title, city, venue, starts_at, age_rating, status) VALUES ('px-nowaves', 'БЕЗ ЦЕН', 'orenburg', 'клуб', '2030-10-20T22:00:00+05:00', 18, 'draft')`);
+  sent.length = 0;
+  let r = await handleUpdate({ update_id: 9004, callback_query: { id: 'p0', data: 'pub:px-nowaves', from: { id: 1 }, message: { chat: { id: 1 }, message_id: 60 } } }, ownerDeps());
+  assert.equal(r.done, 'publish_blocked');
+  assert.equal((await pg.query(`SELECT status FROM events WHERE id = 'px-nowaves'`)).rows[0].status, 'draft');
+  // подписчики: один через ссылку с сайта, второй — кнопкой
+  r = await handleUpdate({ update_id: 9005, message: { message_id: 61, chat: { id: 801, type: 'private' }, text: '/start notify' } }, ownerDeps());
+  assert.equal(r.done, 'subscribed');
+  assert.equal(r.created, true);
+  r = await handleUpdate({ update_id: 9006, callback_query: { id: 's1', data: 'sub:on', from: { id: 802 } } }, ownerDeps());
+  assert.equal(r.done, 'subscribed');
+  sent.length = 0;
+  r = await handleUpdate({ update_id: 9007, callback_query: { id: 'p1', data: `pub:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 62, caption: 'карточка', photo: [{}] } } }, ownerDeps());
+  assert.equal(r.done, 'published');
+  assert.equal((await pg.query(`SELECT status FROM events WHERE id = $1`, [slug])).rows[0].status, 'onsale');
+  assert.ok(sent.some((x) => x.method === 'editMessageCaption'), 'карточка помечена «Опубликовано»');
+  const offer = sent.filter((x) => x.method === 'sendMessage').at(-1).payload;
+  assert.equal(offer.reply_markup.inline_keyboard[0][0].callback_data, `bc:${slug}`);
+  assert.match(offer.reply_markup.inline_keyboard[0][0].text, /\(2\)/);
+});
+
+test('рассылка: анонс уходит подписчикам с кнопкой брони, заблокировавший бота отписывается, повтор — «уже разослано»', async () => {
+  const slug = (await pg.query(`SELECT id FROM events WHERE title = 'PROJECT X: OPENING 2030'`)).rows[0].id;
+  const got = [];
+  const call = async (method, payload) => {
+    got.push({ method, payload });
+    if (payload.chat_id === 802) return { ok: false, error: 'Forbidden: bot was blocked by the user', code: 403 };
+    return { ok: true, result: { message_id: 1, photo: [{ file_id: 'TGPHOTO-small' }, { file_id: 'TGPHOTO-big' }] } };
+  };
+  sent.length = 0;
+  const r = await handleUpdate({ update_id: 9008, callback_query: { id: 'b1', data: `bc:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 63 } } }, ownerDeps({ call }));
+  assert.equal(r.done, 'broadcast_done');
+  assert.equal(r.sent, 1);
+  assert.equal(r.failed, 1);
+  const toSub = got.filter((x) => x.method === 'sendPhoto' && x.payload.chat_id === 801)[0];
+  assert.match(toSub.payload.caption, /Новая ночь PROJECT X/);
+  assert.match(toSub.payload.caption, /\/stop/);
+  assert.equal(toSub.payload.reply_markup.inline_keyboard[0][0].callback_data, `buy:${slug}`);
+  assert.equal((await pg.query(`SELECT active FROM tg_subs WHERE chat_id = 802`)).rows[0].active, false);
+  const again = await handleUpdate({ update_id: 9009, callback_query: { id: 'b2', data: `bc:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 64 } } }, ownerDeps({ call }));
+  assert.equal(again.done, 'broadcast_done');
+  assert.match(sent.filter((x) => x.method === 'sendMessage').at(-1).payload.text, /уже разослан/);
+  // /stop — отписка
+  const stop = await handleUpdate({ update_id: 9010, message: { message_id: 65, chat: { id: 801, type: 'private' }, text: '/stop' } }, ownerDeps());
+  assert.equal(stop.done, 'unsubscribed');
+  assert.equal(stop.was, true);
+});
+
+test('владелец: /stats и /pending, удаление черновика, афиша без подписи — к последнему черновику', async () => {
+  sent.length = 0;
+  let r = await handleUpdate({ update_id: 9011, message: { message_id: 70, chat: OWNER, text: '/stats' } }, ownerDeps());
+  assert.equal(r.done, 'owner_stats');
+  assert.match(sent.at(-1).payload.text, /Продано/);
+  r = await handleUpdate({ update_id: 9012, message: { message_id: 71, chat: OWNER, text: '/pending' } }, ownerDeps());
+  assert.match(r.done, /^owner_pending/);
+  // черновик без афиши → картинка без подписи прикрепляется к нему
+  r = await handleUpdate({ update_id: 9013, message: { message_id: 72, chat: OWNER, text: 'НОВАЯ НОЧЬ\n12.11 в 22:00\nЛофт «Фабрика», Советская 10\nВход 800₽ — приходи пораньше, будет жарко и громко' } }, ownerDeps());
+  assert.equal(r.done, 'draft_from_post');
+  const slug = r.slug;
+  r = await handleUpdate({ update_id: 9014, message: { message_id: 73, chat: OWNER, photo: [{ file_id: 'POSTER-ONLY-12345678901' }] } }, ownerDeps());
+  assert.equal(r.done, 'poster_attached');
+  assert.equal(r.slug, slug);
+  assert.match((await pg.query(`SELECT poster_url FROM events WHERE id = $1`, [slug])).rows[0].poster_url, /^\/api\/poster\?id=/);
+  r = await handleUpdate({ update_id: 9015, callback_query: { id: 'd1', data: `del:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 74, text: 'карточка' } } }, ownerDeps());
+  assert.equal(r.done, 'deleted');
+  assert.equal((await pg.query(`SELECT 1 FROM events WHERE id = $1`, [slug])).rows.length, 0);
+});
+
+test('канал без ИИ-ключа: пост с датой → черновик по правилам с карточкой владельцу; без даты — пересылка', async () => {
+  sent.length = 0;
+  const r = await handleUpdate({
+    update_id: 9020,
+    channel_post: { chat: { id: -1001 }, text: 'ХЭЛЛОУИН 2030\n31.10 · двери 22:00\nЛофт «Фабрика», Советская 10\nВход 900₽', photo: [{ file_id: 'CHANNEL-POSTER-1234567890' }] },
+  }, ownerDeps({ channelId: -1001 }));
+  assert.equal(r.done, 'draft_from_post');
+  const ev = (await pg.query(`SELECT status, poster_url FROM events WHERE id = $1`, [r.slug])).rows[0];
+  assert.equal(ev.status, 'draft');
+  assert.match(ev.poster_url, /^\/api\/poster\?id=/);
+  assert.ok(sent.some((x) => x.payload.chat_id === '1' && (x.method === 'sendPhoto' || x.method === 'sendMessage')));
+  notifications.length = 0;
+  const f = await handleUpdate({ update_id: 9021, channel_post: { chat: { id: -1001 }, text: 'Скоро анонс — следите за каналом' } }, ownerDeps({ channelId: -1001 }));
+  assert.equal(f.done, 'forwarded');
+  assert.match(notifications.at(-1).text, /вручную/);
+});
+
+test('оплата подтверждена кнопкой: время дверей из ночи и предложение подписаться на анонсы', async () => {
+  await pg.query(
+    `INSERT INTO events (id, title, city, venue, address, starts_at, age_rating, status)
+     VALUES ('ev-doors', 'DOORS NIGHT', 'orenburg', 'Лофт', 'Советская, 10', '2030-11-14T23:30:00+05:00', 18, 'onsale')`
+  );
+  await pg.query(`INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota) VALUES ('ev-doors', 1, 'Проходка', 1000, 10)`);
+  await pg.query(ORDER_SQL, [
+    1, 'ev-doors', 1, 'ord_doorsord1', 'Гость Дверей', '+79990003344', null, null,
+    ['doorstkt01'], ['Гость Дверей'], ['adult'], 'transfer', 180, 'PX-DOR1', false,
+  ]);
+  await pg.query(`UPDATE orders SET tg_chat_id = 909 WHERE id = 'ord_doorsord1'`);
+  sent.length = 0;
+  const call = async (method, payload) => { sent.push({ method, payload }); return { ok: true, result: {} }; };
+  const r = await handleUpdate({ update_id: 9022, callback_query: { id: 'pp', data: 'pay:ord_doorsord1', from: { id: 1 }, message: { chat: { id: 1 }, message_id: 80, text: 'бронь' } } }, ownerDeps({ call }));
+  assert.equal(r.done, 'paid');
+  const msg = sent.find((x) => x.method === 'sendMessage' && x.payload.chat_id === 909);
+  assert.ok(msg, 'проходки гостю');
+  assert.match(msg.payload.text, /двери 23:30/);
+  assert.equal(msg.payload.reply_markup.inline_keyboard[0][0].callback_data, 'sub:on');
 });

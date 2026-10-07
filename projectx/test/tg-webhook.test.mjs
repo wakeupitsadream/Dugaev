@@ -763,7 +763,8 @@ test('владелец: пересланный пост с афишей → че
   const kb = card.payload.reply_markup.inline_keyboard;
   assert.equal(kb[0][0].callback_data, `pub:${r.slug}`);
   assert.equal(kb[0][1].callback_data, `del:${r.slug}`);
-  assert.equal(kb[1][0].url, `https://px.test/admin#events/${r.slug}`);
+  assert.equal(kb[1][0].callback_data, `early:${r.slug}`);
+  assert.equal(kb[1][1].url, `https://px.test/admin#events/${r.slug}`);
 });
 
 test('владелец: пост без даты — подсказка, черновика нет; гостю пересланный пост не разбирается', async () => {
@@ -809,7 +810,15 @@ test('рассылка: анонс уходит подписчикам с кно
     return { ok: true, result: { message_id: 1, photo: [{ file_id: 'TGPHOTO-small' }, { file_id: 'TGPHOTO-big' }] } };
   };
   sent.length = 0;
-  const r = await handleUpdate({ update_id: 9008, callback_query: { id: 'b1', data: `bc:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 63 } } }, ownerDeps({ call }));
+  // «📣 Разослать» — сначала превью владельцу: подписчикам ничего не ушло
+  const pv = await handleUpdate({ update_id: 9107, callback_query: { id: 'b0', data: `bc:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 62 } } }, ownerDeps({ call }));
+  assert.equal(pv.done, 'bc_preview');
+  assert.ok(got.some((x) => x.method === 'sendPhoto' && x.payload.chat_id === 1 && /Новая ночь PROJECT X/.test(x.payload.caption)), 'владелец видит анонс как подписчик');
+  assert.equal(got.filter((x) => x.payload.chat_id === 801 || x.payload.chat_id === 802).length, 0, 'подписчикам — ничего');
+  const ctl = sent.filter((x) => x.method === 'sendMessage' && x.payload.chat_id === 1).at(-1).payload;
+  assert.match(ctl.text, /Так увидят подписчики \(\d+\)/);
+  assert.equal(ctl.reply_markup.inline_keyboard[0][0].callback_data, `bcgo:a-${slug}`);
+  const r = await handleUpdate({ update_id: 9008, callback_query: { id: 'b1', data: `bcgo:a-${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 63 } } }, ownerDeps({ call }));
   assert.equal(r.done, 'broadcast_done');
   assert.equal(r.sent, 1);
   assert.equal(r.failed, 1);
@@ -819,7 +828,7 @@ test('рассылка: анонс уходит подписчикам с кно
   assert.equal(toSub.payload.reply_markup.inline_keyboard[0][0].callback_data, `buy:${slug}`);
   assert.equal((await pg.query(`SELECT active FROM tg_subs WHERE chat_id = 802`)).rows[0].active, false);
   const again = await handleUpdate({ update_id: 9009, callback_query: { id: 'b2', data: `bc:${slug}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 64 } } }, ownerDeps({ call }));
-  assert.equal(again.done, 'broadcast_done');
+  assert.equal(again.done, 'bc_preview_failed');
   assert.match(sent.filter((x) => x.method === 'sendMessage').at(-1).payload.text, /уже разослан/);
   // /stop — отписка
   const stop = await handleUpdate({ update_id: 9010, message: { message_id: 65, chat: { id: 801, type: 'private' }, text: '/stop' } }, ownerDeps());

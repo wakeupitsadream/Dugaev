@@ -7,14 +7,17 @@
 // «Править в панели», «Удалить». Черновик на сайте не виден, пока не нажата
 // «Опубликовать» — разбор может ошибиться, последнее слово за человеком.
 import { parseEventForm } from './event-form.js';
-import { saveEvent, uniqueEventId, publishCheck, deleteEvent } from './event-store.js';
+import { saveEvent, uniqueEventId, publishCheck, deleteEvent, openEarly } from './event-store.js';
 import { analyzePost } from './analyze.js';
 import { parsePost } from '../../assets/post-parse.js';
 import { storeMedia, fetchTelegramFile } from './media.js';
-import { runBroadcast, subsCount, broadcastStatus, publishedNotice } from './broadcast.js';
 import {
-  rowsOf, fmtDay, fmtTimeOnly, plural, originOf, escHtml, sender, callOf, posterUrl,
-  loadEvent, nearestEvent, eventWaves,
+  runBroadcast, subsCount, broadcastStatus, publishedNotice, sendPreview, scheduleBroadcast, cancelScheduled,
+  parseWhen, kindOf, kindCode, bcId,
+} from './broadcast.js';
+import {
+  rowsOf, fmtDay, fmtTimeOnly, fmtWhen, plural, originOf, escHtml, sender, callOf, posterUrl,
+  loadEvent, nearestEvent, earlyEvent, eventWaves, getSession, setSession, clearSession,
 } from './bot-kit.js';
 import { fmtRub } from '../../assets/waves.js';
 import { EXPIRE_SQL, revenueSql } from './queries.js';
@@ -23,6 +26,7 @@ export const OWNER_COMMANDS = [
   { command: 'stats', description: 'Сводка по ближайшей ночи' },
   { command: 'pending', description: 'Брони, которые ждут подтверждения' },
   { command: 'new', description: 'Новое мероприятие из поста' },
+  { command: 'pay', description: 'Подтвердить оплату по коду: /pay PX-7F3K' },
   { command: 'buy', description: 'Забронировать проходки' },
   { command: 'tickets', description: 'Мои проходки' },
 ];
@@ -53,6 +57,13 @@ export async function ownerMessage(msg, deps) {
   }
   if (raw.startsWith('/')) return null;
 
+  // бот задал вопрос и ждёт ответ: параметры раннего доступа или время рассылки
+  if (raw && !msg.photo && !msg.document && raw.length < 60) {
+    const st = await getSession(deps.sql, chatId);
+    if (st && st.state === 'owner_early') return earlyFromText(deps, chatId, st.data.eventId, raw);
+    if (st && st.state === 'owner_bctime') return scheduleFromText(deps, chatId, st.data, raw);
+  }
+
   const text = String(msg.text || msg.caption || '').trim();
   const sizes = Array.isArray(msg.photo) ? msg.photo : [];
   const photoId = sizes.length ? sizes[sizes.length - 1].file_id : null;
@@ -78,7 +89,7 @@ export async function draftFromPost(deps, chatId, text, fileId) {
   let known = [];
   try {
     known = rowsOf(await sql.query(
-      `SELECT id, title, starts_at FROM events WHERE status IN ('onsale','draft') ORDER BY starts_at LIMIT 20`
+      `SELECT id, title, starts_at FROM events WHERE status IN ('onsale','early','draft') ORDER BY starts_at LIMIT 20`
     )).map((r) => ({ id: r.id, title: r.title, startsAt: r.starts_at }));
   } catch { /* не критично */ }
   const a = await (deps.analyze || analyzePost)(text, {
@@ -148,7 +159,7 @@ export async function sendDraftCard(deps, chatId, id, { notes = [], engine = 'ru
       pub.length
         ? [{ text: '✅ Опубликовать', callback_data: `pub:${id}` }, { text: '🗑 Удалить', callback_data: `del:${id}` }]
         : [{ text: '🗑 Удалить', callback_data: `del:${id}` }],
-      [{ text: '✏️ Править в панели', url: panelUrl(deps, `events/${id}`) }],
+      [{ text: '🔑 Ранний доступ', callback_data: `early:${id}` }, { text: '✏️ Править в панели', url: panelUrl(deps, `events/${id}`) }],
     ],
   };
   const caption = lines.join('\n');
@@ -205,16 +216,19 @@ export async function ownerStats(deps, chatId) {
        (SELECT count(*) FROM waitlist l WHERE l.event_id = $1 AND l.notified_at IS NULL)::int AS waiting`,
     [ev.id]
   ))[0] || {};
-  const waves = (await eventWaves(sql, ev.id)).filter((w) => w.public);
+  const all = await eventWaves(sql, ev.id);
+  const waves = all.filter((w) => w.public);
+  const earlyW = all.filter((w) => w.early);
   const quota = waves.reduce((x, w) => x + w.quota, 0);
   const subs = await subsCount(sql);
   const text =
-    `📊 <b>${escHtml(ev.title)}</b>\n${escHtml(fmtDay(ev.starts_at))} · ${ev.status === 'onsale' ? 'в продаже' : ev.status === 'past' ? 'прошла' : escHtml(ev.status)}\n\n` +
+    `📊 <b>${escHtml(ev.title)}</b>\n${escHtml(fmtDay(ev.starts_at))} · ${ev.status === 'onsale' ? 'в продаже' : ev.status === 'early' ? 'ранний доступ для подписчиков' : ev.status === 'past' ? 'прошла' : escHtml(ev.status)}\n\n` +
     `🎟 Продано: <b>${s.sold || 0}</b>${quota ? ` из ${quota}` : ''}\n` +
     `💰 Выручка: <b>${fmtRub(s.revenue || 0)} ₽</b>\n` +
     `🕒 Ждут оплаты: ${s.pend || 0} ${plural(Number(s.pend || 0), 'бронь', 'брони', 'броней')}${s.pend ? ` · ${fmtRub(s.pend_rub)} ₽` : ''}${s.claimed ? ` · ${s.claimed} нажали «Я перевёл»` : ''}\n` +
     `🚪 Вошло: ${s.inside || 0}\n` +
     (s.waiting ? `⏳ В листе ожидания: ${s.waiting}\n` : '') +
+    (earlyW.length ? `\n${earlyW.map((w) => `🔑 ${escHtml(w.name)}: ${w.sold}/${w.quota} · ${fmtRub(w.priceRub)} ₽`).join('\n')}` : '') +
     (waves.length ? `\n${waves.map((w) => `${escHtml(w.name)}: ${w.sold}/${w.quota} · ${fmtRub(w.priceRub)} ₽`).join('\n')}\n` : '') +
     `\n🔔 Подписчиков анонсов: ${subs}`;
   await sender(deps, chatId)(text, {
@@ -280,7 +294,8 @@ export async function ownerCallback(action, arg, cb, deps, answer) {
       await deps.tg('answerCallbackQuery', { callback_query_id: cb.id, text: check.message, show_alert: true });
       return { done: 'publish_blocked', slug: arg };
     }
-    const rows = rowsOf(await sql.query(`UPDATE events SET status = 'onsale' WHERE id = $1 AND status = 'draft' RETURNING id`, [arg]));
+    // из черновика или из раннего доступа: ранние волны после этого не продаются
+    const rows = rowsOf(await sql.query(`UPDATE events SET status = 'onsale' WHERE id = $1 AND status IN ('draft', 'early') RETURNING id`, [arg]));
     if (!rows.length) {
       await answer('Уже обработано');
       return { done: 'noop', slug: arg };
@@ -302,20 +317,74 @@ export async function ownerCallback(action, arg, cb, deps, answer) {
     return { done: r.ok ? 'deleted' : 'delete_blocked', slug: arg };
   }
 
+  // «📣 Разослать» — сначала превью владельцу: ровно то, что получат
+  // подписчики, и пульт «сейчас / по времени». Старая кнопка «Продолжить
+  // рассылку» (bc:) на начатой рассылке — продолжает её
   if (action === 'bc') {
-    await answer('Рассылаю…');
-    const r = await runBroadcast(deps, arg, { sleep: deps.sleep });
-    const status = !r.ok
-      ? `Не разослано: ${r.message}`
-      : r.message
-        ? r.message
-        : r.done
-          ? `📣 Анонс разослан: доставлено ${r.sent}${r.failed ? `, не дошло ${r.failed} (бот заблокирован или аккаунт удалён — больше не пишем)` : ''}.`
-          : `📣 Разослано ${r.sent} из ${r.total}…`;
-    await sender(deps, chatId)(status, r.ok && !r.done && !r.busy
-      ? { inline_keyboard: [[{ text: '▶️ Продолжить рассылку', callback_data: `bc:${arg}` }]] }
-      : undefined);
-    return { ...r, finished: Boolean(r.done), done: r.ok ? (r.done ? 'broadcast_done' : 'broadcast_part') : 'broadcast_failed' };
+    const st = await broadcastStatus(sql, arg, 'ann');
+    if (st.started && !st.done) return sendNow(deps, chatId, 'ann', arg, answer);
+    await answer();
+    const p = await sendPreview(deps, chatId, arg, 'ann');
+    if (!p.ok) await sender(deps, chatId)(p.message);
+    return { done: p.ok ? 'bc_preview' : 'bc_preview_failed', slug: arg };
+  }
+  if (['bcgo', 'bct', 'bcw', 'bcx'].includes(action)) {
+    const m = /^([ae])([0-9a-z]{0,8})-([a-z0-9][a-z0-9-]{0,39})$/.exec(arg);
+    if (!m) {
+      await answer('Кнопка устарела — /stats');
+      return { done: 'bc_bad_arg' };
+    }
+    const kind = kindOf(m[1]);
+    const id = m[3];
+    if (action === 'bcgo') {
+      await clearButtons(cb, deps);
+      return sendNow(deps, chatId, kind, id, answer);
+    }
+    if (action === 'bct') {
+      const at = parseInt(m[2] || '0', 36) * 60_000;
+      if (!at || at < deps.nowMs + 60_000) {
+        await answer('Это время уже прошло — выбери другое');
+        return { done: 'bc_time_past' };
+      }
+      return confirmSchedule(deps, chatId, kind, id, at, answer, cb);
+    }
+    if (action === 'bcw') {
+      await setSession(sql, chatId, 'owner_bctime', { kind, eventId: id });
+      await answer();
+      await sender(deps, chatId)('Во сколько отправить? Напиши время по Оренбургу: «20:30», «завтра 18:00» или «18.10 19:00».');
+      return { done: 'bc_time_ask' };
+    }
+    const off = await cancelScheduled(sql, id, kind);
+    await answer(off ? 'Отправка по времени отменена' : 'Нечего отменять — рассылка уже идёт или не запланирована');
+    if (off) {
+      await clearButtons(cb, deps);
+      await sender(deps, chatId)(`Не отправляю по времени. Разослать — снова «📣 Разослать» или кнопки ниже.`, {
+        inline_keyboard: [[{ text: '👁 Превью и отправка', callback_data: `${kind === 'early' ? 'eb' : 'bc'}:${id}` }]],
+      });
+    }
+    return { done: off ? 'bc_unscheduled' : 'bc_unschedule_noop' };
+  }
+  if (action === 'eb') {
+    await answer();
+    const p = await sendPreview(deps, chatId, arg, 'early');
+    if (!p.ok) await sender(deps, chatId)(p.message);
+    return { done: p.ok ? 'early_preview' : 'early_preview_failed', slug: arg };
+  }
+
+  // ---- ранний доступ: сколько и почём → закрытая волна, ночь в 'early' ----
+  if (action === 'early') {
+    await answer();
+    return askEarly(deps, chatId, arg);
+  }
+  if (action === 'eset') {
+    const m = /^(\d{1,4})x(\d{1,5})-([a-z0-9][a-z0-9-]{0,39})$/.exec(arg);
+    if (!m) {
+      await answer('Кнопка устарела');
+      return { done: 'early_bad_arg' };
+    }
+    await answer();
+    await clearButtons(cb, deps);
+    return applyEarly(deps, chatId, m[3], Number(m[1]), Number(m[2]));
   }
 
   if (action === 'own') {
@@ -326,4 +395,126 @@ export async function ownerCallback(action, arg, cb, deps, answer) {
   return null;
 }
 
-export { broadcastStatus };
+// ---------- рассылка: сейчас или по времени ----------
+
+async function clearButtons(cb, deps) {
+  if (!cb?.message?.chat?.id || !cb.message.message_id) return;
+  try {
+    await deps.tg('editMessageReplyMarkup', { chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
+  } catch { /* не критично */ }
+}
+
+// Одна порция прямо сейчас; не успели всех — продолжат фоновые задачи
+// (scheduled_at = сейчас) или кнопка «Продолжить»
+async function sendNow(deps, chatId, kind, id, answer) {
+  await answer('Рассылаю…');
+  const r = await runBroadcast(deps, id, { kind, sleep: deps.sleep });
+  if (r.ok && !r.done && !r.busy) {
+    await deps.sql.query(`UPDATE broadcasts SET scheduled_at = COALESCE(scheduled_at, now()) WHERE id = $1`, [bcId(kind, id)]);
+  }
+  if (r.ok && r.done) await deps.sql.query(`UPDATE broadcasts SET reported = true WHERE id = $1`, [bcId(kind, id)]);
+  const what = kind === 'early' ? 'Ранний доступ' : 'Анонс';
+  const status = !r.ok
+    ? `Не разослано: ${r.message}`
+    : r.message
+      ? r.message
+      : r.done
+        ? `📣 ${what} разослан: доставлено ${r.sent}${r.failed ? `, не дошло ${r.failed} (бот заблокирован или аккаунт удалён — больше не пишем)` : ''}.`
+        : `📣 Разослано ${r.sent} из ${r.total}… Остальным уйдёт в ближайшие минуты.`;
+  await sender(deps, chatId)(status, r.ok && !r.done && !r.busy
+    ? { inline_keyboard: [[{ text: '▶️ Продолжить сейчас', callback_data: `bcgo:${kindCode(kind)}-${id}` }]] }
+    : undefined);
+  return { ...r, finished: Boolean(r.done), done: r.ok ? (r.done ? 'broadcast_done' : 'broadcast_part') : 'broadcast_failed' };
+}
+
+async function confirmSchedule(deps, chatId, kind, id, atMs, answer, cb) {
+  const when = await scheduleBroadcast(deps.sql, id, kind, atMs);
+  if (!when) {
+    await answer?.('Рассылка уже идёт или разослана');
+    return { done: 'bc_schedule_noop' };
+  }
+  await answer?.(`Отправлю ${fmtWhen(when)}`);
+  await clearButtons(cb, deps);
+  const subs = await subsCount(deps.sql);
+  const what = kind === 'early' ? 'Ранний доступ' : 'Анонс';
+  await sender(deps, chatId)(
+    `🕒 ${what} уйдёт ${fmtWhen(when)} — ${subs} ${plural(subs, 'подписчику', 'подписчикам', 'подписчикам')}. Как разошлю — напишу сюда.`,
+    { inline_keyboard: [[
+      { text: '✅ Отправить сейчас', callback_data: `bcgo:${kindCode(kind)}-${id}` },
+      { text: '✖ Не отправлять', callback_data: `bcx:${kindCode(kind)}-${id}` },
+    ]] }
+  );
+  return { done: 'bc_scheduled', at: when };
+}
+
+async function scheduleFromText(deps, chatId, data, text) {
+  const at = parseWhen(text, deps.nowMs);
+  if (!at) {
+    await sender(deps, chatId)('Не понял время. Напиши, например: «20:30», «завтра 18:00» или «18.10 19:00» — не дальше двух недель. Передумал — /cancel');
+    return { done: 'bc_time_bad' };
+  }
+  await clearSession(deps.sql, chatId);
+  return confirmSchedule(deps, chatId, data.kind === 'early' ? 'early' : 'ann', data.eventId, at, null, null);
+}
+
+// ---------- ранний доступ ----------
+// Ночь ещё не на сайте: подписчики бота бронируют раньше всех по своей цене
+// (закрытая волна early). Открытая продажа — «Опубликовать», как обычно.
+export const EARLY_PRESETS = [[50, 690], [50, 590], [30, 590]];
+
+async function askEarly(deps, chatId, eventId) {
+  const sql = deps.sql;
+  const ev = await loadEvent(sql, eventId);
+  const send = sender(deps, chatId);
+  if (!ev) {
+    await send('Мероприятие не найдено');
+    return { done: 'early_missing' };
+  }
+  if (!['draft', 'early'].includes(ev.status)) {
+    await send('Ранний доступ открывают до публикации, а эта ночь уже в продаже.');
+    return { done: 'early_too_late', slug: eventId };
+  }
+  const subs = await subsCount(sql);
+  const pubWaves = (await eventWaves(sql, eventId)).filter((w) => w.public);
+  const from = pubWaves.length ? Math.min(...pubWaves.map((w) => w.priceRub)) : null;
+  await setSession(sql, chatId, 'owner_early', { eventId });
+  await send(
+    `🔑 <b>Ранний доступ</b> — «${escHtml(ev.title)}»\n\n` +
+      `Ночи ещё нет на сайте: подписчики бота (${subs}) бронируют раньше всех по своей цене. ` +
+      'Открытую продажу запустишь как обычно — «✅ Опубликовать».\n\n' +
+      'Сколько проходок и почём? Жми вариант или напиши, например: «40 по 650».' +
+      (from !== null ? `\nОткрытая продажа — от ${fmtRub(from)} ₽: ранняя цена должна быть ниже.` : ''),
+    { inline_keyboard: [EARLY_PRESETS.map(([n, p]) => ({ text: `${n} × ${fmtRub(p)} ₽`, callback_data: `eset:${n}x${p}-${eventId}` }))] },
+    true
+  );
+  return { done: 'early_ask', slug: eventId };
+}
+
+async function earlyFromText(deps, chatId, eventId, text) {
+  const m = /(\d{1,4})\D+?(\d{2,5})/.exec(String(text).replace(/\s+/g, ' '));
+  if (!m) {
+    await sender(deps, chatId)('Не понял. Напиши два числа: сколько проходок и цену — например, «50 по 690». Передумал — /cancel');
+    return { done: 'early_bad_input' };
+  }
+  return applyEarly(deps, chatId, eventId, Number(m[1]), Number(m[2]));
+}
+
+export async function applyEarly(deps, chatId, eventId, qty, price) {
+  const sql = deps.sql;
+  const send = sender(deps, chatId);
+  const r = await openEarly(sql, eventId, qty, price, deps.nowMs);
+  if (!r.ok) {
+    if (!/от 1 до 1000/.test(r.message)) await clearSession(sql, chatId);
+    await send(/от 1 до 1000/.test(r.message) ? `${r.message}. Напиши ещё раз, например «50 по 690».` : r.message);
+    return { done: 'early_failed', slug: eventId, message: r.message };
+  }
+  await clearSession(sql, chatId);
+  await send(
+    `🔑 Ранний доступ: ${qty} × ${fmtRub(price)} ₽. Ночи на сайте нет — бронируют только подписчики, здесь, в боте. ` +
+      'Открыть продажу для всех — «✅ Опубликовать» на карточке ночи или в панели.\n\nНиже — что получат подписчики:'
+  );
+  await sendPreview(deps, chatId, eventId, 'early');
+  return { done: 'early_open', slug: eventId, qty, price };
+}
+
+export { broadcastStatus, earlyEvent };

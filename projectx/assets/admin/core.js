@@ -123,6 +123,7 @@ const ymd = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: TZ });
 export function phaseOf(e, now = Date.now()) {
   if (!e) return 'none';
   if (e.status === 'draft') return 'draft';
+  if (e.status === 'early') return now >= endOf(e) ? 'stale' : 'early';
   if (e.status === 'cancelled') return 'cancelled';
   if (e.status === 'past') return 'past';
   const s = Date.parse(e.startsAt);
@@ -135,6 +136,7 @@ export function phaseOf(e, now = Date.now()) {
 }
 const PHASE = {
   draft: ['Черновик', 'pill-draft'],
+  early: ['Ранний доступ', 'pill-early'],
   onsale: ['В продаже', 'pill-onsale'],
   soldout: ['Распродано', 'pill-soldout'],
   live: ['Идёт сейчас', 'pill-live'],
@@ -221,6 +223,7 @@ const P = {
   phone: '<path d="M6.5 3.5h3l1.5 4.5-2.2 1.4a11 11 0 0 0 5.8 5.8l1.4-2.2 4.5 1.5v3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.5 5.7a2 2 0 0 1 2-2.2z"/>',
   door: '<path d="M5 20.5h14M7 20.5V4.5A1.5 1.5 0 0 1 8.5 3h7A1.5 1.5 0 0 1 17 4.5v16"/><path d="M13.5 12h.5"/>',
   bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
 };
 export function icon(name, cls = '') {
   return `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;

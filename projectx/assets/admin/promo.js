@@ -129,10 +129,13 @@ async function refreshBroadcast() {
   const done = r.ok && r.j.done;
   btn.disabled = !onsale || done || !state.subs || (r.ok && r.j.bot === false);
   btn.innerHTML = `${icon(done ? 'check' : 'send')}${done ? 'Анонс разослан' : 'Разослать анонс'}`;
+  const at = r.ok && !done && !r.j.started && r.j.scheduledAt;
   $('bc-note').textContent = r.ok && r.j.bot === false
     ? 'Бот не подключён: в Vercel нет TELEGRAM_BOT_TOKEN.'
-    : !onsale ? 'Анонс можно разослать для ночи в продаже.'
-      : !state.subs ? 'Подписчиков пока нет — их собирает кнопка «Узнать первым» на сайте и ссылка ниже.' : '';
+    : e.status === 'early' ? 'Ночь в раннем доступе: рассылка подписчикам — из бота, превью пришло тебе в Telegram.'
+      : !onsale ? 'Анонс можно разослать для ночи в продаже.'
+        : !state.subs ? 'Подписчиков пока нет — их собирает кнопка «Узнать первым» на сайте и ссылка ниже.'
+          : at ? `Анонс запланирован в боте на ${fmtWhen(at).toLowerCase()} — можно разослать и сейчас.` : '';
 }
 
 function renderBc(st) {

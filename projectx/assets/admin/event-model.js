@@ -43,6 +43,8 @@ export function toForm(ev) {
       quota: Number(w.quota),
       sold: Number(w.sold) || 0,
       public: w.public !== false,
+      // ранний доступ: только подписчикам бота, на сайте её нет
+      early: w.early === true,
     })),
   };
 }
@@ -51,7 +53,8 @@ export function toForm(ev) {
 // дата и афиша — новые (на старой афише старая дата), продаж нет.
 export function copyForm(ev) {
   const f = toForm(ev);
-  return { ...f, date: '', posterUrl: '', waves: f.waves.map((w, i) => ({ ...w, waveNo: i + 1, sold: 0 })) };
+  // ранний доступ у каждой ночи свой — в копию не переносим
+  return { ...f, date: '', posterUrl: '', waves: f.waves.filter((w) => !w.early).map((w, i) => ({ ...w, waveNo: i + 1, sold: 0 })) };
 }
 
 // Разбор поста → поверх текущей формы: заполняем то, что нашлось, остальное
@@ -109,7 +112,8 @@ export function toBody(f, { id = null, status }) {
       name: String(w.name).trim(),
       priceRub: Number(w.priceRub),
       quota: Number(w.quota),
-      public: w.public !== false,
+      public: w.early ? false : w.public !== false,
+      early: Boolean(w.early),
     })),
   };
 }

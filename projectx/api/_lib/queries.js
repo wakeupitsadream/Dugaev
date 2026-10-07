@@ -22,7 +22,10 @@ WITH w AS (
     AND ($15::bool OR public)
     AND EXISTS (
       SELECT 1 FROM events e
-      WHERE e.id = $2 AND e.status = 'onsale'
+      WHERE e.id = $2 AND e.status IN ('onsale', 'early')
+        -- ранний доступ: пока ночь в 'early', продаются только ранние волны,
+        -- после публикации — только обычные
+        AND price_waves.early = (e.status = 'early')
         AND COALESCE(e.ends_at, e.starts_at + interval '8 hours') > now()
     )
   RETURNING id, price_rub
@@ -315,12 +318,13 @@ RETURNING id`;
 // Параметры: $1 event_id, $2 wave_no, $3 name, $4 price_rub, $5 quota,
 // $6 public (bool: false — скрытая волна, гостевой список; на сайте её нет)
 export const WAVE_UPSERT_SQL = `
-INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota, public)
-VALUES ($1,$2,$3,$4,$5,COALESCE($6::bool,true))
+INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota, public, early)
+VALUES ($1,$2,$3,$4,$5,COALESCE($6::bool,true),COALESCE($7::bool,false))
 ON CONFLICT (event_id, wave_no) DO UPDATE SET
   name=EXCLUDED.name, price_rub=EXCLUDED.price_rub,
   quota=GREATEST(EXCLUDED.quota, price_waves.sold),
-  public=COALESCE($6::bool, price_waves.public)
+  public=COALESCE($6::bool, price_waves.public),
+  early=COALESCE($7::bool, price_waves.early)
 RETURNING wave_no, quota, sold`;
 
 // Снос волн, которых больше нет в форме. Проданные не трогаем: на них
@@ -359,7 +363,7 @@ SELECT e.id, e.title, e.city, e.venue, e.address, e.starts_at, e.ends_at,
        ${revenueSql('e.id')} AS revenue,
        COALESCE(json_agg(json_build_object(
          'waveNo', w.wave_no, 'name', w.name, 'priceRub', w.price_rub,
-         'quota', w.quota, 'sold', w.sold, 'public', w.public
+         'quota', w.quota, 'sold', w.sold, 'public', w.public, 'early', w.early
        ) ORDER BY w.wave_no) FILTER (WHERE w.id IS NOT NULL), '[]'::json) AS waves
 FROM events e LEFT JOIN price_waves w ON w.event_id = e.id
 GROUP BY e.id
@@ -425,3 +429,17 @@ WHERE event_id = $1 AND notified_at IS NULL AND chat_id IN (
   ORDER BY created_at LIMIT $2
 )
 RETURNING chat_id`;
+
+// Ранний доступ: первая ранняя волна с местами — пока ночь в раннем доступе.
+// Опубликовали ночь — ранние волны не продаются, сколько бы мест в них ни было
+export const EARLY_WAVE_SQL = `
+SELECT w.wave_no, w.name, w.price_rub, w.quota, w.sold, w.quota - w.sold AS left
+FROM price_waves w JOIN events e ON e.id = w.event_id
+WHERE w.event_id = $1 AND w.early AND w.sold < w.quota AND e.status = 'early'
+ORDER BY w.wave_no LIMIT 1`;
+
+// Рассылки по времени, которым пора: анонс или ранний доступ
+export const DUE_BROADCASTS_SQL = `
+SELECT id, event_id, kind FROM broadcasts
+WHERE NOT done AND scheduled_at IS NOT NULL AND scheduled_at <= now()
+ORDER BY scheduled_at LIMIT 3`;

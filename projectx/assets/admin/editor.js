@@ -462,7 +462,9 @@ function renderWaves() {
             <input class="in" data-wi="${i}" data-wk="priceRub" type="number" inputmode="numeric" min="0" max="50000" step="50" value="${esc(String(w.priceRub))}" /></label>
           <label class="f wr-quota" data-f="wave-${w.waveNo}-quota"><span class="f-l">Проходок</span>
             <input class="in" data-wi="${i}" data-wk="quota" type="number" inputmode="numeric" min="1" max="5000" value="${esc(String(w.quota))}" /></label>
-          <label class="sw wr-pub"><input type="checkbox" data-wi="${i}" data-wk="public" ${w.public !== false ? 'checked' : ''} /><span>на сайте</span></label>
+          ${w.early
+            ? '<span class="wr-pub wr-early" title="Продаётся только подписчикам бота, пока ночь в раннем доступе">ранний доступ</span>'
+            : `<label class="sw wr-pub"><input type="checkbox" data-wi="${i}" data-wk="public" ${w.public !== false ? 'checked' : ''} /><span>на сайте</span></label>`}
           <span class="wr-x"><button type="button" class="b b-quiet b-icon" data-wdel="${i}" ${w.sold > 0 ? 'disabled title="По волне есть продажи — удалить нельзя"' : 'title="Удалить волну"'} aria-label="Удалить волну">${icon('trash')}</button></span>
           ${w.sold > 0 ? `<span class="wr-sold">Продано ${w.sold} — квоту можно поднять, удалить волну нельзя</span>` : ''}
         </div>`)
@@ -532,7 +534,8 @@ function renderStatus() {
   const sold = ed.f.waves.reduce((s, w) => s + (w.sold || 0), 0);
   const canDelete = sold === 0 && !Number(ev.pending || 0) && !Number(ev.revenue || 0);
   const text = {
-    draft: 'Черновик видишь только ты. Опубликуй, когда всё готово, — ночь появится на сайте и в боте.',
+    draft: 'Черновик видишь только ты. Опубликуй, когда всё готово, — ночь появится на сайте и в боте. Или сначала открой ранний доступ для подписчиков бота.',
+    early: 'Ранний доступ: ночи нет на сайте, подписчики бота бронируют по закрытой цене. «Опубликовать» откроет продажу для всех — ранняя волна закроется.',
     onsale: 'Ночь на сайте и в боте, проходки продаются.',
     soldout: 'Все проходки на сайте проданы. Добавь волну, если места ещё есть.',
     live: 'Ночь идёт прямо сейчас: продажи открыты до финиша.',
@@ -542,6 +545,8 @@ function renderStatus() {
   }[ph] || '';
   const btns = [];
   if (['onsale', 'soldout', 'live'].includes(ph)) btns.push(`<button type="button" class="b b-ghost b-sm" data-st="unpublish">${icon('eye')}Снять с продажи</button>`);
+  if (ph === 'draft' && ed.id) btns.push(`<button type="button" class="b b-ghost b-sm" data-st="early">${icon('key')}Ранний доступ</button>`);
+  if (ph === 'early') btns.push(`<button type="button" class="b b-ghost b-sm" data-st="early">${icon('edit')}Цена и количество</button>`, `<button type="button" class="b b-ghost b-sm" data-st="unpublish">${icon('eye')}Закрыть ранний доступ</button>`);
   if (ph === 'stale' || ph === 'live') btns.push(`<button type="button" class="b b-ghost b-sm" data-st="past">${icon('check')}Перевести в прошедшие</button>`);
   if (canDelete) btns.push(`<button type="button" class="b b-danger b-sm" data-st="delete">${icon('trash')}Удалить ночь</button>`);
   $('ed-status').innerHTML = `
@@ -550,7 +555,9 @@ function renderStatus() {
 }
 
 // какой статус уйдёт при «Сохранить»
-const keepStatus = () => (['onsale', 'soldout'].includes(ed.status) ? 'onsale' : ed.status === 'past' ? 'past' : 'draft');
+const keepStatus = () => (['onsale', 'soldout'].includes(ed.status) ? 'onsale' : ed.status === 'past' ? 'past' : ed.status === 'early' ? 'early' : 'draft');
+// ещё не в открытой продаже: внизу «Сохранить» и «Опубликовать»
+const beforeSale = () => ['draft', 'early'].includes(keepStatus());
 
 // ---------- превью ----------
 function previewHtml() {
@@ -617,7 +624,7 @@ function renderBar() {
       : ed.mode === 'edit' ? `Сохранено · ${(ev ? phaseLabel(ev) : 'черновик').toLowerCase()}` : '';
   const save = $('ed-save');
   const pub = $('ed-publish');
-  if (st === 'draft') {
+  if (st === 'draft' || st === 'early') {
     save.hidden = false;
     save.innerHTML = ed.mode === 'edit' ? 'Сохранить' : '<span class="hide-s">Сохранить черновик</span><span class="show-s">Черновик</span>';
     pub.textContent = 'Опубликовать';
@@ -735,6 +742,7 @@ async function publish(btn) {
   const ok = await confirmDlg({
     title: 'Опубликовать ночь?',
     html: `<p>«${esc(String(f.title).toUpperCase())}» появится на сайте и в боте, проходки начнут продаваться.</p>
+      ${ed.status === 'early' ? '<p class="small muted">Ранний доступ закроется: закрытая волна больше не продаётся, уже купленные проходки в силе.</p>' : ''}
       <div class="pv-price"><b>${esc(fmtWhen(r.startsAt))}</b><small>${esc(place || 'место не указано')}${first ? ` · от ${esc(rub(first.priceRub))}` : ''}</small></div>
       ${f.posterUrl ? '' : '<p class="small warn-t">Без афиши: превью ссылки покажет фирменную картинку. Можно добавить позже.</p>'}`,
     ok: 'Опубликовать',
@@ -743,6 +751,16 @@ async function publish(btn) {
 }
 
 async function statusAction(act, btn) {
+  if (act === 'early') return earlyDialog(btn);
+  if (act === 'unpublish' && ed.status === 'early') {
+    const ok = await confirmDlg({
+      title: 'Закрыть ранний доступ?',
+      text: 'Ночь вернётся в черновики: подписчики больше не смогут бронировать. Брони, которые уже есть, останутся.',
+      ok: 'Закрыть', danger: true,
+    });
+    if (ok) await save('draft', btn);
+    return;
+  }
   if (act === 'unpublish') {
     const ok = await confirmDlg({
       title: 'Снять с продажи?',
@@ -770,6 +788,51 @@ async function statusAction(act, btn) {
     toast('Ночь удалена');
     location.hash = '#events';
   }
+}
+
+// Ранний доступ из панели: сколько и почём → закрытая волна, ночь в
+// 'early'; превью рассылки подписчикам приходит владельцу в Telegram
+async function earlyDialog(btn) {
+  if (isDirty()) {
+    toast('Сначала сохрани изменения', 'info');
+    return;
+  }
+  const had = ed.f.waves.find((w) => w.early);
+  const pub = ed.f.waves.filter((w) => !w.early && w.public !== false).map((w) => Number(w.priceRub));
+  const from = pub.length ? Math.min(...pub) : null;
+  const v = await dialog({
+    title: had ? 'Ранний доступ: цена и количество' : 'Открыть ранний доступ?',
+    body: `<p>Ночи не будет на сайте: подписчики бота (сейчас ${state.subs}) бронируют раньше всех по своей цене. Открытая продажа — как обычно, «Опубликовать».</p>
+      <div class="dlg-2">
+        <label class="f"><span class="f-l">Проходок</span><input class="in" name="qty" type="number" inputmode="numeric" min="1" max="1000" value="${had ? had.quota : 50}" /></label>
+        <label class="f"><span class="f-l">Цена, ₽</span><input class="in" name="price" type="number" inputmode="numeric" min="0" max="50000" step="10" value="${had ? had.priceRub : 690}" /></label>
+      </div>
+      ${from !== null ? `<p class="small muted">В открытой продаже — от ${esc(rub(from))}: ранняя цена должна быть ниже.</p>` : ''}
+      <p class="small muted">Превью рассылки придёт тебе в Telegram — отправишь подписчикам сразу или по времени.</p>`,
+    actions: [
+      { label: 'Отмена', value: null, kind: 'ghost' },
+      {
+        label: had ? 'Сохранить' : 'Открыть', kind: 'primary',
+        validate: (f) => f.qty.reportValidity() && f.price.reportValidity(),
+        collect: (f) => ({ qty: Number(f.qty.value), price: Number(f.price.value) }),
+      },
+    ],
+  });
+  if (!v) return;
+  const r = await busy(btn, () => api('/api/event-upsert', { method: 'POST', body: { action: 'early', id: ed.id, qty: v.qty, price: v.price } }));
+  if (!r.ok) {
+    toast(r.message || 'Не получилось', 'err', 6000);
+    return;
+  }
+  const fresh = await reloadEvents();
+  const ev = fresh.ok ? nightById(ed.id) : null;
+  if (ev) {
+    ed.status = ev.status;
+    ed.f = toForm(ev);
+    ed.base = snap();
+  }
+  renderAll();
+  toast(r.j.previewed ? 'Ранний доступ открыт — превью рассылки у тебя в Telegram' : 'Ранний доступ открыт. Разослать подписчикам — из бота', 'ok', 7000);
 }
 
 async function publishedDialog(ev, notified = false) {
@@ -927,7 +990,7 @@ function bindOnce() {
   });
 
   $('ed-save').onclick = () => save(keepStatus() === 'draft' ? 'draft' : keepStatus(), $('ed-save'));
-  $('ed-publish').onclick = () => (keepStatus() === 'draft' ? publish($('ed-publish')) : save(keepStatus(), $('ed-publish')));
+  $('ed-publish').onclick = () => (beforeSale() ? publish($('ed-publish')) : save(keepStatus(), $('ed-publish')));
   $('ed-pv-btn').onclick = openPreview;
   document.addEventListener('keydown', (e) => {
     if (!visible('editor') || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 's') return;

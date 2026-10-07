@@ -60,9 +60,35 @@ export async function nearestEvent(sql, nowMs) {
 }
 export async function eventWaves(sql, eventId) {
   return rowsOf(await sql.query(
-    `SELECT wave_no, name, price_rub, quota, sold, public FROM price_waves WHERE event_id = $1 ORDER BY wave_no`, [eventId]
+    `SELECT wave_no, name, price_rub, quota, sold, public, early FROM price_waves WHERE event_id = $1 ORDER BY wave_no`, [eventId]
   )).map((w) => ({
     waveNo: Number(w.wave_no), name: w.name, priceRub: Number(w.price_rub),
-    quota: Number(w.quota), sold: Number(w.sold), public: w.public !== false,
+    quota: Number(w.quota), sold: Number(w.sold), public: w.public !== false, early: w.early === true,
   }));
 }
+// Ночь в раннем доступе (ещё не на сайте) — ближайшая
+export async function earlyEvent(sql, nowMs) {
+  return rowsOf(await sql.query(
+    `SELECT id, title, venue, address, secret, starts_at, ends_at, status, poster_url FROM events
+     WHERE status = 'early' AND COALESCE(ends_at, starts_at + interval '8 hours') > $1 ORDER BY starts_at LIMIT 1`,
+    [new Date(nowMs).toISOString()]
+  ))[0] || null;
+}
+
+// Шаги мастеров между сообщениями (бронь гостя, вопросы бота владельцу) —
+// одна строка tg_sessions на чат. Брошенный мастер живёт полсуток: имена,
+// набранные после паузы, не должна встречать афиша
+export const SESSION_TTL_MS = 12 * 3600_000;
+export async function getSession(sql, chatId) {
+  const s = rowsOf(await sql.query(`SELECT state, data, updated_at FROM tg_sessions WHERE chat_id = $1`, [chatId]))[0];
+  if (!s || Date.now() - new Date(s.updated_at).getTime() > SESSION_TTL_MS) return null;
+  return { state: s.state, data: typeof s.data === 'string' ? JSON.parse(s.data) : (s.data || {}) };
+}
+export async function setSession(sql, chatId, state, data) {
+  await sql.query(
+    `INSERT INTO tg_sessions (chat_id, state, data, updated_at) VALUES ($1, $2, $3::jsonb, now())
+     ON CONFLICT (chat_id) DO UPDATE SET state = EXCLUDED.state, data = EXCLUDED.data, updated_at = now()`,
+    [chatId, state, JSON.stringify(data)]
+  );
+}
+export const clearSession = (sql, chatId) => sql.query(`DELETE FROM tg_sessions WHERE chat_id = $1`, [chatId]);

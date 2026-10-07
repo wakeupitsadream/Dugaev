@@ -10,8 +10,8 @@ export async function loadExisting(sql, id) {
   if (!id) return null;
   const ev = rowsOf(await sql.query(`SELECT id, status FROM events WHERE id = $1`, [id]))[0];
   if (!ev) return null;
-  const waves = rowsOf(await sql.query(`SELECT wave_no, sold FROM price_waves WHERE event_id = $1`, [id]));
-  return { id, status: ev.status, waves: waves.map((w) => ({ waveNo: Number(w.wave_no), sold: Number(w.sold) })) };
+  const waves = rowsOf(await sql.query(`SELECT wave_no, sold, early FROM price_waves WHERE event_id = $1`, [id]));
+  return { id, status: ev.status, waves: waves.map((w) => ({ waveNo: Number(w.wave_no), sold: Number(w.sold), early: w.early === true })) };
 }
 
 // Свободный id для нового события: px-novaya-noch-1010, …-2, …-3
@@ -37,7 +37,7 @@ export async function saveEvent(sql, parsed) {
   ]);
   const saved = [];
   for (const w of waves) {
-    const row = rowsOf(await sql.query(WAVE_UPSERT_SQL, [e.id, w.waveNo, w.name, w.priceRub, w.quota, w.public]))[0];
+    const row = rowsOf(await sql.query(WAVE_UPSERT_SQL, [e.id, w.waveNo, w.name, w.priceRub, w.quota, w.public, w.early ?? null]))[0];
     if (row) saved.push({ waveNo: Number(row.wave_no), quota: Number(row.quota), sold: Number(row.sold) });
   }
   if (prune && prune.length) {
@@ -71,6 +71,7 @@ export async function deleteEvent(sql, id, { onlyDraft = false } = {}) {
   if (onlyDraft) {
     const ev = rowsOf(await sql.query(`SELECT status FROM events WHERE id = $1`, [id]))[0];
     if (!ev) return { ok: false, message: 'Мероприятие не найдено' };
+    if (ev.status === 'early') return { ok: false, message: 'Идёт ранний доступ — закрыть его можно в панели' };
     if (ev.status !== 'draft') return { ok: false, message: 'Ночь уже опубликована — снять её можно только в панели' };
   }
   const has = rowsOf(await sql.query(`SELECT 1 FROM orders WHERE event_id = $1 LIMIT 1`, [id])).length > 0;
@@ -79,4 +80,35 @@ export async function deleteEvent(sql, id, { onlyDraft = false } = {}) {
   await sql.query(`DELETE FROM price_waves WHERE event_id = $1`, [id]);
   const rows = rowsOf(await sql.query(`DELETE FROM events WHERE id = $1 RETURNING id`, [id]));
   return rows.length ? { ok: true } : { ok: false, message: 'Мероприятие не найдено' };
+}
+
+// Ранний доступ: закрытая волна для подписчиков бота (early, скрыта с сайта)
+// и ночь в статусе 'early'. Повторный вызов поправляет волну — квота не ниже
+// проданного. Одно для бота и панели. → { ok, message? }
+export async function openEarly(sql, id, qty, price, nowMs = Date.now()) {
+  if (!(Number.isInteger(qty) && qty >= 1 && qty <= 1000) || !(Number.isInteger(price) && price >= 0 && price <= 50000)) {
+    return { ok: false, message: 'Проходок — от 1 до 1000, цена — до 50 000 ₽' };
+  }
+  const ev = rowsOf(await sql.query(`SELECT id, status, starts_at, ends_at FROM events WHERE id = $1`, [id]))[0];
+  if (!ev) return { ok: false, message: 'Мероприятие не найдено' };
+  if (!['draft', 'early'].includes(ev.status)) return { ok: false, message: 'Ночь уже в открытой продаже — ранний доступ не открыть' };
+  const end = ev.ends_at ? new Date(ev.ends_at).getTime() : new Date(ev.starts_at).getTime() + 8 * 3600_000;
+  if (end <= nowMs) return { ok: false, message: 'Дата ночи уже прошла — поправь её' };
+  const waves = rowsOf(await sql.query(`SELECT wave_no, early FROM price_waves WHERE event_id = $1 ORDER BY wave_no`, [id]));
+  const had = waves.find((w) => w.early === true);
+  if (had) {
+    await sql.query(
+      `UPDATE price_waves SET quota = GREATEST($3::int, sold), price_rub = $4 WHERE event_id = $1 AND wave_no = $2`,
+      [id, Number(had.wave_no), qty, price]
+    );
+  } else {
+    const no = Math.max(0, ...waves.map((w) => Number(w.wave_no))) + 1;
+    await sql.query(
+      `INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota, public, early)
+       VALUES ($1, $2, 'Ранний доступ', $3, $4, false, true)`,
+      [id, no, price, qty]
+    );
+  }
+  await sql.query(`UPDATE events SET status = 'early' WHERE id = $1 AND status IN ('draft', 'early')`, [id]);
+  return { ok: true };
 }

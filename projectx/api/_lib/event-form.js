@@ -3,7 +3,7 @@
 import { translitSlug } from './post-normalize.js';
 
 const TZ_OFFSET = '+05:00'; // Оренбург
-const STATUSES = ['draft', 'onsale', 'past'];
+const STATUSES = ['draft', 'early', 'onsale', 'past'];
 // афиша — только своя: загруженная в базу (/api/poster?id=…), присланная
 // боту (/api/poster?fid=…) или лежащая в репозитории (/assets/photos/…)
 const POSTER_RE = /^\/(?:api\/poster\?(?:id=[0-9a-f]{24}|fid=[A-Za-z0-9_-]{20,150})|assets\/photos\/[\w.-]+\.(?:jpe?g|png|webp))$/;
@@ -66,7 +66,7 @@ export function parseEventForm(body, ctx = {}) {
   if (!timeEnd) errors.push({ field: 'timeEnd', message: 'Время окончания в формате ЧЧ:ММ' });
 
   const status = STATUSES.includes(b.status) ? b.status : null;
-  if (!status) errors.push({ field: 'status', message: 'Статус: черновик, в продаже или прошедшее' });
+  if (!status) errors.push({ field: 'status', message: 'Статус: черновик, ранний доступ, в продаже или прошедшее' });
 
   const ageRating = AGES.includes(Number(b.ageRating)) ? Number(b.ageRating) : null;
   if (!ageRating) errors.push({ field: 'ageRating', message: 'Возраст: 16+ или 18+' });
@@ -129,15 +129,21 @@ export function parseEventForm(body, ctx = {}) {
       // не ошибка: квоту поднимаем до проданного, но владелец должен знать
       warnings.push(`«${name}»: уже продано ${sold} — квота поднята до ${sold}`);
     }
-    // скрытая волна (гостевой список): на сайте её нет, продаёт только касса
-    const isPublic = w?.public === undefined || w?.public === null ? true : Boolean(w.public);
-    waves.push({ waveNo, name, priceRub, quota: Math.max(quota, sold), public: isPublic });
+    // скрытая волна (гостевой список): на сайте её нет, продаёт только касса.
+    // Ранняя (early) — для подписчиков бота до анонса, всегда скрыта с сайта.
+    // Не прислали флаг (старая панель) — в базе остаётся как был
+    const early = w?.early === undefined || w?.early === null ? null : Boolean(w.early);
+    const isPublic = early ? false : w?.public === undefined || w?.public === null ? true : Boolean(w.public);
+    waves.push({ waveNo, name, priceRub, quota: Math.max(quota, sold), public: isPublic, early });
   });
   if (new Set(waves.map((w) => w.waveNo)).size !== waves.length) {
     errors.push({ field: 'waves', message: 'Номера волн повторяются' });
   }
   if (status === 'onsale' && rawWaves.length && !waves.some((w) => w.public)) {
     errors.push({ field: 'waves', message: 'В продаже нужна хотя бы одна волна, видная на сайте' });
+  }
+  if (status === 'early' && !waves.some((w) => w.early) && !(existing?.waves || []).some((w) => w.early)) {
+    errors.push({ field: 'waves', message: 'Для раннего доступа нужна закрытая волна для подписчиков' });
   }
 
   // волны, убранные из формы: снести можно только непроданные
@@ -156,7 +162,7 @@ export function parseEventForm(body, ctx = {}) {
 
   const { startsAt, endsAt } = buildRange(date, timeStart, timeEnd);
   // ночь в продаже до своего конца: начавшуюся правят (квоты, описание), закончившуюся — нет
-  if (status === 'onsale' && Date.parse(endsAt || startsAt) <= nowMs) {
+  if ((status === 'onsale' || status === 'early') && Date.parse(endsAt || startsAt) <= nowMs) {
     return {
       ok: false,
       errors: [{ field: 'date', message: 'Ночь уже закончилась — в продажу такое событие не поставить' }],

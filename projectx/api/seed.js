@@ -115,7 +115,7 @@ async function tick(req, res) {
     const sql = db();
     await ensureSchema(sql);
     const r = await runTick({ sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req) });
-    return ok(res, { ran: !r.skipped, reminded: r.reminded || 0, waitlist: r.waitlist || 0 });
+    return ok(res, { ran: !r.skipped, reminded: r.reminded || 0, waitlist: r.waitlist || 0, broadcasts: r.broadcasts || 0 });
   } catch (err) {
     console.error('tick failed:', err);
     return fail(res, 500, 'tick_failed', 'Фоновые задачи не отработали');

@@ -7,7 +7,7 @@
 //   cancel  — отменить неоплаченную бронь, вернуть места (админ)
 //   void    — аннулировать проходку: возврат/отзыв, место вернуть (админ)
 //   rename  — переоформить проходку на другого человека (дверь, админ)
-import { db, hasDb, withTimeout } from './_lib/db.js';
+import { db, hasDb, withTimeout, healSchema } from './_lib/db.js';
 import { ticketId, orderId } from './_lib/ids.js';
 import { makeToken, primarySecret } from './_lib/sign.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
@@ -70,11 +70,11 @@ async function walkin(req, res, b, by, role) {
     oid = orderId();
     tid = ticketId();
     try {
-      const rows = await sql.query(ORDER_SQL, [
+      const rows = await healSchema(sql, () => sql.query(ORDER_SQL, [
         1, eventId, waveNo, oid, name, 'касса', null,
         // скрытые волны (гостевой список) продаёт только владелец из панели
         JSON.stringify({ src }), [tid], [name], ['adult'], 'door', 0, null, role === 'admin',
-      ]);
+      ]));
       const r = rowsOf(rows)[0] || {};
       priceRub = r.price_rub === null ? null : Number(r.price_rub);
       created = Number(r.created || 0);

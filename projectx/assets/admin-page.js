@@ -89,7 +89,7 @@ function pickNight() {
   if (state.night && nightById(state.night)) return;
   const now = Date.now();
   const soon = state.events
-    .filter((e) => ['onsale', 'soldout'].includes(e.status) && endOf(e) > now)
+    .filter((e) => ['onsale', 'soldout', 'early'].includes(e.status) && endOf(e) > now)
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   const recent = state.events.filter((e) => e.status !== 'draft'); // список с сервера — от новых к старым
   const pick = soon[0] || recent[0] || state.events[0] || null;
@@ -115,7 +115,7 @@ async function openNightPicker() {
   }
   const now = Date.now();
   const asc = (a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt);
-  const soon = state.events.filter((e) => ['onsale', 'soldout'].includes(e.status) && endOf(e) > now).sort(asc);
+  const soon = state.events.filter((e) => ['onsale', 'soldout', 'early'].includes(e.status) && endOf(e) > now).sort(asc);
   const drafts = state.events.filter((e) => e.status === 'draft').sort(asc);
   const rest = state.events.filter((e) => !soon.includes(e) && !drafts.includes(e)).sort((a, b) => -asc(a, b));
   const item = (e) => `<button type="button" class="pick" data-id="${esc(e.id)}" aria-current="${e.id === state.night}">

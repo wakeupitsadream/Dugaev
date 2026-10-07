@@ -66,7 +66,7 @@ function renderHero() {
         <a class="b b-ghost b-sm" href="#events/${encodeURIComponent(e.id)}">${icon('edit')}Изменить</a>
         ${pub ? `<a class="b b-ghost b-sm" href="/e/${encodeURIComponent(e.id)}" target="_blank" rel="noopener">${icon('external')}Страница</a>
         <button class="b b-ghost b-sm" type="button" data-copy-link>${icon('copy')}Ссылка</button>` : ''}
-        ${e.status === 'draft' ? `<a class="b b-primary b-sm" href="#events/${encodeURIComponent(e.id)}">${icon('send')}Опубликовать</a>` : ''}
+        ${['draft', 'early'].includes(e.status) ? `<a class="b b-primary b-sm" href="#events/${encodeURIComponent(e.id)}">${icon('send')}Опубликовать</a>` : ''}
       </div>
     </div>
   </div>`;

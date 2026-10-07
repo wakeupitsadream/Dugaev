@@ -160,10 +160,10 @@ test('редактирование без постера/описания не �
 
 test('волна: создаётся, обновляется, квота не падает ниже проданного', async () => {
   await upsertEvent({ id: 'px-sql-3' });
-  await pg.query(WAVE_UPSERT_SQL, ['px-sql-3', 1, 'Ранняя', 400, 50, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-sql-3', 1, 'Ранняя', 400, 50, null, null]);
   await pg.query(`UPDATE price_waves SET sold = 30 WHERE event_id = 'px-sql-3' AND wave_no = 1`);
   // владелец пытается сжать квоту до 10 — CHECK(sold<=quota) уронил бы запрос
-  const r = (await pg.query(WAVE_UPSERT_SQL, ['px-sql-3', 1, 'Ранняя', 450, 10, null])).rows[0];
+  const r = (await pg.query(WAVE_UPSERT_SQL, ['px-sql-3', 1, 'Ранняя', 450, 10, null, null])).rows[0];
   assert.equal(Number(r.quota), 30);
   assert.equal(Number(r.sold), 30);
   const w = (await pg.query(`SELECT price_rub FROM price_waves WHERE event_id='px-sql-3' AND wave_no=1`)).rows[0];
@@ -172,9 +172,9 @@ test('волна: создаётся, обновляется, квота не п
 
 test('prune сносит только непроданные волны', async () => {
   await upsertEvent({ id: 'px-sql-4' });
-  await pg.query(WAVE_UPSERT_SQL, ['px-sql-4', 1, 'Первая', 400, 10, null]);
-  await pg.query(WAVE_UPSERT_SQL, ['px-sql-4', 2, 'Вторая', 600, 10, null]);
-  await pg.query(WAVE_UPSERT_SQL, ['px-sql-4', 3, 'Третья', 800, 10, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-sql-4', 1, 'Первая', 400, 10, null, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-sql-4', 2, 'Вторая', 600, 10, null, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-sql-4', 3, 'Третья', 800, 10, null, null]);
   await pg.query(`UPDATE price_waves SET sold = 4 WHERE event_id='px-sql-4' AND wave_no=2`);
   await pg.query(WAVES_PRUNE_SQL, ['px-sql-4', [1]]); // оставляем только первую
   const left = (await pg.query(`SELECT wave_no FROM price_waves WHERE event_id='px-sql-4' ORDER BY wave_no`)).rows;
@@ -183,7 +183,7 @@ test('prune сносит только непроданные волны', async 
 
 test('созданное из админки событие сразу продаётся тем же ORDER_SQL', async () => {
   await upsertEvent({ id: 'px-sql-5', status: 'onsale' });
-  await pg.query(WAVE_UPSERT_SQL, ['px-sql-5', 1, 'Ранняя', 400, 5, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-sql-5', 1, 'Ранняя', 400, 5, null, null]);
   const r = (await pg.query(ORDER_SQL, [
     1, 'px-sql-5', 1, 'ord-px-1', 'Гость Тест', '+79123456789', null, null,
     ['tkt-px-1'], ['Гость Тест'], ['adult'], 'stub', 180, null, false,
@@ -194,7 +194,7 @@ test('созданное из админки событие сразу прод�
 
 test('админский список отдаёт черновики с волнами, публичная афиша — нет', async () => {
   await upsertEvent({ id: 'px-draft-1', status: 'draft', title: 'ЧЕРНОВИК' });
-  await pg.query(WAVE_UPSERT_SQL, ['px-draft-1', 1, 'Ранняя', 400, 10, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-draft-1', 1, 'Ранняя', 400, 10, null, null]);
   const all = (await pg.query(ADMIN_EVENTS_SQL)).rows;
   const draft = all.find((r) => r.id === 'px-draft-1');
   assert.ok(draft, 'черновик не виден админке');
@@ -208,8 +208,8 @@ test('админский список отдаёт черновики с вол�
 
 test('secret и скрытые волны: UPSERT хранит флаги, null их не трогает', async () => {
   await upsertEvent({ id: 'px-secret-1', secret: true });
-  await pg.query(WAVE_UPSERT_SQL, ['px-secret-1', 1, 'Проходка', 1000, 200, null]);
-  await pg.query(WAVE_UPSERT_SQL, ['px-secret-1', 9, 'Гостевой список', 0, 10, false]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-secret-1', 1, 'Проходка', 1000, 200, null, null]);
+  await pg.query(WAVE_UPSERT_SQL, ['px-secret-1', 9, 'Гостевой список', 0, 10, false, null]);
   let e = (await pg.query(`SELECT secret FROM events WHERE id = 'px-secret-1'`)).rows[0];
   assert.equal(e.secret, true);
   await upsertEvent({ id: 'px-secret-1', secret: null, title: 'ПРАВКА' }); // null — не менять

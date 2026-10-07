@@ -21,19 +21,19 @@ import { isAdmin } from './_lib/auth.js';
 import { notifyOwner, tgApi, tgCall, tgBotUsername } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
-import { parseOrderStart, transferText, transferHtml, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer } from './_lib/booking.js';
+import { parseOrderStart, transferText, transferHtml, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer, normalizePayCode } from './_lib/booking.js';
 import { placeOrder, nextWaveOf, nextWaveFor, seatsLeft, ownerNotice, ownerNoticeMarkup, liveUntilMs } from './_lib/order-core.js';
-import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL, CLAIM_SQL, CLOSE_EXPIRED_SQL, WAITLIST_JOIN_SQL, WAITLIST_LEAVE_SQL } from './_lib/queries.js';
+import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL, CLAIM_SQL, CLOSE_EXPIRED_SQL, WAITLIST_JOIN_SQL, WAITLIST_LEAVE_SQL, EARLY_WAVE_SQL } from './_lib/queries.js';
 import { runTick } from './_lib/tick.js';
 import { normalizePhone, fmtTime, formatRuPhoneDigits } from '../assets/ticket-format.js';
 import { ladderText, fmtRub } from '../assets/waves.js';
 import { SITE } from '../assets/data/config.js';
 import {
   rowsOf, fmtWhen, fmtTimeOnly, plural, originOf, fmtDay, escHtml, sender, callOf, posterUrl,
-  loadEvent, nearestEvent, eventWaves, isOwnerChat,
+  loadEvent, nearestEvent, earlyEvent, eventWaves, isOwnerChat, getSession, setSession, clearSession,
 } from './_lib/bot-kit.js';
 import { ownerMessage, ownerCallback, draftFromPost, OWNER_COMMANDS } from './_lib/bot-owner.js';
-import { subscribe, unsubscribe, SUB_BUTTON, runBroadcast, broadcastStatus, subsCount } from './_lib/broadcast.js';
+import { subscribe, unsubscribe, isSubscribed, SUB_BUTTON, runBroadcast, broadcastStatus, subsCount, earlyAnnouncement, bcId } from './_lib/broadcast.js';
 import { parsePost } from '../assets/post-parse.js';
 
 export default async function handler(req, res) {
@@ -85,6 +85,10 @@ export default async function handler(req, res) {
       sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req),
       assetOrigin: req.headers?.host ? `https://${req.headers.host}` : null,
     }, eventId);
+    // вкладку закроют посреди рассылки — остальным дошлют фоновые задачи
+    if (r.ok && !r.done && !r.busy) {
+      await sql.query(`UPDATE broadcasts SET scheduled_at = COALESCE(scheduled_at, now()) WHERE id = $1`, [bcId('ann', eventId)]);
+    }
     return r.ok ? ok(res, r) : fail(res, 409, 'broadcast_failed', r.message);
   }
 
@@ -131,7 +135,7 @@ export default async function handler(req, res) {
     // Своя обёртка: их сбой не должен превращаться в «что-то сломалось» гостю
     if (sql) {
       try {
-        await runTick({ sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req) });
+        await runTick({ sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req) }, { budgetMs: 4000 });
       } catch (e) {
         console.warn('tg-webhook: tick failed:', e.message);
       }
@@ -459,6 +463,8 @@ async function handleMessage(msg, deps) {
 
   // владелец: сводка, брони, мероприятие из присланного поста
   if (isOwnerChat(chatId)) {
+    const pay = /^\/pay(?:@\w+)?(?:\s+(.+))?$/i.exec(text);
+    if (pay) return ownerPay(chatId, deps, pay[1] || '');
     const r = await ownerMessage(msg, deps);
     if (r) return r;
   }
@@ -472,6 +478,7 @@ async function handleMessage(msg, deps) {
         ? '🔔 Ты уже в списке — напишем, как откроем продажи. Не присылать анонсы — /stop'
         : '🔔 Готово — напишем сюда, как только откроем продажи следующей ночи. Ранняя волна всегда дешевле.\n\nНе присылать анонсы — /stop'
     );
+    await earlyOffer(chatId, deps);
     return { done: 'subscribed', created: r.created, reactivated: r.reactivated };
   }
   if (/^\/stop(?:@\w+)?$/i.test(text)) {
@@ -522,7 +529,8 @@ async function handleMessage(msg, deps) {
     const had = await getSession(deps.sql, chatId);
     await clearSession(deps.sql, chatId);
     await send(
-      had ? 'Ок, ничего не бронируем. Передумаешь — /buy.' : 'Сейчас ничего не оформляем. Забронировать — /buy.',
+      had && /^owner_/.test(had.state) ? 'Ок, отменил.'
+        : had ? 'Ок, ничего не бронируем. Передумаешь — /buy.' : 'Сейчас ничего не оформляем. Забронировать — /buy.',
       { remove_keyboard: true }
     );
     return { done: 'wizard_cancelled' };
@@ -703,21 +711,6 @@ async function sendOrderStatus(o, chatId, deps) {
 // Состояние между сообщениями — строка в tg_sessions (одна на чат):
 // qty → phone → names → confirm → (booking). Любая команда сбрасывает мастер,
 // сессия старше 12 часов считается брошенной и стирается.
-const SESSION_TTL_MS = 12 * 3600_000; // брошенный мастер живёт полсуток — чтобы имена, набранные после паузы, не встречала афиша
-
-async function getSession(sql, chatId) {
-  const s = rowsOf(await sql.query(`SELECT state, data, updated_at FROM tg_sessions WHERE chat_id = $1`, [chatId]))[0];
-  if (!s || Date.now() - new Date(s.updated_at).getTime() > SESSION_TTL_MS) return null;
-  return { state: s.state, data: typeof s.data === 'string' ? JSON.parse(s.data) : (s.data || {}) };
-}
-async function setSession(sql, chatId, state, data) {
-  await sql.query(
-    `INSERT INTO tg_sessions (chat_id, state, data, updated_at) VALUES ($1, $2, $3::jsonb, now())
-     ON CONFLICT (chat_id) DO UPDATE SET state = EXCLUDED.state, data = EXCLUDED.data, updated_at = now()`,
-    [chatId, state, JSON.stringify(data)]
-  );
-}
-const clearSession = (sql, chatId) => sql.query(`DELETE FROM tg_sessions WHERE chat_id = $1`, [chatId]);
 
 // Приветствие — карточка ночи: афиша, дата, место, цена и меню кнопок.
 // Без афиши (или если Telegram её не принял) — тот же текст сообщением.
@@ -728,6 +721,34 @@ async function sendWelcome(chatId, deps, { intro }) {
   const hello = intro ? `👋 Это бот ${SITE.brandName} — здесь берут проходки.\n\n` : '';
   const ev = await nearestEvent(deps.sql, deps.nowMs);
   if (!ev) {
+    // ранний доступ: подписчику — карточка с бронью, остальным — повод подписаться
+    const early = await earlyEvent(deps.sql, deps.nowMs);
+    if (early && (await isSubscribed(deps.sql, chatId))) {
+      const { caption, markup } = earlyAnnouncement(early, await eventWaves(deps.sql, early.id));
+      const text = `${escHtml(hello)}${caption.replace(/\n\n<i>[^<]*<\/i>$/, '')}`;
+      const kb = { inline_keyboard: [...markup.inline_keyboard, [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }]] };
+      const poster = posterUrl(early.poster_url, deps);
+      if (poster) {
+        const p = await call('sendPhoto', { chat_id: chatId, photo: poster, caption: text, parse_mode: 'HTML', reply_markup: kb });
+        if (p.ok) return { via: 'photo', early: true };
+      }
+      const t = await call('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: kb });
+      return t.ok ? { via: 'text', early: true } : { via: 'none', error: t.error };
+    }
+    if (early) {
+      const t = await call('sendMessage', {
+        chat_id: chatId,
+        text: `${hello}Скоро новая ночь. Подписчики бота узнают первыми и берут раньше всех — по ранней цене, до публичного анонса.`,
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔔 Подписаться и узнать первым', callback_data: 'sub:on' }],
+            [{ text: '🎫 Мои проходки', callback_data: 'menu:tickets' }, { text: '🌐 Сайт', url: `${origin}/?src=tgbot` }],
+          ],
+        },
+      });
+      return t.ok ? { via: 'text', teaser: true } : { via: 'none', error: t.error };
+    }
     const r = await call('sendMessage', {
       chat_id: chatId,
       text: `${hello}Пока ничего не продаём — следующую ночь объявим на сайте и в соцсетях.`,
@@ -810,16 +831,96 @@ async function joinWaitlist(chatId, deps, eventId) {
   return { done: added ? 'waitlist_joined' : 'waitlist_already', event: ev.id };
 }
 
+// ---------- ранний доступ ----------
+// Подписчик бронирует закрытую волну до анонса: не больше EARLY_CAP за раз,
+// чтобы 50 проходок достались многим, а не первой компании
+const EARLY_CAP = 4;
+
+// Ранних мест нет: разобрали — ждём анонса; ночь уже опубликована — сразу
+// предлагаем бронь по текущей цене
+async function earlyGone(chatId, deps, eventId) {
+  await clearSession(deps.sql, chatId);
+  const ev = await loadEvent(deps.sql, eventId);
+  const open = Boolean(ev && ev.status === 'onsale' && liveUntilMs(ev) > deps.nowMs);
+  await sender(deps, chatId)(
+    open ? 'Ранний доступ закончился — продажа уже открыта для всех. Бронируй по текущей цене:'
+      : 'Ранний доступ уже разобрали 😔 Открытая продажа скоро — анонс придёт сюда.',
+    open ? { inline_keyboard: [[{ text: '🎟 Забронировать', callback_data: `buy:${eventId}` }]] } : undefined
+  );
+  return { done: open ? 'early_closed' : 'early_sold_out', event: eventId, open };
+}
+
+async function startEarlyQty(chatId, deps, ev) {
+  const send = sender(deps, chatId);
+  const w = rowsOf(await deps.sql.query(EARLY_WAVE_SQL, [ev.id]))[0];
+  if (!w) return earlyGone(chatId, deps, ev.id);
+  const left = Number(w.left);
+  const cap = Math.min(EARLY_CAP, left);
+  await setSession(deps.sql, chatId, 'qty', {
+    eventId: ev.id, title: ev.title, startsAt: new Date(ev.starts_at).toISOString(),
+    waveNo: Number(w.wave_no), priceRub: Number(w.price_rub), early: true, cap,
+    run: Math.random().toString(36).slice(2, 8),
+  });
+  await send(
+    `🔑 <b>${escHtml(ev.title)}</b> · ${escHtml(fmtWhen(ev.starts_at))}\n` +
+      `Ранний доступ: <b>${fmtRub(Number(w.price_rub))} ₽</b> за проходку, осталось ${left}. ` +
+      `В одни руки — до ${cap}.\n\nСколько берёшь?`,
+    { inline_keyboard: [Array.from({ length: Math.min(cap, 4) }, (_, i) => ({ text: String(i + 1), callback_data: `qty:${i + 1}` }))] },
+    true
+  );
+  return { done: 'wizard_qty', event: ev.id, early: true };
+}
+
+// Подписался — и сразу видит ранний доступ, если он идёт: награда за подписку
+async function earlyOffer(chatId, deps) {
+  try {
+    const ev = await earlyEvent(deps.sql, deps.nowMs);
+    if (!ev) return null;
+    const w = rowsOf(await deps.sql.query(EARLY_WAVE_SQL, [ev.id]))[0];
+    if (!w) return null;
+    return sender(deps, chatId)(
+      `🔑 Кстати, сейчас для подписчиков ранний доступ к <b>${escHtml(ev.title)}</b> · ${escHtml(fmtWhen(ev.starts_at))}: ` +
+        `${Number(w.left)} ${plural(Number(w.left), 'проходка', 'проходки', 'проходок')} по <b>${fmtRub(Number(w.price_rub))} ₽</b> до публичного анонса.`,
+      { inline_keyboard: [[{ text: `🔑 Забронировать за ${fmtRub(Number(w.price_rub))} ₽`, callback_data: `buy:${ev.id}` }]] },
+      true
+    );
+  } catch {
+    return null;
+  }
+}
+
 // Шаг 1: сколько проходок. eventId=null — ближайшая ночь.
 async function startWizard(chatId, deps, eventId, { force = false } = {}) {
   const send = sender(deps, chatId);
   let ev = eventId ? await loadEvent(deps.sql, eventId) : null;
+  // ранний доступ: ночи ещё нет на сайте — бронируют только подписчики
+  let early = Boolean(ev && ev.status === 'early' && liveUntilMs(ev) > deps.nowMs);
   // кнопка со старой афиши (ночь прошла или снята) — предлагаем ближайшую живую
-  if (!ev || ev.status !== 'onsale' || liveUntilMs(ev) <= deps.nowMs) ev = await nearestEvent(deps.sql, deps.nowMs);
+  if (!early && (!ev || ev.status !== 'onsale' || liveUntilMs(ev) <= deps.nowMs)) ev = await nearestEvent(deps.sql, deps.nowMs);
+  if (!ev) {
+    ev = await earlyEvent(deps.sql, deps.nowMs);
+    early = Boolean(ev);
+  }
   if (!ev) {
     await clearSession(deps.sql, chatId);
     await send('Сейчас продаж нет — следующую ночь объявим здесь, на сайте и в соцсетях.', { inline_keyboard: [[SUB_BUTTON]] });
     return { done: 'wizard_closed' };
+  }
+  if (early && !(await isSubscribed(deps.sql, chatId))) {
+    await clearSession(deps.sql, chatId);
+    const w = rowsOf(await deps.sql.query(EARLY_WAVE_SQL, [ev.id]))[0];
+    if (!w) {
+      await send('Ранний доступ на эту ночь уже разобрали. Подпишись — анонс открытой продажи придёт сюда первым.', { inline_keyboard: [[SUB_BUTTON]] });
+      return { done: 'early_sold_out', event: ev.id };
+    }
+    await send(
+      `🔑 Ранний доступ к <b>${escHtml(ev.title)}</b> — только для подписчиков бота: ` +
+        `${Number(w.left)} ${plural(Number(w.left), 'проходка', 'проходки', 'проходок')} по <b>${fmtRub(Number(w.price_rub))} ₽</b> до публичного анонса.\n\n` +
+        'Подпишись на анонсы — и бронируй. Отписаться можно в любой момент: /stop.',
+      { inline_keyboard: [[{ text: '🔔 Подписаться и забронировать', callback_data: `esub:${ev.id}` }]] },
+      true
+    );
+    return { done: 'early_need_sub', event: ev.id };
   }
   // уже есть неоплаченная бронь: напоминаем о ней, а не плодим вторую
   if (!force) {
@@ -839,6 +940,7 @@ async function startWizard(chatId, deps, eventId, { force = false } = {}) {
       return { done: 'wizard_pending_exists', order: pend.pay_code };
     }
   }
+  if (early) return startEarlyQty(chatId, deps, ev);
   const wave = await nextWaveOf(deps.sql, ev.id);
   if (!wave) {
     await clearSession(deps.sql, chatId);
@@ -889,7 +991,9 @@ async function wizardQty(chatId, deps, s, n) {
     return { done: 'wizard_qty_bad' };
   }
   if (s.data.cap && n > s.data.cap) {
-    await send(`Одной бронью сейчас можно до ${s.data.cap}. Сколько берёшь?`);
+    await send(s.data.early
+      ? `В раннем доступе — до ${s.data.cap} в одни руки. Сколько берёшь?`
+      : `Одной бронью сейчас можно до ${s.data.cap}. Сколько берёшь?`);
     return { done: 'wizard_qty_bad' };
   }
   const { cap, ...rest } = s.data;
@@ -897,13 +1001,26 @@ async function wizardQty(chatId, deps, s, n) {
   // цена сразу под всю компанию: если в текущей волне столько нет, бронь
   // целиком идёт по следующей — гость видит это здесь, а не на подтверждении
   let note = '';
-  const nw = await nextWaveFor(deps.sql, d.eventId, n);
-  if (nw && nw.waveNo !== d.waveNo) {
+  // ранний доступ: своя закрытая волна, другие цены не предлагаем
+  const nw = d.early ? null : await nextWaveFor(deps.sql, d.eventId, n);
+  if (d.early) {
+    const w = rowsOf(await deps.sql.query(EARLY_WAVE_SQL, [d.eventId]))[0];
+    const left = w ? Number(w.left) : 0;
+    if (!left) return earlyGone(chatId, deps, d.eventId);
+    if (n > left) {
+      await setSession(deps.sql, chatId, 'qty', { ...rest, cap: left });
+      await send(`По ранней цене осталось ${left} — сколько берёшь?`, {
+        inline_keyboard: [Array.from({ length: Math.min(left, 4) }, (_, i) => ({ text: String(i + 1), callback_data: `qty:${i + 1}` }))],
+      });
+      return { done: 'wizard_qty_cap', maxOne: left };
+    }
+    d = { ...d, waveNo: Number(w.wave_no), priceRub: Number(w.price_rub) };
+  } else if (nw && nw.waveNo !== d.waveNo) {
     note = nw.priceRub > d.priceRub
       ? `\nПо ${fmtRub(d.priceRub)} ₽ столько уже нет, поэтому вся бронь — по ${fmtRub(nw.priceRub)} ₽.`
       : `\nЕсть место по ${fmtRub(nw.priceRub)} ₽ — бронь по этой цене.`;
     d = { ...d, waveNo: nw.waveNo, priceRub: nw.priceRub };
-  } else if (!nw) {
+  } else if (!d.early && !nw) {
     const left = await seatsLeft(deps.sql, d.eventId);
     if (left.maxOne > 0) {
       await setSession(deps.sql, chatId, 'qty', { ...rest, cap: left.maxOne });
@@ -1039,9 +1156,23 @@ async function wizardBook(chatId, deps, cb, run = null) {
   const r = await placeOrder(deps.sql, {
     eventId: d.eventId, waveNo: d.waveNo, buyerName: d.names[0], phone: d.phone,
     buyerTg: cb.from?.username ? String(cb.from.username).slice(0, 64) : null,
-    utm: { src: 'tgbot' },
+    utm: { src: d.early ? 'early' : 'tgbot' },
     attendees: d.names.map((name) => ({ name })),
-  }, { nowMs: deps.nowMs });
+  }, { nowMs: deps.nowMs, early: Boolean(d.early) });
+
+  if (!r.ok && d.early && (r.error === 'wave_sold_out' || r.error === 'sales_closed')) {
+    // ранний доступ разобрали, пока гость писал имена, или продажа уже открыта для всех
+    const w = r.error === 'wave_sold_out' ? rowsOf(await deps.sql.query(EARLY_WAVE_SQL, [d.eventId]))[0] : null;
+    const left = w ? Number(w.left) : 0;
+    if (left > 0 && left < d.qty) {
+      await setSession(deps.sql, chatId, 'qty', { ...d, cap: left });
+      await send(`Столько по ранней цене уже нет — осталось ${left}. Сколько берёшь?`, {
+        inline_keyboard: [Array.from({ length: Math.min(left, 4) }, (_, i) => ({ text: String(i + 1), callback_data: `qty:${i + 1}` }))],
+      });
+      return { done: 'wizard_fewer', maxOne: left };
+    }
+    return earlyGone(chatId, deps, d.eventId);
+  }
 
   if (!r.ok) {
     if (r.error === 'wave_sold_out') {
@@ -1119,7 +1250,7 @@ async function wizardBook(chatId, deps, cb, run = null) {
 // ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, ...(text ? { text } : {}) });
-  const m = /^(pub|skip|hide|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu|wl|wlx):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  const m = /^(pub|skip|hide|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu|wl|wlx|esub|early|eset|eb|bcgo|bct|bcw|bcx):([\w-]{1,64})$/.exec(String(cb.data || ''));
   if (!m || !deps.sql) {
     await answer('Кнопка устарела — /start');
     return { done: 'callback_bad' };
@@ -1160,7 +1291,14 @@ async function handleCallback(cb, deps) {
     const r = await subscribe(deps.sql, guestChat, 'button');
     await answer(r.already ? 'Ты уже подписан' : 'Готово — напишем о следующей ночи первым');
     if (!r.already) await sender(deps, guestChat)('🔔 Подписка на анонсы включена. Не присылать — /stop');
+    await earlyOffer(guestChat, deps);
     return { done: 'subscribed', created: r.created, reactivated: r.reactivated };
+  }
+  // «Подписаться и забронировать» под предложением раннего доступа
+  if (action === 'esub') {
+    await subscribe(deps.sql, guestChat, 'early');
+    await answer('Подписка включена');
+    return startWizard(guestChat, deps, arg);
   }
   if (action === 'qty') {
     const s = await getSession(deps.sql, guestChat);
@@ -1252,50 +1390,20 @@ async function handleCallback(cb, deps) {
   const at = fmtTime(new Date(deps.nowMs).toISOString());
 
   if (action === 'pay') {
-    const o = rowsOf(await deps.sql.query(CONFIRM_SQL, [slug, 'Telegram', 'transfer']))[0];
-    if (!o) {
-      const st = rowsOf(await deps.sql.query(`SELECT status, pay_code, tg_chat_id FROM orders WHERE id = $1`, [slug]))[0];
-      if (st && st.status === 'expired') {
-        // бронь сгорела, а её места уже купили: подтвердить нечего — владелец
-        // решает сам (поднять квоту и подтвердить по коду, касса или возврат)
-        await answer('Мест не осталось — подробности в чате');
-        await sender(deps, ownerChat)(
-          `⚠️ ${st.pay_code}: бронь сгорела, а её места уже разобрали — подтвердить нельзя.\n` +
-            'Если перевод пришёл: подними квоту волны в панели и подтверди по коду, оформи гостя через кассу или верни перевод.'
-        );
-        if (st.tg_chat_id) {
-          await deps.tg('sendMessage', {
-            chat_id: st.tg_chat_id,
-            text: 'Бронь сгорела раньше, чем мы увидели перевод, и места в этой волне уже разобрали. Организатор напишет тебе здесь: оформим проходку или вернём деньги.',
-          });
-        }
-        return { done: 'pay_no_seats', order: slug };
-      }
-      if (st && st.status === 'paid') await dropButtons(cb, deps);
-      await answer(st?.status === 'paid' ? 'Уже подтверждено' : st?.status === 'cancelled' ? 'Бронь отменена' : 'Бронь уже обработана');
+    const r = await confirmPaid(deps, slug, ownerChat);
+    if (r.done === 'pay_no_seats') {
+      await answer('Мест не осталось — подробности в чате');
+      return { done: 'pay_no_seats', order: slug };
+    }
+    if (r.done === 'pay_noop') {
+      if (r.st && r.st.status === 'paid') await dropButtons(cb, deps);
+      await answer(r.st?.status === 'paid' ? 'Уже подтверждено' : r.st?.status === 'cancelled' ? 'Бронь отменена' : 'Бронь уже обработана');
       return { done: 'pay_noop', order: slug };
     }
     await dropButtons(cb, deps);
-    const tickets = (typeof o.tickets === 'string' ? JSON.parse(o.tickets) : o.tickets) || [];
-    let delivered = false;
-    let deliveryError = null;
-    if (o.tg_chat_id) {
-      const ev = await loadEvent(deps.sql, o.event_id);
-      let markup = null;
-      try { markup = await subOffer(deps.sql, o.tg_chat_id); } catch { /* без кнопки */ }
-      const r = await callOf(deps)('sendMessage', {
-        chat_id: o.tg_chat_id,
-        disable_web_page_preview: true,
-        text: paidMessage(tickets, originOf(deps), ev),
-        ...(markup ? { reply_markup: markup } : {}),
-      });
-      delivered = r.ok;
-      deliveryError = r.ok ? null : r.error;
-    }
-    await stamp(`✅ Подтверждено в ${at}${o.was === 'expired' ? ' (бронь была сгоревшей, места списаны снова)' : ''} · ` +
-      (o.tg_chat_id ? (delivered ? 'QR гостю отправлены' : `гостю НЕ доставлено (${deliveryError}) — отправь ссылки из панели`) : 'гость без Telegram — ссылки в панели'));
-    await answer(`Подтверждено: ${o.pay_code || slug}`);
-    return { done: 'paid', order: slug, delivered };
+    await stamp(`✅ Подтверждено в ${at}${r.line}`);
+    await answer(`Подтверждено: ${r.o.pay_code || slug}`);
+    return { done: 'paid', order: slug, delivered: r.delivered };
   }
   if (action === 'nopay') {
     const o = rowsOf(await deps.sql.query(
@@ -1337,7 +1445,7 @@ async function handleCallback(cb, deps) {
     return { done: o ? 'dropped' : late ? 'dropped_expired' : 'drop_noop', order: slug };
   }
 
-  if (['pub', 'del', 'bc', 'own'].includes(action)) {
+  if (['pub', 'del', 'bc', 'own', 'early', 'eset', 'eb', 'bcgo', 'bct', 'bcw', 'bcx'].includes(action)) {
     const r = await ownerCallback(action, slug, cb, deps, answer);
     if (r) return r;
   }
@@ -1374,6 +1482,77 @@ async function handleCallback(cb, deps) {
   await deps.sql.query(`UPDATE events SET status = 'cancelled' WHERE id = $1`, [slug]);
   await answer('Снято с продажи');
   return { done: 'cancelled', slug };
+}
+
+// Оплата пришла: бронь → оплачена, проходки — гостю в чат. Одно для кнопки
+// «Пришло» и команды /pay. → { done, o?, st?, delivered, line }
+async function confirmPaid(deps, orderId, ownerChat) {
+  const o = rowsOf(await deps.sql.query(CONFIRM_SQL, [orderId, 'Telegram', 'transfer']))[0];
+  if (!o) {
+    const st = rowsOf(await deps.sql.query(`SELECT status, pay_code, tg_chat_id FROM orders WHERE id = $1`, [orderId]))[0];
+    if (st && st.status === 'expired') {
+      // бронь сгорела, а её места уже купили: подтвердить нечего — владелец
+      // решает сам (поднять квоту и подтвердить по коду, касса или возврат)
+      await sender(deps, ownerChat)(
+        `⚠️ ${st.pay_code}: бронь сгорела, а её места уже разобрали — подтвердить нельзя.\n` +
+          'Если перевод пришёл: подними квоту волны в панели и подтверди по коду, оформи гостя через кассу или верни перевод.'
+      );
+      if (st.tg_chat_id) {
+        await deps.tg('sendMessage', {
+          chat_id: st.tg_chat_id,
+          text: 'Бронь сгорела раньше, чем мы увидели перевод, и места в этой волне уже разобрали. Организатор напишет тебе здесь: оформим проходку или вернём деньги.',
+        });
+      }
+      return { done: 'pay_no_seats', st };
+    }
+    return { done: 'pay_noop', st };
+  }
+  const tickets = (typeof o.tickets === 'string' ? JSON.parse(o.tickets) : o.tickets) || [];
+  let delivered = false;
+  let deliveryError = null;
+  if (o.tg_chat_id) {
+    const ev = await loadEvent(deps.sql, o.event_id);
+    let markup = null;
+    try { markup = await subOffer(deps.sql, o.tg_chat_id); } catch { /* без кнопки */ }
+    const r = await callOf(deps)('sendMessage', {
+      chat_id: o.tg_chat_id,
+      disable_web_page_preview: true,
+      text: paidMessage(tickets, originOf(deps), ev),
+      ...(markup ? { reply_markup: markup } : {}),
+    });
+    delivered = r.ok;
+    deliveryError = r.ok ? null : r.error;
+  }
+  const line = `${o.was === 'expired' ? ' (бронь была сгоревшей, места списаны снова)' : ''} · ` +
+    (o.tg_chat_id ? (delivered ? 'QR гостю отправлены' : `гостю НЕ доставлено (${deliveryError}) — отправь ссылки из панели`) : 'гость без Telegram — ссылки в панели');
+  return { done: 'paid', o, delivered, line };
+}
+
+// /pay PX-7F3K — подтвердить оплату по коду из уведомления банка, не листая чат
+const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', У: 'Y' };
+async function ownerPay(chatId, deps, raw) {
+  const send = sender(deps, chatId);
+  const code = normalizePayCode(String(raw || '').toUpperCase().replace(/[АВЕКМНОРСТХУ]/g, (c) => LOOKALIKE[c]));
+  if (!code) {
+    await send('Напиши код брони из комментария к переводу, например: /pay PX-7F3K');
+    return { done: 'pay_cmd_help' };
+  }
+  const o = rowsOf(await deps.sql.query(`SELECT id, status FROM orders WHERE pay_code = $1`, [code]))[0];
+  if (!o) {
+    await send(`Брони ${code} нет — проверь код.`);
+    return { done: 'pay_cmd_unknown' };
+  }
+  const r = await confirmPaid(deps, o.id, chatId);
+  if (r.done === 'pay_noop') {
+    await send(r.st?.status === 'paid' ? `${code} уже подтверждена.`
+      : r.st?.status === 'cancelled' ? `${code} отменена — подтвердить нельзя. Если перевод пришёл, оформи гостя через кассу в панели.`
+        : `${code} уже обработана.`);
+    return { done: 'pay_cmd_noop', order: o.id };
+  }
+  if (r.done === 'paid') {
+    await send(`✅ ${code} подтверждена${r.line}`);
+  }
+  return { done: r.done === 'paid' ? 'pay_cmd_paid' : r.done, order: o.id };
 }
 
 // Кнопки под сообщением убираем после нажатия — второй тап ничего не сделает

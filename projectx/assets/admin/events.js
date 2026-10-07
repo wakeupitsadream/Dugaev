@@ -7,7 +7,7 @@ import {
 
 const FILTERS = {
   all: ['Все', () => true],
-  soon: ['Скоро', (e) => ['onsale', 'soldout', 'live'].includes(phaseOf(e))],
+  soon: ['Скоро', (e) => ['early', 'onsale', 'soldout', 'live'].includes(phaseOf(e))],
   draft: ['Черновики', (e) => e.status === 'draft'],
   past: ['Прошедшие', (e) => ['past', 'stale', 'cancelled'].includes(phaseOf(e))],
 };
@@ -24,7 +24,7 @@ function order(list) {
   const rank = (e) => {
     const ph = phaseOf(e, now);
     if (ph === 'live') return 0;
-    if (ph === 'onsale' || ph === 'soldout') return 1;
+    if (ph === 'early' || ph === 'onsale' || ph === 'soldout') return 1;
     if (ph === 'draft') return 2;
     return 3;
   };
@@ -55,7 +55,7 @@ function card(e) {
       <a class="b b-quiet b-sm" href="#events/${id}">${icon('edit')}Изменить</a>
       <a class="b b-quiet b-sm" href="#events/copy/${id}" title="Новая ночь с теми же местом, ценами и программой">${icon('copy')}Копия</a>
       ${isPublic(e) ? `<a class="b b-quiet b-sm" href="/e/${id}" target="_blank" rel="noopener">${icon('external')}Сайт</a>` : ''}
-      ${['onsale', 'soldout', 'live'].includes(ph) ? `<button class="b b-quiet b-sm" type="button" data-ev="stats">${icon('chart')}Сводка</button>` : ''}
+      ${['early', 'onsale', 'soldout', 'live'].includes(ph) ? `<button class="b b-quiet b-sm" type="button" data-ev="stats">${icon('chart')}Сводка</button>` : ''}
       ${canDelete ? `<button class="b b-quiet b-sm" type="button" data-ev="delete" title="Удалить — продаж нет">${icon('trash')}</button>` : ''}
     </div>
   </article>`;

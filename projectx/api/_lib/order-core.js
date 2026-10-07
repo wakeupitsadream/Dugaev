@@ -8,6 +8,7 @@ import { ticketId, orderId, payCode } from './ids.js';
 import { makeToken, primarySecret } from './sign.js';
 import { paymentMode, holdMinutes } from './booking.js';
 import { ORDER_SQL, NEXT_WAVE_SQL, NEXT_WAVE_FOR_SQL, SEATS_LEFT_SQL, EXPIRE_SQL } from './queries.js';
+import { healSchema } from './db.js';
 
 const rowsOf = (r) => (r && r.rows) || r || [];
 
@@ -25,7 +26,9 @@ export const liveUntilMs = (e) => (e.ends_at
 export const MAX_PENDING_PER_PHONE = 2;
 export const MAX_PENDING_PER_IP = 3;
 
-export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
+// early — бронь раннего доступа из бота (подписку проверил вызывающий):
+// ночь в статусе 'early', волна — ранняя и скрытая с сайта
+export async function placeOrder(sql, input, { nowMs = Date.now(), early = false } = {}) {
   const { eventId, waveNo, buyerName, phone, buyerTg = null, utm = null, iph = '' } = input;
   const attendees = Array.isArray(input.attendees) ? input.attendees : [];
 
@@ -42,7 +45,7 @@ export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
     return { ok: false, status: 503, error: 'db_unavailable', message: 'Онлайн-оформление сейчас недоступно' };
   }
   if (!event) return { ok: false, status: 404, error: 'not_found', message: 'Такой тусовки нет' };
-  if (event.status !== 'onsale' || liveUntilMs(event) <= nowMs) {
+  if (!(event.status === 'onsale' || (early && event.status === 'early')) || liveUntilMs(event) <= nowMs) {
     return { ok: false, status: 410, error: 'sales_closed', message: 'Продажи на эту тусовку закрыты' };
   }
 
@@ -100,10 +103,10 @@ export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
     tids = names.map(() => ticketId());
     code = transfer ? payCode() : null;
     try {
-      const r = rowsOf(await sql.query(ORDER_SQL, [
+      const r = rowsOf(await healSchema(sql, () => sql.query(ORDER_SQL, [
         qty, eventId, waveNo, oid, buyerName, phone, buyerTg,
-        JSON.stringify({ ...(utm || {}), ...(iph ? { iph } : {}) }), tids, names, ages, provider, hold, code, false,
-      ]))[0] || {};
+        JSON.stringify({ ...(utm || {}), ...(iph ? { iph } : {}) }), tids, names, ages, provider, hold, code, Boolean(early),
+      ])))[0] || {};
       priceRub = r.price_rub === null || r.price_rub === undefined ? null : Number(r.price_rub);
       created = Number(r.created || 0);
       expiresAt = r.expires_at ? new Date(r.expires_at).toISOString() : null;

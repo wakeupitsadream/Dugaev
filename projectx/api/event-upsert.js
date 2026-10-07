@@ -5,6 +5,8 @@
 // POST /api/event-upsert
 //   { action: 'analyze', text }   → черновик формы из текста поста
 //   { action: 'delete', id }      → удалить мероприятие без броней
+//   { action: 'early', id, qty, price } → ранний доступ для подписчиков бота:
+//     закрытая волна, ночь в статусе 'early'; превью рассылки — владельцу в Telegram
 //   { id?, title, date, timeStart, timeEnd, ageRating, status, venue,
 //     address?, secret?, descr?, capacity?, posterUrl?, lineup?, program?,
 //     waves: [{waveNo,name,priceRub,quota,public?}] } → сохранить
@@ -17,12 +19,12 @@ import { isAdmin } from './_lib/auth.js';
 import { ok, fail, noStore } from './_lib/respond.js';
 import { parseEventForm } from './_lib/event-form.js';
 import { ADMIN_EVENTS_SQL } from './_lib/queries.js';
-import { loadExisting, saveEvent, deleteEvent, publishCheck } from './_lib/event-store.js';
+import { loadExisting, saveEvent, deleteEvent, publishCheck, openEarly } from './_lib/event-store.js';
 import { analyzePost } from './_lib/analyze.js';
 import { extractorAvailable } from './_lib/extract.js';
-import { notifyOwner } from './_lib/tg.js';
+import { notifyOwner, tgApi, tgCall } from './_lib/tg.js';
 import { siteOrigin } from './_lib/booking.js';
-import { subsCount, publishedNotice } from './_lib/broadcast.js';
+import { subsCount, publishedNotice, sendPreview } from './_lib/broadcast.js';
 
 const rowsOf = (r) => r.rows || r;
 const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
@@ -47,6 +49,7 @@ export default async function handler(req, res) {
 
   if (action === 'list') return list(res, sql);
   if (action === 'delete') return remove(req, res, sql);
+  if (action === 'early') return early(req, res, sql);
   if (action === 'check') {
     const r = await publishCheck(sql, String(req.body?.id || ''));
     return r.ok ? ok(res, {}) : fail(res, 409, 'not_publishable', r.message);
@@ -175,5 +178,31 @@ async function save(req, res, sql) {
   } catch (err) {
     console.error('event upsert failed:', err);
     return fail(res, 500, 'upsert_failed', 'Не удалось сохранить событие');
+  }
+}
+
+async function early(req, res, sql) {
+  const id = String(req.body?.id || '').trim();
+  const qty = Number(req.body?.qty);
+  const price = Number(req.body?.price);
+  if (!id) return fail(res, 400, 'validation', 'Нужен id мероприятия');
+  try {
+    const r = await openEarly(sql, id, qty, price, Date.now());
+    if (!r.ok) return fail(res, 409, 'not_allowed', r.message);
+    // превью рассылки — владельцу в бот: отправить сейчас или по времени — оттуда
+    let previewed = false;
+    const owner = process.env.TELEGRAM_CHAT_ID;
+    if (owner && process.env.TELEGRAM_BOT_TOKEN) {
+      try {
+        const p = await sendPreview({ sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req) }, owner, id, 'early');
+        previewed = Boolean(p.ok);
+      } catch (err) {
+        console.warn('early preview failed:', err.message);
+      }
+    }
+    return ok(res, { event_id: id, status: 'early', previewed });
+  } catch (err) {
+    console.error('early failed:', err);
+    return fail(res, 503, 'db_unavailable', 'БД недоступна');
   }
 }

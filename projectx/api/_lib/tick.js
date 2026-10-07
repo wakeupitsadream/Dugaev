@@ -2,17 +2,21 @@
 //  - напоминание о брони, которая сгорит через полчаса (только тем, у кого
 //    есть чат с ботом, — больше писать некуда);
 //  - лист ожидания: на распроданной ночи освободились места — пишем ждущим
-//    по очереди, кто раньше встал.
+//    по очереди, кто раньше встал;
+//  - рассылки по времени (анонс, ранний доступ) и дослать начатые.
 // Запускаются внешним планировщиком (GET /api/seed?tick=1 раз в 1–5 минут)
 // и попутно любым апдейтом бота. Чаще раза в минуту работа не делается, кто
 // бы её ни дёрнул: отметка в px_meta ставится атомарно (TICK_SQL).
 import {
-  TICK_SQL, EXPIRE_SQL, REMIND_SQL, WAITLIST_DUE_SQL, WAITLIST_SKIP_BOOKED_SQL, WAITLIST_CLAIM_SQL,
+  TICK_SQL, EXPIRE_SQL, REMIND_SQL, WAITLIST_DUE_SQL, WAITLIST_SKIP_BOOKED_SQL, WAITLIST_CLAIM_SQL, DUE_BROADCASTS_SQL,
 } from './queries.js';
-import { rowsOf, fmtWhen, fmtTimeOnly, plural, escHtml, originOf, sender } from './bot-kit.js';
+import { rowsOf, fmtWhen, fmtTimeOnly, plural, escHtml, originOf, sender, loadEvent } from './bot-kit.js';
 import { transferHtml } from './booking.js';
+import { runBroadcast, reportText } from './broadcast.js';
+import { notifyOwner } from './tg.js';
 
-export async function runTick(deps, { force = false } = {}) {
+// budgetMs — сколько можно потратить на рассылки: вебхук бота не держим долго
+export async function runTick(deps, { force = false, budgetMs = 18_000 } = {}) {
   const { sql } = deps;
   if (!sql) return { ok: false, skipped: 'no_db' };
   if (!force && !rowsOf(await sql.query(TICK_SQL)).length) return { ok: true, skipped: 'recent' };
@@ -21,7 +25,39 @@ export async function runTick(deps, { force = false } = {}) {
   try { expired = rowsOf(await sql.query(EXPIRE_SQL)).length; } catch (e) { console.warn('tick: expire', e.message); }
   const reminded = await sendReminders(deps);
   const waitlist = await notifyWaitlist(deps);
-  return { ok: true, expired, reminded, waitlist };
+  const broadcasts = await runScheduled(deps, { budgetMs });
+  return { ok: true, expired, reminded, waitlist, broadcasts };
+}
+
+// Рассылки, которым пора (по времени или начатые и не дошедшие до конца):
+// гоним порциями, пока хватает времени; закончили — владельцу итог
+export async function runScheduled(deps, { budgetMs = 18_000 } = {}) {
+  const due = rowsOf(await deps.sql.query(DUE_BROADCASTS_SQL));
+  const notify = deps.notify || notifyOwner;
+  const t0 = Date.now();
+  let finished = 0;
+  for (const b of due) {
+    if (Date.now() - t0 > budgetMs) break;
+    let r;
+    // порция — в пределах оставшегося времени: функцию не оборвут посреди пачки
+    do {
+      r = await runBroadcast(deps, b.event_id, { kind: b.kind, sleep: deps.sleep, budgetMs: Math.max(0, budgetMs - (Date.now() - t0)) });
+    } while (r.ok && !r.done && !r.busy && Date.now() - t0 < budgetMs);
+    const what = b.kind === 'early' ? 'Ранний доступ' : 'Анонс';
+    if (!r.ok) {
+      // ночь сменила статус к назначенному времени — план снимаем, владельцу сообщаем
+      await deps.sql.query(`UPDATE broadcasts SET scheduled_at = NULL, updated_at = now() WHERE id = $1`, [b.id]);
+      await notify(`⚠️ ${what} по расписанию не разослан: ${r.message}`);
+    } else if (r.done) {
+      finished++;
+      const first = rowsOf(await deps.sql.query(`UPDATE broadcasts SET reported = true WHERE id = $1 AND NOT reported RETURNING id`, [b.id]));
+      if (first.length) {
+        const ev = await loadEvent(deps.sql, b.event_id);
+        await notify(reportText(b.kind, ev ? ev.title : b.event_id, r));
+      }
+    }
+  }
+  return finished;
 }
 
 export async function sendReminders(deps) {

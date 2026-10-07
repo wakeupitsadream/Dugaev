@@ -89,3 +89,20 @@ export function ensureSchema(sql) {
   }
   return ensured.get(sql);
 }
+
+// Колонка или таблица ещё не доехала до базы — первые секунды после
+// выкладки, а путь заказа миграции сам не гоняет (см. выше): доводим схему и
+// повторяем запрос один раз. Иначе бронь с сайта падала бы, пока схему не
+// доведёт бот, панель или планировщик
+const MISSING_RE = /(?:column|relation) .{1,80} does not exist/i;
+export async function healSchema(sql, run) {
+  try {
+    return await run();
+  } catch (err) {
+    if (!MISSING_RE.test(String(err?.message || ''))) throw err;
+    console.warn('healSchema:', err.message);
+    ensured.delete(sql);
+    await ensureSchema(sql);
+    return run();
+  }
+}

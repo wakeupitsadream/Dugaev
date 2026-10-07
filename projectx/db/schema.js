@@ -183,4 +183,15 @@ export const SCHEMA = [
     PRIMARY KEY (event_id, chat_id)
   )`,
   `CREATE TABLE IF NOT EXISTS px_meta (k text PRIMARY KEY, v text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`,
+
+  // v10: ранний доступ — закрытая волна (early) для подписчиков бота до
+  // публичного анонса. Пока ночь в статусе 'early', на сайте её нет, а в боте
+  // бронируют только подписчики и только ранние волны; после публикации
+  // ранние волны больше не продаются. Рассылки: анонс ('ann') и ранний доступ
+  // ('early') — у каждой своя строка broadcasts; scheduled_at — отправка по
+  // времени (её запускают фоновые задачи), reported — владельцу уже сообщили.
+  `ALTER TABLE price_waves ADD COLUMN IF NOT EXISTS early boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'ann'`,
+  `ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS scheduled_at timestamptz`,
+  `ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS reported boolean NOT NULL DEFAULT false`,
 ];

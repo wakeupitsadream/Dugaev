@@ -154,7 +154,7 @@ async function guestAction(kind, id, btn) {
     toast(r.message || 'Не получилось — проверь сеть', 'err', 6000);
     return;
   }
-  toast(kind === 'rename' ? 'Проходка переоформлена' : 'Проходка аннулирована');
+  toast(`${kind === 'rename' ? 'Проходка переоформлена' : 'Проходка аннулирована'}${r.j.notified ? ' — покупателю написали в Telegram' : ' — бот у покупателя не подключён, сообщи ему сам'}`, 'ok', 6000);
   await loadGuests();
   loadStats();
 }

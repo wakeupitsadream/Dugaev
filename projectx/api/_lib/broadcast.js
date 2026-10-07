@@ -49,6 +49,20 @@ export async function subsCount(sql) {
 
 export const SUB_BUTTON = { text: '🔔 Сообщать о новых ночах', callback_data: 'sub:on' };
 
+// Владельцу после публикации (кнопкой в боте или из панели): ссылка на
+// страницу и предложение разослать анонс подписчикам
+export function publishedNotice(origin, slug, title, subs) {
+  const url = `${origin}/e/${slug}`;
+  return {
+    text: `✅ «${title}» в продаже: ${url}` +
+      (subs ? `\n\nРазослать анонс подписчикам бота (${subs})? Каждый получит афишу и кнопку брони.` : ''),
+    markup: { inline_keyboard: [[
+      ...(subs ? [{ text: `📣 Разослать (${subs})`, callback_data: `bc:${slug}` }] : []),
+      { text: '🌐 Открыть страницу', url },
+    ]] },
+  };
+}
+
 // Текст анонса: афиша, дата, место, цена — и две кнопки
 export function announcement(ev, waves, origin) {
   const open = waves.filter((w) => w.public && w.sold < w.quota);

@@ -1170,9 +1170,10 @@ h2 { line-height: 1.1; }
 .pay-box.is-claimed .pay-kicker { color: var(--amber); }
 .pay-box .pay-sum { font-family: var(--font-display); font-weight: 900; font-size: 2rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .pay-rows { display: grid; gap: 6px; margin-top: 4px; }
-.pay-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; border-bottom: 1px dashed var(--line); padding: 8px 0; font-size: 0.92rem; }
-.pay-row span { color: var(--muted); flex: 0 1 auto; }
-.pay-row b { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: auto; }
+.pay-box > * { min-width: 0; }
+.pay-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; align-items: baseline; border-bottom: 1px dashed var(--line); padding: 8px 0; font-size: 0.92rem; }
+.pay-row span { color: var(--muted); flex: 0 1 auto; min-width: 0; }
+.pay-row b { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: auto; max-width: 100%; overflow-wrap: anywhere; }
 /* Мини-логотип банка перед названием: фирменный цвет и буква, без чужих файлов */
 .bank-badge { display: inline-block; width: 18px; height: 18px; border-radius: 5px; vertical-align: -4px; margin-right: 7px; position: relative; background: #555; }
 .bank-badge::after { content: ''; position: absolute; inset: 0; color: #fff; font: 700 12px/18px Arial, sans-serif; text-align: center; }
@@ -1223,8 +1224,15 @@ h2 { line-height: 1.1; }
 /* --- ревью перед запуском: контраст мелкого акцентного текста, экран оплаты, строка над афишей --- */
 :root { --acid-text: #ff474d; } /* 6:1 на чёрном для мелкого текста; заливки остаются --acid */
 .kicker, .pay-kicker, .check a, .st-open, .buy-left b { color: var(--acid-text); }
-.pay-copy-row { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 8px; margin: 10px 0 12px; }
-.pay-copy-row .btn { margin: 0; padding-inline: 10px; }
+/* Три одинаковые кнопки, которые не раздвигаются: колонки не шире трети,
+   подпись не меняется — отметка «скопировано» появляется галочкой */
+.pay-copy { display: grid; gap: 6px; margin: 10px 0 12px; }
+.pay-copy-l { font-size: 0.78rem; color: var(--muted); }
+.pay-copy-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pay-copy-row .btn { margin: 0; min-width: 0; padding-inline: 6px; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pay-copy-row .btn.is-done { border-color: var(--ok); color: var(--ok); }
+.pay-copy-row .btn.is-done::before { content: '✓'; font-family: var(--font-text, system-ui), sans-serif; }
+.pay-copy-note { margin: 0; min-height: 1.2em; font-size: 0.8rem; color: var(--muted); }
 .pay-steps { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 6px; font-size: 0.92rem; color: var(--text); }
 .pay-steps li { line-height: 1.4; }
 .eh-strip { display: none; margin: 0 0 12px; font-weight: 700; letter-spacing: 0.02em; font-size: 0.95rem; }

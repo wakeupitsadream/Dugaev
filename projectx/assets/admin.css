@@ -780,9 +780,18 @@ dialog.dlg[open] .dlg-card { animation: dlg-in 0.24s var(--ease); }
   .drop { max-width: none; aspect-ratio: 16 / 11; }
   .magic-row { grid-template-columns: minmax(0, 1fr); }
   .magic-drop { min-height: 96px; }
-  .pg-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .pg-row .pg-text { grid-column: 1 / 2; grid-row: 2; }
-  .pg-row .pg-acts { grid-row: 1 / 3; grid-column: 2; flex-direction: column; }
+  /* пункт программы — карточкой: заголовок во всю ширину, под ним пояснение
+     и кнопки «выше / ниже / убрать»; между пунктами — зазор, чтобы было
+     видно, какое пояснение к какому заголовку */
+  .pg { gap: 10px; }
+  .pg-row {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "t t" "x a"; gap: 8px;
+    padding: 10px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--line);
+  }
+  .pg-row .in { background: var(--surface); }
+  .pg-row > .in:first-child { grid-area: t; }
+  .pg-row .pg-text { grid-area: x; }
+  .pg-row .pg-acts { grid-area: a; align-items: center; }
   .wr { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 40px; }
   .wr-no { width: 22px; }
   .wr .wr-name { grid-column: 2 / 4; }

@@ -167,6 +167,8 @@ function waveName(ctx, index, total) {
   if (/на\s+входе|на\s+кассе|в\s+день\s+(?:ночи|вечеринки|мероприятия)|на\s+месте|у\s+входа/.test(c)) return { name: 'На входе', door: true };
   if (/втор/.test(c)) return { name: 'Вторая волна' };
   if (/трет/.test(c)) return { name: 'Третья волна' };
+  if (/заключит/.test(c)) return { name: 'Заключительная волна' };
+  if (/финальн/.test(c)) return { name: 'Финальная волна' };
   if (/последн|поздн/.test(c)) return { name: 'Последняя волна' };
   const until = /до\s+(\d{1,2}\.\d{1,2}|\d{1,2}\s+[а-яё]+)/.exec(c);
   if (until) return { name: `До ${until[1]}` };
@@ -297,6 +299,17 @@ function stripMeta(s) {
     .trim();
 }
 
+// Строка-слоган под названием («ВЕЧЕРИНКА С БЕСПЛАТНЫМ БАРОМ»): капсом,
+// короткая, без даты, цены, места и ссылок — это подзаголовок, он идёт
+// первой фразой описания, а не в название
+function isTagline(L) {
+  if (!L || L.blank || L.price || L.cta || L.loc || L.hashtag || L.secret || L.rules || L.dates.length) return false;
+  const t = stripMeta(L.clean);
+  return t.length >= 8 && t.length <= 50 && isCaps(t) && /[А-ЯЁ]{3}/.test(t) && t.split(/\s+/).length >= 2
+    && !VENUE_WORDS.test(t) && !PROGRAM_HEAD_RE.test(L.clean) && !LINEUP_HEAD_RE.test(L.clean)
+    && !new RegExp(`(?<![\\d.])${TIME_SRC}`).test(L.clean);
+}
+
 function findTitle(lines) {
   const firsts = lines.filter((L) => !L.blank).slice(0, 4);
   for (let i = 0; i < firsts.length; i++) {
@@ -309,13 +322,22 @@ function findTitle(lines) {
     if (/^project\s*x$/i.test(t) && firsts[i + 1]) {
       const next = stripMeta(firsts[i + 1].clean);
       if (next.length >= 3 && next.length <= 40 && isCaps(next) && !firsts[i + 1].price) {
-        return { title: `${t} — ${next}`.slice(0, 60), idx: L.idx, idx2: firsts[i + 1].idx };
+        return { title: `${t} — ${next}`.slice(0, 60), idx: L.idx, idx2: firsts[i + 1].idx, tagline: '' };
       }
     }
+    // «PROJECT X TINDER PARTY ВЕЧЕРИНКА С БЕСПЛАТНЫМ БАРОМ» одной строкой:
+    // латинское название + русский слоган капсом — делим на два
+    const split = /^([A-Z0-9][A-Z0-9 :&'’.!×x-]*?[A-Z0-9!])\s+([А-ЯЁ][А-ЯЁ0-9 ,.!«»"-]{6,})$/.exec(t);
+    if (split && t.length > 30 && split[1].split(/\s+/).length >= 2 && split[2].split(/\s+/).length >= 2) {
+      return { title: split[1], idx: L.idx, tagline: split[2] };
+    }
     if (t.length > 60) t = t.slice(0, 60).replace(/\s+\S*$/, '');
-    return { title: t, idx: L.idx };
+    // слоган строкой ниже
+    const next = firsts[i + 1];
+    if (next && !/^project\s*x$/i.test(t) && isTagline(next)) return { title: t, idx: L.idx, idx2: next.idx, tagline: stripMeta(next.clean) };
+    return { title: t, idx: L.idx, tagline: '' };
   }
-  return { title: null, idx: -1 };
+  return { title: null, idx: -1, tagline: '' };
 }
 
 function findLineup(lines) {
@@ -334,18 +356,100 @@ function findLineup(lines) {
   return { lineup: out, used };
 }
 
+// Капс в строке поста — крик, а не смысл: «БЕСПЛАТНЫЙ БАР ВСЁ ВРЕМЯ» →
+// «Бесплатный бар всё время». Короткие латинские сокращения (DJ, MC, PS5,
+// FC/DC) и слова с цифрами оставляем как есть.
+const PHRASES = { 'show program': 'Шоу-программа', 'шоу программа': 'Шоу-программа' };
+const KEEP_CAPS = /^(?:[A-Z]{1,3}\d*|[A-Z]+\/[A-Z]+|\S*\d\S*)$/;
+function sentenceCase(s) {
+  const t = String(s || '').trim();
+  if (!isCaps(t)) return t;
+  return cap(t.split(/(\s+)/).map((w) => (KEEP_CAPS.test(w) ? w : w.toLowerCase())).join(''));
+}
+const lowerFirst = (s) => (/^[А-ЯЁA-Z][а-яёa-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s);
+// хвост заголовка не обрывается на предлоге, союзе или знаке
+const DANGLING = new Set(['в', 'во', 'на', 'с', 'со', 'и', 'а', 'для', 'по', 'из', 'к', 'у', 'о', 'об', 'от', 'до', 'за', 'под', 'над', 'при', 'без', 'через', 'или', 'где', 'что', 'как', 'же']);
+function tidyTitle(s) {
+  let t = String(s || '').replace(/[\s,;:/|(«"—–-]+$/, '').trim();
+  if (t.length > 40) t = t.slice(0, 38).replace(/\s+\S*$/, '');
+  const words = t.split(/\s+/);
+  while (words.length > 1 && DANGLING.has(words[words.length - 1].toLowerCase())) words.pop();
+  return words.join(' ').replace(/[\s,;:/|(«"—–-]+$/, '').trim();
+}
+// непарную скобку из обрезанной строки поста убираем
+function balance(s) {
+  let t = s;
+  if ((t.match(/\(/g) || []).length > (t.match(/\)/g) || []).length) t = t.replace(/\(\s*/, '');
+  if ((t.match(/\)/g) || []).length > (t.match(/\(/g) || []).length) t = t.replace(/\s*\)(?!.*\))/, '');
+  return t;
+}
+
+// Пункт программы: короткий заголовок + пояснение. Короткая строка — целиком
+// заголовок; длинная делится на естественной границе (двоеточие, «/», тире,
+// скобка, запятая), а причастный или придаточный оборот уходит в пояснение:
+// «4 комнаты сделанные в разных стилях: …» → «4 комнаты» + «Сделанные в…»
 function toProgramItem(text) {
-  const t = cap(text.replace(/[.;]+$/, '').trim());
+  let t = sentenceCase(text.replace(/[.;]+$/, '').trim());
+  t = cap(PHRASES[t.toLowerCase()] || t);
   if (!t) return null;
-  const colon = t.indexOf(':');
-  if (colon > 2 && colon <= 40) {
-    const rest = cap(t.slice(colon + 1).trim());
-    return { title: t.slice(0, colon).trim(), text: rest ? `${rest}.` : '' };
+  if (t.length <= 40) return { title: tidyTitle(t) || t, text: '' };
+  const m = /\s*:\s*|\s+\/\s*|\/\s+|\s+[—–-]\s+|\s*\(|,\s*/.exec(t);
+  let title = m && m.index >= 3 ? t.slice(0, m.index) : t;
+  const clause = /\s(?:сделанн|созданн|оформленн|посвящ[её]нн|выполненн|которы|где\s|чтобы\s)/i.exec(title);
+  if (clause && clause.index >= 3) title = title.slice(0, clause.index);
+  title = tidyTitle(title);
+  const rest = balance(t.slice(title.length).replace(/^[\s,;:/|(—–-]+/, '').trim());
+  return { title, text: rest ? `${cap(rest.replace(/[.;,]+$/, ''))}.` : '' };
+}
+
+// Главное из программы — для описания: бар, welcome, шоу и т.п. вперёд,
+// не больше четырёх, без того, что уже сказано в слогане
+const HIGHLIGHT = [/бар(?![а-яё]{3})/i, /welcome|велком/i, /шоу|show/i, /фонтан/i, /комнат/i, /танцпол/i, /кальян/i, /конкурс|приз/i, /караоке|турнир|игр/i, /фото/i];
+function highlights(program, tagline, n = 4) {
+  const said = String(tagline || '').toLowerCase();
+  const scored = program
+    .map((p, i) => {
+      const phrase = lowerFirst(p.title.split(/,\s*/)[0].trim());
+      const k = HIGHLIGHT.findIndex((re) => re.test(p.title));
+      return { phrase, i, k: k < 0 ? 99 : k };
+    })
+    .filter((x) => x.phrase.length >= 3 && !(said && said.includes(x.phrase.toLowerCase().slice(0, 5))));
+  scored.sort((a, b) => a.k - b.k || a.i - b.i);
+  return scored.slice(0, n).map((x) => x.phrase);
+}
+const listRu = (xs) => (xs.length < 2 || / и /.test(xs[xs.length - 1])
+  ? xs.join(', ')
+  : `${xs.slice(0, -1).join(', ')} и ${xs[xs.length - 1]}`);
+
+// Условия входа — одной фразой бренда, а не обрывком строки поста
+function conditions(rulesText, ageRating, ageFound) {
+  const fcdc = /fc\s*[|/\\]\s*dc|фейс-?контрол|дресс-?код/i.test(rulesText);
+  const sport = /спортивн/i.test(rulesText);
+  if (!fcdc && !sport && !ageFound) return '';
+  let s = `Строго ${ageRating}+${/паспорт/i.test(rulesText) || ageFound ? ' по паспорту' : ''}`;
+  if (fcdc) s += ', FC/DC';
+  if (sport) s += ' — в спортивной одежде не пустим';
+  return `${s}.`;
+}
+
+// Описание ночи: связный текст поста, если он есть; иначе — короткий
+// рассказ из разобранного: слоган, главное из программы, кто за пультом,
+// условия входа. Весь список программы — в блоках «Что внутри», не здесь.
+function buildDescr({ tagline, prose, program, lineup, rulesText, ageRating, ageFound }) {
+  const lead = tagline ? `${sentenceCase(tagline).replace(/[.!…]+$/, '')}.` : '';
+  const text = prose.map(sentenceCase).map((p) => (/[.!?…]$/.test(p) ? p : `${p}.`)).join(' ');
+  if (text.length >= 60) {
+    const cond = conditions(rulesText, ageRating, ageFound);
+    const body = [lead, text].filter(Boolean).join(' ');
+    return { descr: [body, cond && !/fc\s*\/\s*dc|паспорт|спортивн/i.test(body) ? cond : ''].filter(Boolean).join(' '), auto: false };
   }
-  const comma = t.search(/,|\s[—–-]\s/);
-  if (comma > 2 && comma <= 40) return { title: t.slice(0, comma).trim(), text: `${t}.` };
-  if (t.length <= 40) return { title: t, text: '' };
-  return { title: t.slice(0, 36).replace(/\s+\S*$/, ''), text: `${t}.` };
+  const hi = highlights(program, tagline);
+  if (!lead && !hi.length) return { descr: text, auto: false };
+  const parts = [lead, text];
+  if (hi.length) parts.push(`В программе — ${listRu(hi)}.`);
+  if (lineup.length) parts.push(`За пультом — ${listRu(lineup.slice(0, 3))}.`);
+  parts.push(conditions(rulesText, ageRating, ageFound));
+  return { descr: parts.filter(Boolean).join(' '), auto: true };
 }
 
 // text → { draft, found, notes }
@@ -399,7 +503,7 @@ export function parsePost(text, { nowMs = Date.now(), offsetMin = 300 } = {}) {
   }
 
   // ---- название ----
-  const { title, idx: titleIdx, idx2: titleIdx2 } = findTitle(lines);
+  const { title, idx: titleIdx, idx2: titleIdx2, tagline } = findTitle(lines);
   if (!title) notes.push('Название не найдено — впиши его');
 
   // ---- адрес и площадка ----
@@ -439,8 +543,8 @@ export function parsePost(text, { nowMs = Date.now(), offsetMin = 300 } = {}) {
       || (streetLc && L.clean.toLowerCase().includes(streetLc))
       || /^(?:место|где|локация|площадка|адрес|вход|время|начало|старт|двери|сбор|цена|билеты|проходки)\s*[:—–-]/i.test(L.clean);
     if (meta) continue;
-    // правила входа — в описание, только если это фраза, а не «18+ FC/DC»
-    if (L.rules) { if (L.clean.length >= 25) rules.push(/[.!?…]$/.test(L.clean) ? L.clean : `${L.clean}.`); continue; }
+    // правила входа — в описание одной фразой бренда (см. conditions)
+    if (L.rules) { rules.push(L.clean); continue; }
     if ((L.bullet || inProgram) && L.clean.length >= 6) {
       const item = toProgramItem(L.clean);
       if (item && program.length < 12) program.push(item);
@@ -448,13 +552,8 @@ export function parsePost(text, { nowMs = Date.now(), offsetMin = 300 } = {}) {
     }
     if (L.clean.length >= 20 && /[а-яё]{3}/i.test(L.clean)) prose.push(L.clean);
   }
-  let descr = prose.join(' ');
-  if (descr.length < 40 && program.length) {
-    const items = program.map((p) => p.title.charAt(0).toLowerCase() + p.title.slice(1));
-    descr = `В программе: ${items.join(', ')}.`;
-  }
-  const tail = rules.filter((r) => !descr.includes(r)).join(' ');
-  descr = `${descr} ${tail}`.replace(/\s{2,}/g, ' ').trim();
+  const built = buildDescr({ tagline, prose, program, lineup, rulesText: rules.join(' '), ageRating, ageFound: Boolean(ageM) });
+  let descr = built.descr.replace(/\s{2,}/g, ' ').trim();
   if (descr.length > 700) descr = `${descr.slice(0, 700).replace(/\s+\S*$/, '')}…`;
 
   const draft = {
@@ -475,6 +574,9 @@ export function parsePost(text, { nowMs = Date.now(), offsetMin = 300 } = {}) {
     title: Boolean(title), date: Boolean(date), timeStart: Boolean(timeStart), timeEnd: Boolean(timeEnd),
     age: Boolean(ageM), venue: Boolean(venue), address: Boolean(address) || secret, waves: waves.length,
     lineup: lineup.length, program: program.length, descr: descr.length >= 40,
+    // описание собрано из программы, а не взято из текста поста: ИИ (если
+    // подключён) может написать лучше
+    descrAuto: built.auto,
   };
   return { draft, found, notes };
 }

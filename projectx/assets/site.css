@@ -56,10 +56,27 @@ body.menu-open .site-header {
 }
 body.menu-open .site-header::before { display: none; }
 /* Липкая кнопка приходит снизу, когда карточка ночи ушла с экрана, и уходит
-   тем же путём — в том числе под меню. */
-.site-v3 .sticky-cta { transform: translateY(110%); visibility: hidden; transition: transform 260ms var(--ease-drawer), visibility 0s linear 260ms; }
-.site-v3 .sticky-cta.is-on { transform: none; visibility: visible; transition-delay: 0s; }
-body.menu-open .sticky-cta.is-on { transform: translateY(110%); visibility: hidden; transition-delay: 0s, 260ms; }
+   тем же путём — в том числе под меню.
+   Safari 26 на iPhone красит зону своей нижней панели в цвет закреплённого
+   внизу элемента — даже скрытого через visibility или сдвинутого за край.
+   Поэтому скрытая кнопка уходит из вёрстки целиком (display: none), а у
+   видимой полоса под кнопкой — сплошного цвета страницы: панель остаётся
+   чёрной, а не красной. Плавный переход сверху — отдельным слоем. */
+.site-v3 .sticky-cta {
+  background: var(--bg);
+  transform: translateY(110%);
+  transition: transform 260ms var(--ease-drawer), display 260ms allow-discrete;
+}
+.site-v3 .sticky-cta::before {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px;
+  background: linear-gradient(transparent, var(--bg)); pointer-events: none;
+}
+@media (max-width: 760px) {
+  .site-v3 .sticky-cta { display: none; }
+  .site-v3 .sticky-cta.is-on { display: block; transform: none; }
+  @starting-style { .site-v3 .sticky-cta.is-on { transform: translateY(110%); } }
+  body.menu-open.site-v3 .sticky-cta.is-on { display: none; transform: translateY(110%); }
+}
 
 /* Бургер: две линии складываются в X — знак бренда и есть «закрыть» */
 .burger {
@@ -254,6 +271,7 @@ body.menu-open { overflow: hidden; }
 
 /* Ближайшая ночь: карточка-билет внизу сцены */
 .next-night {
+  color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent;
   position: relative; z-index: 4; margin-top: clamp(24px, 6vw, 48px);
   display: grid; grid-template-columns: auto 1fr; gap: 14px 16px; align-items: center;
   padding: 16px; border-radius: var(--radius);
@@ -490,9 +508,7 @@ body.menu-open { overflow: hidden; }
 @starting-style { #pane-form:not(.hidden), #pane-success:not(.hidden), #pane-fallback:not(.hidden) { opacity: 0; filter: blur(2px); } }
 @media (prefers-reduced-motion: reduce) {
   #wave-note, .err { transform: none !important; }
-  .site-v3 .sticky-cta { transform: none; transition: opacity 150ms ease, visibility 0s linear 150ms; opacity: 0; }
-  .site-v3 .sticky-cta.is-on { opacity: 1; }
-  body.menu-open .sticky-cta.is-on { transform: none; opacity: 0; }
+  .site-v3 .sticky-cta, .site-v3 .sticky-cta.is-on { transform: none; transition: none; }
   .menu nav { transform: none; }
 }
 

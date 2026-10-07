@@ -211,7 +211,12 @@ async function voidTicket(req, res, b, by) {
   const t = rowsOf(await q(db(), VOID_SQL, [id, status, note ? `${note} (${by})` : by]))[0];
   if (!t) return fail(res, 409, 'not_voidable', 'Проходку нельзя аннулировать: её нет, она не оплачена (неоплаченную бронь отменяй целиком), уже использована или отозвана');
   await notifyOwner(`🚫 Проходка ${id} (${t.holder_name}) ${status === 'refunded' ? 'возвращена' : 'аннулирована'}${note ? ': ' + note : ''} — ${by}`);
-  ok(res, { ticket_id: id, status });
+  // покупателю — в его чат с ботом: QR больше не действует, и почему
+  const why = note ? ` Причина: ${note.replace(/[.!\s]+$/, '')}.` : '';
+  const sent = await tellGuest(t.tg_chat_id, status === 'refunded'
+    ? `↩️ Проходка «${t.title}» на имя ${t.holder_name} аннулирована, деньги за неё возвращены.${why} QR по ней больше не действует. Вопросы — пиши сюда.`
+    : `⛔️ Проходка «${t.title}» на имя ${t.holder_name} аннулирована.${why} QR по ней больше не действует. Если это ошибка — напиши сюда, разберёмся.`);
+  ok(res, { ticket_id: id, status, notified: Boolean(sent) });
 }
 
 async function rename(req, res, b, by) {
@@ -222,5 +227,8 @@ async function rename(req, res, b, by) {
   const t = rowsOf(await q(db(), RENAME_SQL, [id, name]))[0];
   if (!t) return fail(res, 409, 'not_editable', 'Переоформить нельзя: проходка использована или отозвана');
   await notifyOwner(`✏️ Проходка ${id} переоформлена на ${name} — ${by}`);
-  ok(res, { ticket_id: id, holder_name: t.holder_name });
+  const sent = t.old_name && t.old_name !== t.holder_name
+    ? await tellGuest(t.tg_chat_id, `✏️ Проходка «${t.title}» переоформлена: была на ${t.old_name}, теперь на ${t.holder_name}. Ссылка и QR прежние — перешли проходку новому гостю; на входе сверят имя с паспортом.`)
+    : null;
+  ok(res, { ticket_id: id, holder_name: t.holder_name, notified: Boolean(sent) });
 }

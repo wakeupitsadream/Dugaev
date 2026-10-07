@@ -25,7 +25,9 @@ export function mergeAi(rules, ai) {
   if (x.secret === true && !d.secret) { d.secret = true; d.address = ''; took.push('secret'); }
   if ([16, 18].includes(Number(x.ageRating)) && !rules.found.age) d.ageRating = Number(x.ageRating);
   // описание и программа: у ИИ обычно лучше связный текст
-  if (x.descr && x.descr.length >= 40 && (!rules.found.descr || /^В программе:/.test(d.descr))) { d.descr = x.descr.slice(0, 1500); took.push('descr'); }
+  // описание правила собирают из программы, если в посте нет связного текста
+  // (descrAuto) — тогда текст ИИ лучше
+  if (x.descr && x.descr.length >= 40 && (!rules.found.descr || rules.found.descrAuto || /^В программе:/.test(d.descr))) { d.descr = x.descr.slice(0, 1500); took.push('descr'); }
   if (Array.isArray(x.program) && x.program.length > d.program.length) { d.program = x.program.slice(0, 12); took.push('program'); }
   if (Array.isArray(x.lineup) && x.lineup.length > d.lineup.length) { d.lineup = x.lineup.slice(0, 10); took.push('lineup'); }
   // цены: правила знают «первые 50» и «на входе»; ИИ — если правила ничего не нашли

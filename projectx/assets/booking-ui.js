@@ -29,18 +29,22 @@ export function payBlockHtml(order, bot, opts = {}) {
   return `
   <div class="pay-box ${claimed ? 'is-claimed' : ''}" id="pay-box">
     <div class="pay-kicker">${claimed ? 'Ждём подтверждение' : 'Оплата переводом'}</div>
-    <div class="pay-sum">${fmtRub(order.amountRub)} ₽</div>
+    <div class="pay-sum" id="pay-sum">${fmtRub(order.amountRub)} ₽</div>
     ${qty > 1 ? `<p class="pay-note">Одним переводом за все ${qty} проходки платит тот, кто бронировал. Если платишь ты — укажи код брони.</p>` : ''}
     <div class="pay-rows">
-      <div class="pay-row"><span>СБП по номеру</span><b>${esc(t.phone || '—')}</b></div>
+      <div class="pay-row"><span>СБП по номеру</span><b id="pay-phone">${esc(t.phone || '—')}</b></div>
       ${t.bank ? `<div class="pay-row"><span>Банк получателя</span><b>${t.bankKey ? `<i class="bank-badge bank-${esc(t.bankKey)}" aria-hidden="true"></i>` : ''}${esc(t.bank)}</b></div>` : ''}
       ${t.recipient ? `<div class="pay-row"><span>Получатель</span><b>${esc(t.recipient)}</b></div>` : ''}
       <div class="pay-row"><span>Код в комментарии</span><b class="pay-code" id="pay-code">${esc(order.payCode || '')}</b></div>
     </div>
-    <div class="pay-copy-row">
-      <button class="btn btn-ghost" id="pay-copy" type="button">Скопировать код</button>
-      <button class="btn btn-ghost" id="pay-copy-phone" type="button">Номер</button>
-      <button class="btn btn-ghost" id="pay-copy-sum" type="button">Сумму</button>
+    <div class="pay-copy">
+      <span class="pay-copy-l">Скопировать</span>
+      <div class="pay-copy-row">
+        <button class="btn btn-ghost" id="pay-copy" type="button">Код</button>
+        <button class="btn btn-ghost" id="pay-copy-phone" type="button">Номер</button>
+        <button class="btn btn-ghost" id="pay-copy-sum" type="button">Сумму</button>
+      </div>
+      <p class="pay-copy-note" id="pay-copy-note" aria-live="polite"></p>
     </div>
     <ol class="pay-steps">
       <li>Открой приложение своего банка → Переводы → <b>По номеру телефона</b>.</li>
@@ -62,22 +66,43 @@ export function payBlockHtml(order, bot, opts = {}) {
 // Навешивает копирование кода и «Я перевёл». onClaimed(claimedAt) — коллбек.
 export function bindPayBlock(order, { onClaimed } = {}) {
   const t = SITE.transfer || {};
-  const copyBtn = (id, value, label, fallback) => {
+  // Подпись кнопки не меняется — меняется только отметка рядом: длинное
+  // «Скопировано» раздвигало ряд, и весь блок оплаты уезжал за край экрана
+  const note = $('pay-copy-note');
+  let noteTimer = 0;
+  const say = (text) => {
+    if (!note) return;
+    note.textContent = text;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { note.textContent = ''; }, 2600);
+  };
+  const copyBtn = (id, value, what, sourceId) => {
     const b = $(id);
     if (!b) return;
     b.onclick = async () => {
+      for (const other of document.querySelectorAll('.pay-copy-row .btn')) other.classList.remove('is-done');
       try {
         await navigator.clipboard.writeText(value);
-        b.textContent = 'Скопировано';
+        b.classList.add('is-done');
+        say(`${what} скопирован${what === 'Сумма' ? 'а' : ''} — вставь в приложении банка`);
+        setTimeout(() => b.classList.remove('is-done'), 2600);
       } catch {
-        b.textContent = fallback;
+        // буфер недоступен (встроенный браузер) — выделяем значение, копирует сам человек
+        const src = sourceId && $(sourceId);
+        if (src && window.getSelection) {
+          const range = document.createRange();
+          range.selectNodeContents(src);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        say(`Не получилось скопировать — ${what.toLowerCase()} выделен${what === 'Сумма' ? 'а' : ''}, скопируй вручную`);
       }
-      setTimeout(() => { b.textContent = label; }, 2500);
     };
   };
-  copyBtn('pay-copy', order.payCode || '', 'Скопировать код', 'Выдели код и скопируй');
-  copyBtn('pay-copy-phone', String(t.phone || '').replace(/[^\d+]/g, ''), 'Номер', 'Выдели номер');
-  copyBtn('pay-copy-sum', String(order.amountRub || ''), 'Сумму', 'Выдели сумму');
+  copyBtn('pay-copy', order.payCode || '', 'Код', 'pay-code');
+  copyBtn('pay-copy-phone', String(t.phone || '').replace(/[^\d+]/g, ''), 'Номер', 'pay-phone');
+  copyBtn('pay-copy-sum', String(order.amountRub || ''), 'Сумма', 'pay-sum');
   const claim = $('pay-claim');
   if (claim) claim.onclick = async () => {
     claim.disabled = true;

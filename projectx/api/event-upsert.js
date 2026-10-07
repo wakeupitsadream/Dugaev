@@ -20,6 +20,9 @@ import { ADMIN_EVENTS_SQL } from './_lib/queries.js';
 import { loadExisting, saveEvent, deleteEvent, publishCheck } from './_lib/event-store.js';
 import { analyzePost } from './_lib/analyze.js';
 import { extractorAvailable } from './_lib/extract.js';
+import { notifyOwner } from './_lib/tg.js';
+import { siteOrigin } from './_lib/booking.js';
+import { subsCount, publishedNotice } from './_lib/broadcast.js';
 
 const rowsOf = (r) => r.rows || r;
 const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
@@ -148,11 +151,24 @@ async function save(req, res, sql) {
 
   try {
     const r = await saveEvent(sql, parsed);
+    const published = e.status === 'onsale' && (!existing || existing.status !== 'onsale');
+    // опубликовали из панели — владельцу в Telegram то же, что после кнопки
+    // в боте: ссылка и предложение разослать анонс подписчикам
+    let notified = false;
+    if (published) {
+      try {
+        const notice = publishedNotice(siteOrigin(req), e.id, e.title, await subsCount(sql));
+        notified = Boolean(await notifyOwner(notice.text, notice.markup));
+      } catch (err) {
+        console.warn('publish notice failed:', err.message);
+      }
+    }
     return ok(res, {
       event_id: e.id,
       created: !existing,
       status: e.status,
-      published: e.status === 'onsale' && (!existing || existing.status !== 'onsale'),
+      published,
+      notified,
       waves: r.waves,
       warnings: r.warnings,
     });

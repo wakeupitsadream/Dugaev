@@ -11,7 +11,7 @@ import { saveEvent, uniqueEventId, publishCheck, deleteEvent } from './event-sto
 import { analyzePost } from './analyze.js';
 import { parsePost } from '../../assets/post-parse.js';
 import { storeMedia, fetchTelegramFile } from './media.js';
-import { runBroadcast, subsCount, broadcastStatus } from './broadcast.js';
+import { runBroadcast, subsCount, broadcastStatus, publishedNotice } from './broadcast.js';
 import {
   rowsOf, fmtDay, fmtTimeOnly, plural, originOf, escHtml, sender, callOf, posterUrl,
   loadEvent, nearestEvent, eventWaves,
@@ -285,15 +285,8 @@ export async function ownerCallback(action, arg, cb, deps, answer) {
     }
     await answer('Опубликовано — уже на сайте');
     await stamp('✅ Опубликовано — уже на сайте');
-    const subs = await subsCount(sql);
-    await sender(deps, chatId)(
-      `✅ «${check.event.title}» в продаже: ${originOf(deps)}/e/${arg}` +
-        (subs ? `\n\nРазослать анонс подписчикам бота (${subs})? Каждый получит афишу и кнопку брони.` : ''),
-      { inline_keyboard: [[
-        ...(subs ? [{ text: `📣 Разослать (${subs})`, callback_data: `bc:${arg}` }] : []),
-        { text: '🌐 Открыть страницу', url: `${originOf(deps)}/e/${arg}` },
-      ]] }
-    );
+    const notice = publishedNotice(originOf(deps), arg, check.event.title, await subsCount(sql));
+    await sender(deps, chatId)(notice.text, notice.markup);
     return { done: 'published', slug: arg };
   }
 

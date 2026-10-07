@@ -688,7 +688,7 @@ async function save(status, btn) {
   if (r.j.published) {
     const cur = nightById(state.night);
     if (!cur || !['onsale', 'soldout', 'live'].includes(phaseOf(cur))) setNight(id);
-    publishedDialog(ev || { id, title: ed.f.title });
+    publishedDialog(ev || { id, title: ed.f.title }, Boolean(r.j.notified));
   } else {
     toast(status === 'draft' ? (r.j.created ? 'Черновик сохранён' : 'Сохранено') : status === 'past' ? 'Ночь в архиве' : 'Сохранено');
   }
@@ -748,7 +748,7 @@ async function statusAction(act, btn) {
   }
 }
 
-async function publishedDialog(ev) {
+async function publishedDialog(ev, notified = false) {
   const url = siteUrl(ev);
   const subs = state.subs;
   const v = await dialog({
@@ -757,7 +757,8 @@ async function publishedDialog(ev) {
       <div class="linkbox"><code>${esc(url)}</code><button type="button" class="b b-sm" data-copy>${icon('copy')}Копировать</button></div>
       ${subs
         ? `<p><b>Анонс подписчикам бота</b><br><span class="small muted">${subs} ${plural(subs, 'человек ждёт', 'человека ждут', 'человек ждут')} новую ночь — анонс с афишей и кнопкой брони придёт в Telegram.</span></p>`
-        : '<p class="small muted">Подписчиков анонсов в боте пока нет — их собирает кнопка «Узнать первым» на сайте и ссылка в постах.</p>'}`,
+        : '<p class="small muted">Подписчиков анонсов в боте пока нет — их собирает кнопка «Узнать первым» на сайте и ссылка в постах.</p>'}
+      ${notified ? '<p class="small muted">Ссылка и кнопка рассылки пришли и тебе в Telegram — можно разослать оттуда.</p>' : ''}`,
     actions: [
       { label: 'Готово', value: 'done', kind: 'ghost' },
       subs ? { label: 'Разослать анонс', value: 'bc', kind: 'primary', icon: 'send' } : { label: 'Открыть страницу', value: 'open', kind: 'primary', icon: 'external' },

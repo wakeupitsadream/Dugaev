@@ -173,14 +173,21 @@ dec AS (
   UPDATE price_waves w SET sold = GREATEST(0, w.sold - 1)
   FROM orders o, t WHERE o.id = t.order_id AND w.id = o.wave_id
 )
-SELECT id, holder_name FROM t`;
+SELECT t.id, t.holder_name, o.tg_chat_id, e.title
+FROM t JOIN orders o ON o.id = t.order_id JOIN events e ON e.id = o.event_id`;
 
 // Переоформление на другого человека: имя меняется, QR остаётся тем же.
+// Возвращает и прежнее имя, и чат покупателя — ему сообщаем о замене.
 // Параметры: $1 ticket_id, $2 новое имя
 export const RENAME_SQL = `
-UPDATE tickets SET holder_name = $2
-WHERE id = $1 AND status IN ('active', 'reserved') AND checked_in_at IS NULL
-RETURNING id, holder_name`;
+WITH prev AS (SELECT holder_name FROM tickets WHERE id = $1),
+t AS (
+  UPDATE tickets SET holder_name = $2
+  WHERE id = $1 AND status IN ('active', 'reserved') AND checked_in_at IS NULL
+  RETURNING id, holder_name, order_id
+)
+SELECT t.id, t.holder_name, (SELECT holder_name FROM prev) AS old_name, o.tg_chat_id, e.title
+FROM t JOIN orders o ON o.id = t.order_id JOIN events e ON e.id = o.event_id`;
 
 // Ожидающие подтверждения брони — для админки и двери. Сначала те, где гость
 // уже нажал «Я перевёл». Параметры: $1 event_id

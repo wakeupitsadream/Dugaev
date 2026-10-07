@@ -137,8 +137,9 @@ async function guestAction(kind, id, btn) {
       title: `Аннулировать проходку?`,
       body: `<p><b>${esc(t.holder_name)}</b> · ${esc(code(id))}. Вход по ней перестанет работать, место вернётся в продажу.</p>
         <div class="radios">
-          <label class="radio"><input type="radio" name="kind" value="refunded" checked /><span><b>Деньги вернули</b><small>В выручке и выгрузке — как возврат</small></span></label>
-          <label class="radio"><input type="radio" name="kind" value="revoked" /><span><b>Без возврата</b><small>Например, проходка выдана по ошибке</small></span></label>
+          <label class="radio"><input type="radio" name="kind" value="refunded" checked /><span><b>Деньги вернули</b><small>Сумма уйдёт из выручки, в выгрузке — как возврат</small></span></label>
+          <label class="radio"><input type="radio" name="kind" value="revoked" /><span><b>Без возврата</b><small>Деньги остаются в выручке — например, не пустили за нарушение правил</small></span></label>
+          <label class="radio"><input type="radio" name="kind" value="unpaid" /><span><b>Оплата не пришла</b><small>Подтвердили по ошибке — снимется вся бронь, сумма уйдёт из выручки</small></span></label>
         </div>
         <input class="in" name="note" placeholder="Причина — необязательно" maxlength="200" autocomplete="off" />`,
       actions: [
@@ -154,7 +155,8 @@ async function guestAction(kind, id, btn) {
     toast(r.message || 'Не получилось — проверь сеть', 'err', 6000);
     return;
   }
-  toast(`${kind === 'rename' ? 'Проходка переоформлена' : 'Проходка аннулирована'}${r.j.notified ? ' — покупателю написали в Telegram' : ' — бот у покупателя не подключён, сообщи ему сам'}`, 'ok', 6000);
+  const done = kind === 'rename' ? 'Проходка переоформлена' : body.status === 'unpaid' ? 'Бронь снята' : 'Проходка аннулирована';
+  toast(`${done}${r.j.notified ? ' — покупателю написали в Telegram' : ' — бот у покупателя не подключён, сообщи ему сам'}`, 'ok', 6000);
   await loadGuests();
   loadStats();
 }

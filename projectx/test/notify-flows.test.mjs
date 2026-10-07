@@ -28,7 +28,8 @@ after(() => { globalThis.fetch = realFetch; });
 const { db, ensureSchema } = await import('../api/_lib/db.js');
 const { default: upsert } = await import('../api/event-upsert.js');
 const { default: walkin } = await import('../api/walkin.js');
-const { ORDER_SQL } = await import('../api/_lib/queries.js');
+const { default: stats } = await import('../api/stats.js');
+const { ORDER_SQL, ADMIN_EVENTS_SQL } = await import('../api/_lib/queries.js');
 
 const res = () => ({
   code: 0, body: null, headers: {},
@@ -118,4 +119,47 @@ test('бот у покупателя не подключён — честно «
   assert.equal(r.code, 200);
   assert.equal(r.body.notified, false);
   assert.equal(sentTg.filter((x) => String(x.payload.chat_id) !== '9001').length, 0);
+});
+
+test('оплата не пришла: бронь снимается целиком — места назад, покупателю честное сообщение', async () => {
+  const ev = (await db().query(`SELECT id FROM events WHERE title = 'NOTIFY NIGHT'`))[0].id;
+  const sold = async () => (await db().query(`SELECT sold FROM price_waves WHERE event_id = $1 AND wave_no = 1`, [ev]))[0].sold;
+  await db().query(ORDER_SQL, [
+    2, ev, 1, 'ord_notify0003', 'Ошибочный Платёж', '+79160005566', null, null,
+    ['ntfytkt004', 'ntfytkt005'], ['Ошибочный Платёж', 'Друг Пять'], ['adult', 'adult'], 'door', 180, null, false,
+  ]);
+  await db().query(`UPDATE orders SET tg_chat_id = 7008, pay_code = 'PX-OOPS' WHERE id = 'ord_notify0003'`);
+  const was = await sold();
+  sentTg.length = 0;
+  const r = await call(walkin, { action: 'void', ticket_id: 'ntfytkt005', status: 'unpaid', note: 'перевода нет в выписке', by: 'Максим' });
+  assert.equal(r.code, 200, JSON.stringify(r.body));
+  assert.equal(r.body.tickets, 2);
+  assert.equal(r.body.notified, true);
+  assert.match(toChat(7008).at(-1).payload.text, /^⛔️ Бронь PX-OOPS на «NOTIFY NIGHT» снята: оплата по ней не пришла\. Причина: перевода нет в выписке\. QR по этим проходкам больше не действует\. Если ты переводил — пришли сюда чек/);
+  assert.ok(toChat(9001).some((x) => /Бронь PX-OOPS снята: оплата не пришла \(2 шт\.\)/.test(x.payload.text)));
+  assert.equal((await db().query(`SELECT status FROM orders WHERE id = 'ord_notify0003'`))[0].status, 'cancelled');
+  assert.deepEqual((await db().query(`SELECT status FROM tickets WHERE order_id = 'ord_notify0003' ORDER BY id`)).map((x) => x.status), ['cancelled', 'cancelled']);
+  assert.equal(await sold(), was - 2, 'оба места вернулись в продажу');
+  // второй раз снимать нечего
+  const again = await call(walkin, { action: 'void', ticket_id: 'ntfytkt004', status: 'unpaid', by: 'Максим' });
+  assert.equal(again.code, 409);
+});
+
+test('выручка: возврат вычитается, «без возврата» остаётся, снятая бронь не считается — в сводке панели и списке ночей', async () => {
+  const ev = (await db().query(`SELECT id FROM events WHERE title = 'NOTIFY NIGHT'`))[0].id;
+  const amount = async (id) => (await db().query(`SELECT amount_rub FROM orders WHERE id = $1`, [id]))[0].amount_rub;
+  const a1 = await amount('ord_notify0001'); // 2 проходки: одна возвращена, одна снята без возврата
+  const a2 = await amount('ord_notify0002'); // 1 проходка, снята без возврата
+  assert.ok(a1 > 0 && a2 > 0);
+  const expected = a1 - a1 / 2 + a2; // ord_notify0003 — оплата не пришла, её нет
+  const r = res();
+  await stats({ method: 'GET', headers: ADMIN, query: { event_id: ev } }, r);
+  assert.equal(r.code, 200, JSON.stringify(r.body));
+  assert.equal(r.body.revenue_rub, expected);
+  assert.deepEqual(r.body.refunded, { n: 1, rub: a1 / 2 });
+  const list = res();
+  await stats({ method: 'GET', headers: ADMIN, query: { include_drafts: '1' } }, list);
+  assert.equal(list.body.events.find((e) => e.id === ev).revenue_rub, expected);
+  const adm = (await db().query(ADMIN_EVENTS_SQL)).find((e) => e.id === ev);
+  assert.equal(adm.revenue, expected);
 });

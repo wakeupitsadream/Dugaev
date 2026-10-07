@@ -10,7 +10,7 @@
 import { isAdmin, isBot, roleOf } from './_lib/auth.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
-import { EXPIRE_SQL, PENDING_SQL, SOURCES_SQL } from './_lib/queries.js';
+import { EXPIRE_SQL, PENDING_SQL, SOURCES_SQL, revenueSql } from './_lib/queries.js';
 
 export default async function handler(req, res) {
   noStore(res);
@@ -57,8 +57,7 @@ export default async function handler(req, res) {
                 count(t.id) FILTER (WHERE t.status = 'active')::int AS sold,
                 count(t.id) FILTER (WHERE t.status = 'reserved')::int AS reserved,
                 count(t.id) FILTER (WHERE t.checked_in_at IS NOT NULL)::int AS checked_in,
-                coalesce((SELECT sum(o.amount_rub) FROM orders o
-                          WHERE o.event_id = e.id AND o.status = 'paid'), 0)::int AS revenue_rub
+                ${revenueSql('e.id')} AS revenue_rub
          FROM events e
          LEFT JOIN tickets t ON t.event_id = e.id
          WHERE ($1::bool OR e.status <> 'draft')
@@ -77,8 +76,7 @@ export default async function handler(req, res) {
                 count(t.id) FILTER (WHERE t.status = 'reserved')::int AS reserved,
                 count(t.id) FILTER (WHERE t.checked_in_at IS NOT NULL)::int AS checked_in,
                 count(t.id) FILTER (WHERE t.age_cat = 'minor' AND t.status = 'active')::int AS minors,
-                coalesce((SELECT sum(o.amount_rub) FROM orders o
-                          WHERE o.event_id = $1 AND o.status = 'paid'), 0)::int AS revenue_rub,
+                ${revenueSql('$1')} AS revenue_rub,
                 coalesce((SELECT sum(o.amount_rub) FROM orders o
                           WHERE o.event_id = $1 AND o.status = 'pending'), 0)::int AS pending_rub
          FROM tickets t WHERE t.event_id = $1`,
@@ -120,11 +118,11 @@ export default async function handler(req, res) {
       sql.query(PENDING_SQL, [eventId]),
       sql.query(SOURCES_SQL, [eventId]),
       sql.query(`SELECT title, starts_at, capacity, secret, address, venue FROM events WHERE id = $1`, [eventId]),
-      // возвращённые проходки: их деньги вычитаем из выручки
+      // возвращённые проходки: их доля уже вычтена из выручки (revenueSql)
       sql.query(
-        `SELECT count(*)::int AS n, coalesce(sum(w.price_rub), 0)::int AS rub
-         FROM tickets t JOIN orders o ON o.id = t.order_id JOIN price_waves w ON w.id = o.wave_id
-         WHERE t.event_id = $1 AND t.status = 'refunded'`,
+        `SELECT count(*)::int AS n, round(coalesce(sum(o.amount_rub::numeric / GREATEST(o.qty, 1)), 0))::int AS rub
+         FROM tickets t JOIN orders o ON o.id = t.order_id
+         WHERE t.event_id = $1 AND t.status = 'refunded' AND o.status = 'paid'`,
         [eventId]
       ),
     ]), 8000);

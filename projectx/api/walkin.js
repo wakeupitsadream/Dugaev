@@ -15,7 +15,7 @@ import { roleOf, staffName } from './_lib/auth.js';
 import { notifyOwner } from './_lib/tg.js';
 import { normalizePayCode, isOrderId, deliverTickets, tellGuest, siteOrigin } from './_lib/booking.js';
 import {
-  ORDER_SQL, CHECKIN_SQL, NEXT_WAVE_SQL, CONFIRM_SQL, CANCEL_SQL, VOID_SQL, RENAME_SQL, CLOSE_EXPIRED_SQL,
+  ORDER_SQL, CHECKIN_SQL, NEXT_WAVE_SQL, CONFIRM_SQL, CANCEL_SQL, VOID_SQL, UNPAY_SQL, RENAME_SQL, CLOSE_EXPIRED_SQL,
 } from './_lib/queries.js';
 
 const rowsOf = (r) => r.rows || r;
@@ -206,8 +206,9 @@ async function cancel(req, res, b, by) {
 async function voidTicket(req, res, b, by) {
   const id = String(b.ticket_id || '').toLowerCase();
   if (!/^[0-9a-z]{10}$/.test(id)) return fail(res, 400, 'validation', 'Некорректный номер проходки');
-  const status = b.status === 'refunded' ? 'refunded' : 'revoked';
   const note = String(b.note || '').trim().slice(0, 120) || null;
+  if (b.status === 'unpaid') return unpay(res, id, note, by);
+  const status = b.status === 'refunded' ? 'refunded' : 'revoked';
   const t = rowsOf(await q(db(), VOID_SQL, [id, status, note ? `${note} (${by})` : by]))[0];
   if (!t) return fail(res, 409, 'not_voidable', 'Проходку нельзя аннулировать: её нет, она не оплачена (неоплаченную бронь отменяй целиком), уже использована или отозвана');
   await notifyOwner(`🚫 Проходка ${id} (${t.holder_name}) ${status === 'refunded' ? 'возвращена' : 'аннулирована'}${note ? ': ' + note : ''} — ${by}`);
@@ -217,6 +218,18 @@ async function voidTicket(req, res, b, by) {
     ? `↩️ Проходка «${t.title}» на имя ${t.holder_name} аннулирована, деньги за неё возвращены.${why} QR по ней больше не действует. Вопросы — пиши сюда.`
     : `⛔️ Проходка «${t.title}» на имя ${t.holder_name} аннулирована.${why} QR по ней больше не действует. Если это ошибка — напиши сюда, разберёмся.`);
   ok(res, { ticket_id: id, status, notified: Boolean(sent) });
+}
+
+// Оплату подтвердили по ошибке — перевод так и не пришёл: снимаем бронь
+// целиком (все её проходки), сумма уходит из выручки
+async function unpay(res, id, note, by) {
+  const o = rowsOf(await q(db(), UNPAY_SQL, [id, note ? `оплата не пришла: ${note} (${by})` : `оплата не пришла (${by})`]))[0];
+  if (!o) return fail(res, 409, 'not_unpayable', 'Снять оплату нельзя: бронь не оплачена или по ней уже кто-то вошёл — тогда снимай проходки по одной');
+  await notifyOwner(`↩️ Бронь ${o.pay_code || o.id} снята: оплата не пришла (${o.n} шт.)${note ? ': ' + note : ''} — ${by}`);
+  const why = note ? ` Причина: ${note.replace(/[.!\s]+$/, '')}.` : '';
+  const sent = await tellGuest(o.tg_chat_id,
+    `⛔️ Бронь${o.pay_code ? ` ${o.pay_code}` : ''} на «${o.title}» снята: оплата по ней не пришла.${why} QR ${o.n > 1 ? 'по этим проходкам' : 'по ней'} больше не действует. Если ты переводил — пришли сюда чек или скрин перевода, разберёмся.`);
+  ok(res, { order_id: o.id, status: 'cancelled', tickets: o.n, notified: Boolean(sent) });
 }
 
 async function rename(req, res, b, by) {

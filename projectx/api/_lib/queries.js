@@ -162,7 +162,8 @@ SELECT id, tg_chat_id FROM o`;
 // по ней не прошли вход; место возвращается в волну. Неоплаченную бронь
 // снимают целиком через CANCEL_SQL — иначе место вернулось бы дважды
 // (здесь и при сгорании/отмене заказа). Параметры: $1 ticket_id,
-// $2 новый статус ('revoked' | 'refunded'), $3 причина
+// $2 новый статус ('revoked' | 'refunded'), $3 причина. Подтверждённую по
+// ошибке бронь (оплата не пришла) снимает целиком UNPAY_SQL.
 export const VOID_SQL = `
 WITH t AS (
   UPDATE tickets SET status = $2, note = $3
@@ -175,6 +176,33 @@ dec AS (
 )
 SELECT t.id, t.holder_name, o.tg_chat_id, e.title
 FROM t JOIN orders o ON o.id = t.order_id JOIN events e ON e.id = o.event_id`;
+
+// Подтвердили по ошибке — оплата так и не пришла: бронь целиком снова
+// отменена, её проходки гаснут, места возвращаются в продажу, из выручки
+// она уходит. Если по брони кто-то уже вошёл — ничего не меняем.
+// Параметры: $1 ticket_id (любая проходка брони), $2 пометка
+export const UNPAY_SQL = `
+WITH cand AS (
+  SELECT o.id, o.wave_id FROM orders o
+  WHERE o.id = (SELECT order_id FROM tickets WHERE id = $1) AND o.status = 'paid'
+    AND NOT EXISTS (SELECT 1 FROM tickets x WHERE x.order_id = o.id AND x.checked_in_at IS NOT NULL)
+  FOR UPDATE
+),
+t AS (
+  UPDATE tickets SET status = 'cancelled', note = $2
+  WHERE order_id IN (SELECT id FROM cand) AND status = 'active'
+  RETURNING id
+),
+dec AS (
+  UPDATE price_waves w SET sold = GREATEST(0, w.sold - (SELECT count(*) FROM t))
+  FROM cand c WHERE w.id = c.wave_id
+),
+o AS (
+  UPDATE orders SET status = 'cancelled' FROM cand c WHERE orders.id = c.id
+  RETURNING orders.id, orders.pay_code, orders.tg_chat_id, orders.event_id
+)
+SELECT o.id, o.pay_code, o.tg_chat_id, e.title, (SELECT count(*) FROM t)::int AS n
+FROM o JOIN events e ON e.id = o.event_id`;
 
 // Переоформление на другого человека: имя меняется, QR остаётся тем же.
 // Возвращает и прежнее имя, и чат покупателя — ему сообщаем о замене.
@@ -313,12 +341,22 @@ UPDATE price_waves SET public = false
 WHERE event_id = $1 AND NOT (wave_no = ANY($2::int[])) AND public
 RETURNING wave_no`;
 
+// Выручка ночи: оплаченные брони минус доля возвращённых проходок (сумма
+// брони / число проходок в ней). Проходка, снятая «без возврата», остаётся
+// в выручке — деньги у организатора. ev — SQL-выражение с id ночи.
+export const revenueSql = (ev) => `round(
+  coalesce((SELECT sum(o.amount_rub) FROM orders o WHERE o.event_id = ${ev} AND o.status = 'paid'), 0)
+  - coalesce((SELECT sum(o.amount_rub::numeric / GREATEST(o.qty, 1))
+              FROM tickets t JOIN orders o ON o.id = t.order_id
+              WHERE o.event_id = ${ev} AND o.status = 'paid' AND t.status = 'refunded'), 0)
+)::int`;
+
 // Афиша для админки: все события, включая черновики (на сайте их не видно).
 export const ADMIN_EVENTS_SQL = `
 SELECT e.id, e.title, e.city, e.venue, e.address, e.starts_at, e.ends_at,
        e.age_rating, e.status, e.descr, e.secret, e.capacity, e.poster_url, e.lineup, e.program,
        (SELECT count(*) FROM orders o WHERE o.event_id = e.id AND o.status = 'pending')::int AS pending,
-       (SELECT coalesce(sum(o.amount_rub), 0) FROM orders o WHERE o.event_id = e.id AND o.status = 'paid')::int AS revenue,
+       ${revenueSql('e.id')} AS revenue,
        COALESCE(json_agg(json_build_object(
          'waveNo', w.wave_no, 'name', w.name, 'priceRub', w.price_rub,
          'quota', w.quota, 'sold', w.sold, 'public', w.public

@@ -17,7 +17,7 @@ import {
   loadEvent, nearestEvent, eventWaves,
 } from './bot-kit.js';
 import { fmtRub } from '../../assets/waves.js';
-import { EXPIRE_SQL } from './queries.js';
+import { EXPIRE_SQL, revenueSql } from './queries.js';
 
 export const OWNER_COMMANDS = [
   { command: 'stats', description: 'Сводка по ближайшей ночи' },
@@ -198,7 +198,7 @@ export async function ownerStats(deps, chatId) {
     `SELECT
        (SELECT count(*) FROM tickets t WHERE t.event_id = $1 AND t.status = 'active')::int AS sold,
        (SELECT count(*) FROM tickets t WHERE t.event_id = $1 AND t.checked_in_at IS NOT NULL)::int AS inside,
-       (SELECT coalesce(sum(amount_rub), 0) FROM orders o WHERE o.event_id = $1 AND o.status = 'paid')::int AS revenue,
+       ${revenueSql('$1')} AS revenue,
        (SELECT count(*) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending')::int AS pend,
        (SELECT coalesce(sum(amount_rub), 0) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending')::int AS pend_rub,
        (SELECT count(*) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending' AND o.claimed_at IS NOT NULL)::int AS claimed`,

@@ -92,7 +92,7 @@ function renderKpis(s) {
   const refunded = s.refunded && s.refunded.n ? s.refunded : null;
   const tiles = [
     { n: sold, l: 'Оплачено проходок', s: sold ? `переводом ${online} · на входе ${door}` : 'продаж пока нет', cls: 'is-acc' },
-    { n: rub(s.revenue_rub || 0), l: 'Выручка', s: refunded ? `возвраты: ${refunded.n} на ${rub(refunded.rub)}` : `переводом ${rub(onlineRub)} · касса ${rub(doorRub)}` },
+    { n: rub(s.revenue_rub || 0), l: 'Выручка', s: refunded ? `за вычетом ${refunded.n} ${plural(refunded.n, 'возврата', 'возвратов', 'возвратов')} на ${rub(refunded.rub)}` : `переводом ${rub(onlineRub)} · касса ${rub(doorRub)}` },
     {
       n: pendingN, l: 'Ждут оплаты', href: '#orders', cls: pendingN ? 'is-warn' : '',
       s: pendingN ? `${pending.length} ${plural(pending.length, 'бронь', 'брони', 'броней')} · ${rub(pendingRub)}${claimed ? ` · ${claimed} уже ${plural(claimed, 'перевёл', 'перевели', 'перевели')}` : ''}` : 'все брони закрыты',

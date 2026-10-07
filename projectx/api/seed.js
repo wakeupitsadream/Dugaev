@@ -6,13 +6,19 @@
 import { SCHEMA } from '../db/schema.js';
 import { EVENTS } from '../assets/data/events.js';
 import { demoWaves } from '../assets/waves.js';
-import { db, hasDb } from './_lib/db.js';
+import { db, hasDb, ensureSchema } from './_lib/db.js';
 import { isAdmin } from './_lib/auth.js';
-import { paymentMode, TEST_PHONE } from './_lib/booking.js';
+import { paymentMode, TEST_PHONE, siteOrigin } from './_lib/booking.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
+import { tgApi, tgCall } from './_lib/tg.js';
+import { runTick } from './_lib/tick.js';
 
 export default async function handler(req, res) {
   noStore(res);
+  // Планировщик (cron-job.org и т.п.) дёргает GET /api/seed?tick=1 раз в 1–5
+  // минут: напоминания о бронях и лист ожидания (api/_lib/tick.js). Ключ не
+  // нужен — работа идемпотентна и всё равно не чаще раза в минуту.
+  if (String(req.query?.tick || '') === '1') return tick(req, res);
   if (!onlyMethod(req, res, 'POST')) return;
   if (!isAdmin(req)) return fail(res, 403, 'forbidden', 'Нужен админ-ключ');
   if (!hasDb()) return fail(res, 503, 'db_unavailable', 'DATABASE_URL не настроен');
@@ -102,3 +108,16 @@ del_tickets AS (
 )
 DELETE FROM orders WHERE id IN (SELECT id FROM doomed)
 RETURNING id`;
+
+async function tick(req, res) {
+  if (!hasDb()) return fail(res, 503, 'db_unavailable', 'DATABASE_URL не настроен');
+  try {
+    const sql = db();
+    await ensureSchema(sql);
+    const r = await runTick({ sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req) });
+    return ok(res, { ran: !r.skipped, reminded: r.reminded || 0, waitlist: r.waitlist || 0 });
+  } catch (err) {
+    console.error('tick failed:', err);
+    return fail(res, 500, 'tick_failed', 'Фоновые задачи не отработали');
+  }
+}

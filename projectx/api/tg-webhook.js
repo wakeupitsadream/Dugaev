@@ -21,9 +21,10 @@ import { isAdmin } from './_lib/auth.js';
 import { notifyOwner, tgApi, tgCall, tgBotUsername } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
-import { parseOrderStart, transferText, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer } from './_lib/booking.js';
+import { parseOrderStart, transferText, transferHtml, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer } from './_lib/booking.js';
 import { placeOrder, nextWaveOf, nextWaveFor, seatsLeft, ownerNotice, ownerNoticeMarkup, liveUntilMs } from './_lib/order-core.js';
-import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL, CLAIM_SQL, CLOSE_EXPIRED_SQL } from './_lib/queries.js';
+import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL, CLAIM_SQL, CLOSE_EXPIRED_SQL, WAITLIST_JOIN_SQL, WAITLIST_LEAVE_SQL } from './_lib/queries.js';
+import { runTick } from './_lib/tick.js';
 import { normalizePhone, fmtTime, formatRuPhoneDigits } from '../assets/ticket-format.js';
 import { ladderText, fmtRub } from '../assets/waves.js';
 import { SITE } from '../assets/data/config.js';
@@ -125,6 +126,16 @@ export default async function handler(req, res) {
     });
     // одна строка на апдейт: что пришло, кому, чем кончилось и сколько заняло
     console.log(`tg-webhook: ${kind} chat=${chat} "${head}" -> ${r?.done} (${Date.now() - t0} ms)`);
+    // попутно — фоновые задачи (на всех не чаще раза в минуту): напоминания
+    // о бронях и лист ожидания живут, даже если планировщик не настроен.
+    // Своя обёртка: их сбой не должен превращаться в «что-то сломалось» гостю
+    if (sql) {
+      try {
+        await runTick({ sql, tg: tgApi, call: tgCall, nowMs: Date.now(), origin: siteOrigin(req) });
+      } catch (e) {
+        console.warn('tg-webhook: tick failed:', e.message);
+      }
+    }
   } catch (e) {
     console.error(`tg-webhook failed: ${kind} chat=${chat} "${head}" (${Date.now() - t0} ms):`, e);
     // гость не должен получать тишину в ответ: коротко скажем, что сломалось
@@ -498,6 +509,9 @@ async function handleMessage(msg, deps) {
       return { done: 'linked', order: o.id };
     }
     if (/^buy/i.test(payload)) return startWizard(chatId, deps, null);
+    // с распроданной страницы ночи: «Сообщить, если появится место»
+    const wl = /^wl_([a-z0-9][a-z0-9-]{0,39})$/i.exec(payload);
+    if (wl) return joinWaitlist(chatId, deps, wl[1].toLowerCase());
     const welcome = await sendWelcome(chatId, deps, { intro: true });
     return { done: 'start', welcome };
   }
@@ -760,6 +774,42 @@ async function sendWelcome(chatId, deps, { intro }) {
   return t.ok ? { via: 'text', ...(photoError ? { photo_error: photoError } : {}) } : { via: 'none', error: t.error, ...(photoError ? { photo_error: photoError } : {}) };
 }
 
+// ---------- лист ожидания ----------
+// Распроданная ночь: гость встаёт в очередь, освободились места — бот пишет
+// ждущим по очереди (api/_lib/tick.js). Подписка на анонсы тут ни при чём.
+const waitlistMarkup = (eventId) => ({
+  inline_keyboard: [[{ text: '⏳ Встать в лист ожидания', callback_data: `wl:${eventId}` }], [SUB_BUTTON]],
+});
+
+async function joinWaitlist(chatId, deps, eventId) {
+  const send = sender(deps, chatId);
+  await clearSession(deps.sql, chatId);
+  const ev = await loadEvent(deps.sql, eventId);
+  if (!ev || ev.status !== 'onsale' || liveUntilMs(ev) <= deps.nowMs) {
+    await send('Эта ночь уже не продаётся. Следующую объявим здесь — подпишись, чтобы узнать первым.', { inline_keyboard: [[SUB_BUTTON]] });
+    return { done: 'waitlist_closed' };
+  }
+  const left = await seatsLeft(deps.sql, ev.id);
+  if (left.total > 0) {
+    await send(
+      `На <b>${escHtml(ev.title)}</b> места ещё есть — бронируй, пока не разобрали.`,
+      { inline_keyboard: [[{ text: '🎟 Забронировать', callback_data: `buy:${ev.id}` }]] },
+      true
+    );
+    return { done: 'waitlist_has_seats', event: ev.id };
+  }
+  const added = rowsOf(await deps.sql.query(WAITLIST_JOIN_SQL, [ev.id, chatId])).length > 0;
+  await send(
+    added
+      ? `⏳ Готово — ты в листе ожидания на <b>${escHtml(ev.title)}</b> · ${escHtml(fmtWhen(ev.starts_at))}.\n\n` +
+        'Освободится место — напишем сюда. Пишем по очереди: кто раньше встал, тот раньше узнает.'
+      : `⏳ Ты уже в листе ожидания на <b>${escHtml(ev.title)}</b> — напишем, как только освободится место.`,
+    { inline_keyboard: [[{ text: '✖ Выйти из листа ожидания', callback_data: `wlx:${ev.id}` }]] },
+    true
+  );
+  return { done: added ? 'waitlist_joined' : 'waitlist_already', event: ev.id };
+}
+
 // Шаг 1: сколько проходок. eventId=null — ближайшая ночь.
 async function startWizard(chatId, deps, eventId, { force = false } = {}) {
   const send = sender(deps, chatId);
@@ -792,7 +842,7 @@ async function startWizard(chatId, deps, eventId, { force = false } = {}) {
   const wave = await nextWaveOf(deps.sql, ev.id);
   if (!wave) {
     await clearSession(deps.sql, chatId);
-    await send('Всё продано 😔 Подпишись — напишем, если места освободятся и когда объявим следующую ночь.', { inline_keyboard: [[SUB_BUTTON]] });
+    await send('Всё продано 😔 Встань в лист ожидания — напишем, как только освободится место.', waitlistMarkup(ev.id));
     return { done: 'wizard_sold_out' };
   }
   await setSession(deps.sql, chatId, 'qty', {
@@ -864,7 +914,7 @@ async function wizardQty(chatId, deps, s, n) {
       return { done: 'wizard_qty_cap', maxOne: left.maxOne };
     }
     await clearSession(deps.sql, chatId);
-    await send(`Все проходки проданы 😔 Если что-то освободится — расскажем в ${SITE.instagramName}.`);
+    await send('Все проходки проданы 😔 Встань в лист ожидания — напишем, как только освободится место.', waitlistMarkup(d.eventId));
     return { done: 'wizard_sold_out' };
   }
   const sum = `${n} ${plural(n, 'проходка', 'проходки', 'проходок')} × ${fmtRub(d.priceRub)} ₽ = <b>${fmtRub(n * d.priceRub)} ₽</b>.${escHtml(note)}`;
@@ -1025,11 +1075,12 @@ async function wizardBook(chatId, deps, cb, run = null) {
     }
     await clearSession(deps.sql, chatId);
     await send(
-      r.error === 'wave_sold_out' ? 'Все проходки проданы 😔'
+      r.error === 'wave_sold_out' ? 'Все проходки проданы 😔 Встань в лист ожидания — напишем, как только освободится место.'
         : r.error === 'sales_closed' ? 'Продажи на эту ночь закрыты.'
           : r.error === 'too_many' ? `${r.message}.`
             : r.error === 'validation' ? `${r.message}. Начни заново: /buy`
-              : 'Не получилось оформить — попробуй через минуту: /buy'
+              : 'Не получилось оформить — попробуй через минуту: /buy',
+      r.error === 'wave_sold_out' ? waitlistMarkup(d.eventId) : undefined
     );
     return { done: 'wizard_failed', error: r.error };
   }
@@ -1053,17 +1104,10 @@ async function wizardBook(chatId, deps, cb, run = null) {
     return { done: 'booked', order: order.id, paid: true };
   }
   const T = SITE.transfer || {};
-  // номер и код — в <code>: тап по ним в Telegram копирует
-  const lines = [
-    `Сумма: <b>${fmtRub(order.amount)} ₽</b>`,
-    T.phone ? `СБП по номеру: <code>${escHtml(T.phone)}</code>${T.bank ? ` (${escHtml(T.bank)})` : ''}` : null,
-    T.recipient ? `Получатель: <b>${escHtml(T.recipient)}</b>` : null,
-    `Код брони в комментарии: <code>${escHtml(order.code)}</code>`,
-  ].filter(Boolean);
   await send(
     `🎟 Бронь <b>${escHtml(order.code)}</b> оформлена\n${what}\n` +
       `${order.qty === 1 ? 'Гость' : 'Гости'}: ${order.names.map(escHtml).join(', ')}\n\n` +
-      `${lines.join('\n')}\n\n` +
+      `${transferHtml(order.amount, order.code)}\n\n` +
       `Как перевести: приложение банка → «По номеру телефона» → номер выше${T.bank ? ` → банк ${escHtml(T.bank)}` : ''} → сумма → в комментарии код брони.\n\n` +
       `Бронь держим до <b>${escHtml(fmtWhen(order.expiresAt))}</b>. Перевёл — жми кнопку, QR придут сюда, как только увидим перевод.`,
     { inline_keyboard: [[{ text: '✅ Я перевёл', callback_data: `claim:${order.id}` }]] },
@@ -1075,7 +1119,7 @@ async function wizardBook(chatId, deps, cb, run = null) {
 // ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, ...(text ? { text } : {}) });
-  const m = /^(pub|skip|hide|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  const m = /^(pub|skip|hide|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu|wl|wlx):([\w-]{1,64})$/.exec(String(cb.data || ''));
   if (!m || !deps.sql) {
     await answer('Кнопка устарела — /start');
     return { done: 'callback_bad' };
@@ -1096,6 +1140,16 @@ async function handleCallback(cb, deps) {
   if (action === 'more') {
     await answer();
     return startWizard(guestChat, deps, arg, { force: true });
+  }
+  if (action === 'wl') {
+    await answer();
+    return joinWaitlist(guestChat, deps, arg);
+  }
+  if (action === 'wlx') {
+    const r = rowsOf(await deps.sql.query(WAITLIST_LEAVE_SQL, [arg, guestChat]));
+    await answer(r.length ? 'Убрали из листа ожидания' : 'Тебя нет в листе ожидания');
+    if (r.length) await dropButtons(cb, deps);
+    return { done: r.length ? 'waitlist_left' : 'waitlist_not_in' };
   }
   if (action === 'sub') {
     if (arg === 'off') {

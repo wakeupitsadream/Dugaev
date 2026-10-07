@@ -25,6 +25,7 @@ const store = {
   consent: false,
   showingDone: false,
   sending: false,
+  waitlist: false,     // всё продано: кнопки ведут в лист ожидания в боте
 };
 
 init();
@@ -211,9 +212,13 @@ function renderWaves() {
     store.wave = waveFor(e.waves, store.qty);
   }
   const soldOut = !a;
+  // распродано — кнопка ведёт в лист ожидания в боте (без бота — просто серая)
+  store.waitlist = soldOut && Boolean(SITE.telegramBot);
   for (const btn of [$('buy-open'), $('sticky-buy')]) {
-    btn.disabled = soldOut;
-    btn.textContent = soldOut ? 'Все проходки проданы' : `Взять проходку · ${fmtRub(a.priceRub)} ₽`;
+    btn.disabled = soldOut && !store.waitlist;
+    btn.textContent = soldOut
+      ? (store.waitlist ? 'Сообщить, если появится место' : 'Все проходки проданы')
+      : `Взять проходку · ${fmtRub(a.priceRub)} ₽`;
   }
   updateTotal();
 }
@@ -274,14 +279,23 @@ function bindSheet() {
     drag.close();
   };
 
-  $('buy-open').onclick = open;
-  for (const id of ['buy-open', 'sticky-buy']) $(id).addEventListener('click', () => track('booking_open'), { passive: true });
-  $('sticky-buy').onclick = open;
+  // распродано — вместо шторки бот: встать в лист ожидания
+  const go = (counted) => {
+    if (store.waitlist) {
+      track('waitlist_open');
+      location.href = waitlistUrl();
+      return;
+    }
+    if (counted) track('booking_open');
+    open();
+  };
+  $('buy-open').onclick = () => go(true);
+  $('sticky-buy').onclick = () => go(true);
   for (const id of ['header-buy', 'menu-buy']) {
     const el = $(id);
     if (!el) continue;
     el.href = '#buy';
-    el.onclick = (ev) => { ev.preventDefault(); closeMenu(); open(); };
+    el.onclick = (ev) => { ev.preventDefault(); closeMenu(); go(false); };
   }
   // Системная «назад» (Android, стрелка in-app браузера) закрывает лист, а не
   // уводит со страницы: открытие кладёт запись в историю, popstate её снимает.
@@ -701,6 +715,11 @@ async function submitOrder() {
   showFallback();
 }
 
+// Лист ожидания распроданной ночи — в боте (/start wl_<id>)
+function waitlistUrl() {
+  return `https://t.me/${encodeURIComponent(SITE.telegramBot)}?start=wl_${encodeURIComponent(store.event.id)}`;
+}
+
 function handleSoldOut(j) {
   const e = store.event;
   const nextWave = j.next_wave || null;
@@ -731,7 +750,9 @@ function handleSoldOut(j) {
     }
     store.wave = null;
     renderWaves();
-    return alertNote('Только что забрали последние проходки. Следи за анонсами — бывают возвраты.', 'error', { href: '/#afisha', label: 'Другие ночи на афише' });
+    return SITE.telegramBot
+      ? alertNote('Только что забрали последние проходки. Встань в лист ожидания — бот напишет, если место освободится.', 'error', { href: waitlistUrl(), label: 'Встать в лист ожидания' })
+      : alertNote('Только что забрали последние проходки. Следи за анонсами — бывают возвраты.', 'error', { href: '/#afisha', label: 'Другие ночи на афише' });
   }
   store.wave = waveFor(e.waves, store.qty) || { waveNo: nextWave.waveNo, name: nextWave.name, priceRub: nextWave.priceRub, left: nextWave.left };
   renderWaves();

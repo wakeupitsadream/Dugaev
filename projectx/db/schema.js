@@ -168,4 +168,19 @@ export const SCHEMA = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+
+  // v9: фоновые задачи. Напоминание гостю, что бронь скоро сгорит, — одно
+  // на бронь (reminded_at). Лист ожидания распроданной ночи: освободились
+  // места — бот пишет ждущим по очереди, один раз на запись (notified_at).
+  // px_meta.k = 'tick' — когда задачи запускались в последний раз: чаще
+  // раза в минуту работа не делается, кто бы её ни дёрнул.
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS reminded_at timestamptz`,
+  `CREATE TABLE IF NOT EXISTS waitlist (
+    event_id    text NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    chat_id     bigint NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    notified_at timestamptz,
+    PRIMARY KEY (event_id, chat_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS px_meta (k text PRIMARY KEY, v text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`,
 ];

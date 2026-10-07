@@ -201,7 +201,8 @@ export async function ownerStats(deps, chatId) {
        ${revenueSql('$1')} AS revenue,
        (SELECT count(*) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending')::int AS pend,
        (SELECT coalesce(sum(amount_rub), 0) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending')::int AS pend_rub,
-       (SELECT count(*) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending' AND o.claimed_at IS NOT NULL)::int AS claimed`,
+       (SELECT count(*) FROM orders o WHERE o.event_id = $1 AND o.status = 'pending' AND o.claimed_at IS NOT NULL)::int AS claimed,
+       (SELECT count(*) FROM waitlist l WHERE l.event_id = $1 AND l.notified_at IS NULL)::int AS waiting`,
     [ev.id]
   ))[0] || {};
   const waves = (await eventWaves(sql, ev.id)).filter((w) => w.public);
@@ -213,6 +214,7 @@ export async function ownerStats(deps, chatId) {
     `💰 Выручка: <b>${fmtRub(s.revenue || 0)} ₽</b>\n` +
     `🕒 Ждут оплаты: ${s.pend || 0} ${plural(Number(s.pend || 0), 'бронь', 'брони', 'броней')}${s.pend ? ` · ${fmtRub(s.pend_rub)} ₽` : ''}${s.claimed ? ` · ${s.claimed} нажали «Я перевёл»` : ''}\n` +
     `🚪 Вошло: ${s.inside || 0}\n` +
+    (s.waiting ? `⏳ В листе ожидания: ${s.waiting}\n` : '') +
     (waves.length ? `\n${waves.map((w) => `${escHtml(w.name)}: ${w.sold}/${w.quota} · ${fmtRub(w.priceRub)} ₽`).join('\n')}\n` : '') +
     `\n🔔 Подписчиков анонсов: ${subs}`;
   await sender(deps, chatId)(text, {

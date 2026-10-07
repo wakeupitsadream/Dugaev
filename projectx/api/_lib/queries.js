@@ -364,3 +364,64 @@ SELECT e.id, e.title, e.city, e.venue, e.address, e.starts_at, e.ends_at,
 FROM events e LEFT JOIN price_waves w ON w.event_id = e.id
 GROUP BY e.id
 ORDER BY e.starts_at DESC`;
+
+// ---------- фоновые задачи (api/_lib/tick.js) ----------
+
+// Не чаще раза в минуту: строка возвращается, только если прошлый запуск
+// был больше 50 секунд назад (или его не было) — атомарно на все копии функции
+export const TICK_SQL = `
+INSERT INTO px_meta (k, v) VALUES ('tick', 'on')
+ON CONFLICT (k) DO UPDATE SET updated_at = now()
+WHERE px_meta.updated_at < now() - interval '50 seconds'
+RETURNING k`;
+
+// Бронь сгорит через полчаса, а «Я перевёл» не нажато — напомнить в чат с
+// ботом. Один раз на бронь: reminded_at ставится тем же стейтментом, и два
+// параллельных запуска не напомнят дважды. Свежую бронь не трогаем — человек
+// ещё в приложении банка; за три минуты до конца напоминать уже поздно.
+export const REMIND_SQL = `
+UPDATE orders o SET reminded_at = now()
+FROM events e
+WHERE e.id = o.event_id AND o.reminded_at IS NULL AND o.status = 'pending' AND o.claimed_at IS NULL
+  AND o.id IN (
+    SELECT id FROM orders
+    WHERE status = 'pending' AND claimed_at IS NULL AND reminded_at IS NULL AND tg_chat_id IS NOT NULL
+      AND expires_at > now() + interval '3 minutes' AND expires_at <= now() + interval '30 minutes'
+      AND created_at <= now() - interval '10 minutes'
+    ORDER BY expires_at LIMIT 25
+  )
+RETURNING o.id, o.pay_code, o.amount_rub, o.qty, o.expires_at, o.tg_chat_id, e.title, e.starts_at`;
+
+// Лист ожидания. Встать; кому уже написали — встаёт в конец очереди заново.
+// Строка возвращается, только если запись новая. $1 event_id, $2 chat_id
+export const WAITLIST_JOIN_SQL = `
+INSERT INTO waitlist (event_id, chat_id) VALUES ($1, $2)
+ON CONFLICT (event_id, chat_id) DO UPDATE SET created_at = now(), notified_at = NULL
+WHERE waitlist.notified_at IS NOT NULL
+RETURNING chat_id`;
+export const WAITLIST_LEAVE_SQL = `DELETE FROM waitlist WHERE event_id = $1 AND chat_id = $2 RETURNING chat_id`;
+
+// Ночи в продаже, где кто-то ждёт, — со свободными местами на сайте
+export const WAITLIST_DUE_SQL = `
+SELECT e.id, e.title, e.starts_at,
+       (SELECT COALESCE(SUM(GREATEST(0, w.quota - w.sold)), 0) FROM price_waves w
+        WHERE w.event_id = e.id AND w.public)::int AS seats
+FROM events e
+WHERE e.status = 'onsale' AND COALESCE(e.ends_at, e.starts_at + interval '8 hours') > now()
+  AND EXISTS (SELECT 1 FROM waitlist l WHERE l.event_id = e.id AND l.notified_at IS NULL)`;
+
+// Кто уже взял бронь на эту ночь — выбывает из очереди без сообщения
+export const WAITLIST_SKIP_BOOKED_SQL = `
+UPDATE waitlist l SET notified_at = now()
+WHERE l.event_id = $1 AND l.notified_at IS NULL
+  AND EXISTS (SELECT 1 FROM orders o WHERE o.event_id = $1 AND o.tg_chat_id = l.chat_id
+                AND o.status IN ('pending', 'paid'))`;
+
+// Первые $2 ждущих по времени записи — им пишем сейчас
+export const WAITLIST_CLAIM_SQL = `
+UPDATE waitlist SET notified_at = now()
+WHERE event_id = $1 AND notified_at IS NULL AND chat_id IN (
+  SELECT chat_id FROM waitlist WHERE event_id = $1 AND notified_at IS NULL
+  ORDER BY created_at LIMIT $2
+)
+RETURNING chat_id`;

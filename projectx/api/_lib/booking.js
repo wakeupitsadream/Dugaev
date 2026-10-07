@@ -71,6 +71,19 @@ export function transferText(amountRub, payCode) {
   return transferLines(amountRub, payCode).map(([k, v]) => `${k}: ${v}`).join('\n');
 }
 
+// Реквизиты для сообщений бота с разметкой HTML: номер и код в <code> —
+// тап по ним в Telegram копирует
+const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+export function transferHtml(amountRub, payCode) {
+  const t = SITE.transfer || {};
+  return [
+    `Сумма: <b>${fmtRub(amountRub)} ₽</b>`,
+    t.phone ? `СБП по номеру: <code>${escHtml(t.phone)}</code>${t.bank ? ` (${escHtml(t.bank)})` : ''}` : null,
+    t.recipient ? `Получатель: <b>${escHtml(t.recipient)}</b>` : null,
+    payCode ? `Код брони в комментарии: <code>${escHtml(payCode)}</code>` : null,
+  ].filter(Boolean).join('\n');
+}
+
 export function ticketLinks(tickets, origin) {
   const secret = primarySecret();
   return (tickets || []).map((t) => ({

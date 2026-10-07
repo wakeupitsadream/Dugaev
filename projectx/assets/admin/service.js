@@ -92,9 +92,15 @@ async function selfTest() {
       row(Boolean(t.ok && t.j.ticket), 'проходка открывается', t.j?.ticket?.holderName);
       const v1 = await api(`/api/verify?token=${encodeURIComponent(token)}`);
       row(v1.j?.status === 'active', 'скан: проходка активна', v1.j?.status);
-      const c1 = await api('/api/checkin', { method: 'POST', body: { token, by: 'самотест' } });
-      row(c1.ok && c1.j.first === true, 'вход: впущен', c1.j?.checked_in_at ? fmtTime(c1.j.checked_in_at) : '');
-      const c2 = await api('/api/checkin', { method: 'POST', body: { token, by: 'самотест' } });
+      let c1 = await api('/api/checkin', { method: 'POST', body: { token, by: 'самотест' } });
+      // ночь ещё не началась (самотест обычно гоняют заранее): дверь обязана
+      // сказать «не та ночь», а впустить — только по явному подтверждению
+      if (c1.j?.error === 'wrong_night') {
+        row(true, 'проходка до дня ночи не пускается без подтверждения', c1.j.night === 'early' ? 'ночь ещё не началась' : 'ночь уже прошла');
+        c1 = await api('/api/checkin', { method: 'POST', body: { token, by: 'самотест', force: true } });
+      }
+      row(c1.ok && c1.j.first === true, 'вход: впущен', c1.j?.checked_in_at ? fmtTime(c1.j.checked_in_at) : c1.message);
+      const c2 = await api('/api/checkin', { method: 'POST', body: { token, by: 'самотест', force: true } });
       row(c2.ok && c2.j.first === false, 'повторный вход отклонён');
       const st = await api(`/api/stats?event_id=${encodeURIComponent(target.id)}`);
       row(Boolean(st.ok && st.j.sold >= 1 && st.j.checked_in >= 1), 'статистика видит продажу и вход', st.ok ? `продано ${st.j.sold}, вошло ${st.j.checked_in}` : '');

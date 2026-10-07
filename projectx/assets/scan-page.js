@@ -134,9 +134,10 @@ async function verifyAndRender() {
   if (j.status === 'not_found') return renderNotFound();
   if (j.status === 'checked_in') return renderRepeat(j);
   if (j.status === 'revoked' || j.status === 'refunded') return renderRevoked(j);
-  if (j.status === 'reserved') return renderReserved(j);
   if (j.status === 'expired' || j.status === 'cancelled') return renderExpired(j);
+  // и неоплаченная бронь на другую ночь: деньги за чужую дату на входе не берём
   if (j.night && j.night !== 'ok') return renderWrongNight(j, () => doCheckin({ force: true }));
+  if (j.status === 'reserved') return renderReserved(j);
   renderActive(j);
 }
 
@@ -617,7 +618,6 @@ async function manualLookup() {
   if (j.status === 'not_found') return renderNotFound();
   if (j.status === 'checked_in') return renderRepeat(j);
   if (j.status === 'revoked' || j.status === 'refunded') return renderRevoked(j);
-  if (j.status === 'reserved') return renderReserved(j);
   if (j.status === 'expired' || j.status === 'cancelled') return renderExpired(j);
   // active: чек-ин по голому id (доверенный режим админа)
   const admit = async ({ force = false } = {}) => {
@@ -633,12 +633,16 @@ async function manualLookup() {
       if (jj?.ok && jj.first) return stageLockOk('Впущен', `${jj.holder_name} · ${fmtTime(jj.checked_in_at)}`);
       if (jj?.ok) return renderRepeat(jj);
       if (jj?.error === 'wrong_night') return renderWrongNight(jj, () => admit({ force: true }));
+      if (jj?.error === 'unpaid') return renderReserved({ holder_name: jj.holder_name, order: jj.order });
+      if (jj?.error === 'expired') return renderExpired({ holder_name: jj.holder_name, status: jj.status });
+      if (jj?.error === 'revoked') return renderRevoked({ holder_name: '' });
       if (jj && r.status < 500) return pinHint(jj.message || 'Не получилось — проверь номер');
     } catch { /* ignore */ }
     saveOutbox(enqueue(loadOutbox(), { ticketId: id, by: state.name, at: new Date().toISOString() }));
     stageLockOk('Впущен под запись', 'Отметка досинхронизируется.');
   };
   if (j.night && j.night !== 'ok') return renderWrongNight(j, () => admit({ force: true }));
+  if (j.status === 'reserved') return renderReserved(j);
   renderActive(j);
   $('do-checkin').onclick = () => admit();
 }

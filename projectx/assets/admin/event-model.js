@@ -55,20 +55,26 @@ export function copyForm(ev) {
 }
 
 // Разбор поста → поверх текущей формы: заполняем то, что нашлось, остальное
-// не трогаем (человек мог уже что-то вписать руками).
-export function applyDraft(form, d, { keepWaves = false } = {}) {
+// не трогаем (человек мог уже что-то вписать руками). У ночи, которая уже на
+// сайте (contentOnly), пост обновляет только тексты: название, описание,
+// лайн-ап и программу. Дату, место, возраст и волны по такой ночи правят
+// руками — на них уже продают.
+export function applyDraft(form, d, { keepWaves = false, contentOnly = false } = {}) {
   const f = { ...form };
   const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
-  for (const k of ['title', 'date', 'timeStart', 'timeEnd', 'venue', 'address', 'descr']) {
+  const keys = contentOnly ? ['title', 'descr'] : ['title', 'date', 'timeStart', 'timeEnd', 'venue', 'address', 'descr'];
+  for (const k of keys) {
     if (has(d[k])) f[k] = String(d[k]);
   }
-  if (Number(d.ageRating) === 16 || Number(d.ageRating) === 18) f.ageRating = Number(d.ageRating);
-  if (d.secret) f.secret = true;
+  if (!contentOnly) {
+    if (Number(d.ageRating) === 16 || Number(d.ageRating) === 18) f.ageRating = Number(d.ageRating);
+    if (d.secret) f.secret = true;
+  }
   if (Array.isArray(d.lineup) && d.lineup.length) f.lineup = d.lineup.map(String).slice(0, 10);
   if (Array.isArray(d.program) && d.program.length) {
     f.program = d.program.slice(0, 16).map((p) => ({ title: String(p.title || ''), text: String(p.text || '') }));
   }
-  if (!keepWaves && Array.isArray(d.waves) && d.waves.length) {
+  if (!keepWaves && !contentOnly && Array.isArray(d.waves) && d.waves.length) {
     f.waves = d.waves.slice(0, 8).map((w, i) => ({
       waveNo: i + 1,
       name: String(w.name || `Волна ${i + 1}`),

@@ -398,7 +398,10 @@ function toProgramItem(text) {
   const clause = /\s(?:сделанн|созданн|оформленн|посвящ[её]нн|выполненн|которы|где\s|чтобы\s)/i.exec(title);
   if (clause && clause.index >= 3) title = title.slice(0, clause.index);
   title = tidyTitle(title);
-  const rest = balance(t.slice(title.length).replace(/^[\s,;:/|(—–-]+/, '').trim());
+  // «сделанные в разных стилях» → «В разных стилях»: причастие, оторванное
+  // от своего слова, читается обрывком
+  const rest = balance(t.slice(title.length).replace(/^[\s,;:/|(—–-]+/, '')
+    .replace(/^(?:сделанн|созданн|оформленн|выполненн)[а-яё]*\s+(?=(?:в|во|на|под)\s)/i, '').trim());
   return { title, text: rest ? `${cap(rest.replace(/[.;,]+$/, ''))}.` : '' };
 }
 

@@ -141,18 +141,26 @@ function renderAge() {
 }
 
 // ---------- мастер «из поста» ----------
+// Ночь уже на сайте: пост обновляет только тексты (см. applyDraft)
+const contentOnly = () => ed.mode === 'edit' && ed.status !== 'draft';
+
 function renderMagic() {
   const box = $('ed-magic');
-  box.hidden = ed.mode === 'edit';
+  box.hidden = false;
   const a = ed.analysis;
   const collapsed = !ed.magicOpen && a;
-  box.querySelector('.magic-row').hidden = Boolean(collapsed) || (!ed.magicOpen && ed.mode === 'copy');
-  box.querySelector('.magic-acts').hidden = Boolean(collapsed) || (!ed.magicOpen && ed.mode === 'copy');
+  // у копии и сохранённой ночи мастер свёрнут до кнопки «Вставить пост»
+  const later = ed.mode !== 'new';
+  box.querySelector('.magic-row').hidden = Boolean(collapsed) || (!ed.magicOpen && later);
+  box.querySelector('.magic-acts').hidden = Boolean(collapsed) || (!ed.magicOpen && later);
+  box.querySelector('.magic-h h2').textContent = ed.mode === 'edit' ? 'Обновить из поста' : 'Заполнить из поста';
   const head = box.querySelector('.magic-h p');
-  head.textContent = ed.mode === 'copy'
-    ? 'Есть новый пост для этой ночи? Вставь его — дата, цены и программа обновятся.'
-    : 'Вставь текст анонса из Telegram — разберу дату, время, место, цены, лайн-ап и программу. Афишу можно перетащить или вставить рядом.';
-  if (ed.mode === 'copy' && !ed.magicOpen && !a) {
+  head.textContent = contentOnly()
+    ? 'Поправили анонс? Вставь пост — обновлю название, описание, программу и лайн-ап. Дату, место и волны не трону: на них уже продают.'
+    : later
+      ? 'Есть новый пост для этой ночи? Вставь его — дата, цены и программа обновятся.'
+      : 'Вставь текст анонса из Telegram — разберу дату, время, место, цены, лайн-ап и программу. Афишу можно перетащить или вставить рядом.';
+  if (later && !ed.magicOpen && !a) {
     $('ed-found').hidden = false;
     $('ed-found').innerHTML = `<div class="magic-done"><button class="b b-ghost b-sm" type="button" data-magic="open">${icon('sparkles')}Вставить пост</button></div>`;
     return;
@@ -177,11 +185,12 @@ function renderMagic() {
       <button class="b b-quiet b-sm" type="button" data-magic="open">${icon('edit')}Изменить текст</button></div>
     <div class="found-chips">
       ${chip(F.title, 'Название')}
+      ${contentOnly() ? '' : `
       ${chip(F.date, F.date && f.date ? `Дата: ${fmtDay(`${f.date}T12:00:00+05:00`)}` : 'Дата')}
       ${chip(F.timeStart, F.timeStart ? `Двери ${f.timeStart}` : 'Время')}
       ${chip(F.venue, 'Площадка')}
       ${chip(F.address, f.secret ? 'SECRET PLACE' : 'Адрес')}
-      ${chip(F.waves, n('waves', 'цена', 'цены', 'цен') || 'Цены')}
+      ${chip(F.waves, n('waves', 'цена', 'цены', 'цен') || 'Цены')}`}
       ${F.lineup ? chip(true, `Лайн-ап: ${F.lineup}`) : ''}
       ${F.program ? chip(true, `Программа: ${n('program', 'пункт', 'пункта', 'пунктов')}`) : ''}
       ${chip(F.descr, 'Описание')}
@@ -207,7 +216,21 @@ async function analyze() {
     return;
   }
   const sold = ed.f.waves.some((w) => w.sold > 0);
-  ed.f = applyDraft(ed.f, res.draft || {}, { keepWaves: sold });
+  const only = contentOnly();
+  const was = ed.f.date;
+  ed.f = applyDraft(ed.f, res.draft || {}, { keepWaves: sold, contentOnly: only });
+  if (only) {
+    // подсказки разбора про дату, место и цены здесь ни к чему — их не меняли
+    const d = res.draft && res.draft.date;
+    res = {
+      ...res,
+      notes: [
+        ...(res.found && !res.found.title ? ['Название не найдено — оставил прежнее'] : []),
+        ...(d && d !== was ? [`В посте другая дата — ${fmtDay(`${d}T12:00:00+05:00`)}. Дату ночи не менял: если её переносят, поправь вручную.`] : []),
+        'Дата, место, возраст и волны остались как были.',
+      ],
+    };
+  }
   ed.analysis = res;
   ed.magicOpen = false;
   clearErrors();
@@ -219,10 +242,11 @@ async function analyze() {
   renderWaves();
   renderPreview();
   renderBar();
-  markFound(res.found || {});
   const F = res.found || {};
+  if (only) setMark('title', !F.title && 'is-check');
+  else markFound(F);
   if (!F.date && !F.waves && !F.venue) toast('В тексте не нашлось ни даты, ни цен, ни места — это точно анонс?', 'info', 5000);
-  else toast('Готово — проверь подсвеченные поля и добавь афишу');
+  else toast(only ? 'Готово — проверь описание и программу и сохрани' : 'Готово — проверь подсвеченные поля и добавь афишу');
   $('ed-magic').scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 

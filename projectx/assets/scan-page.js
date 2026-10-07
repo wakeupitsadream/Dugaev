@@ -7,7 +7,7 @@
 //   на месте и впускает одной кнопкой (v6);
 //   янтарный — БД недоступна: подпись подлинная, впуск под запись (outbox)
 //   + офлайн-список из admin.html (localStorage).
-import { parseToken, formatTicketCode, normalizeManualId, fmtTime, plural } from './ticket-format.js';
+import { parseToken, formatTicketCode, normalizeManualId, fmtTime, fmtTicketWhen, plural } from './ticket-format.js';
 import { enqueue, pendingItems, applyResults } from './outbox.js';
 import { esc, loadEvents, upcoming } from './events-load.js';
 import { fmtRub } from './waves.js';
@@ -136,7 +136,30 @@ async function verifyAndRender() {
   if (j.status === 'revoked' || j.status === 'refunded') return renderRevoked(j);
   if (j.status === 'reserved') return renderReserved(j);
   if (j.status === 'expired' || j.status === 'cancelled') return renderExpired(j);
+  if (j.night && j.night !== 'ok') return renderWrongNight(j, () => doCheckin({ force: true }));
   renderActive(j);
+}
+
+// Проходка подлинная, но на другую ночь (прошлую или будущую): красный экран
+// с датой. Впустить можно только явным решением — на случай, если в панели
+// ошиблись с датой, а не гость пришёл не в тот день.
+function renderWrongNight(j, forceAdmit) {
+  const when = j.event?.startsAt ? fmtTicketWhen(j.event.startsAt) : '';
+  stage('danger', `
+    <div class="scan-verdict">Не та ночь</div>
+    ${j.holder_name ? `<div class="scan-name">${esc(j.holder_name)}</div>` : ''}
+    <p class="scan-sub">Проходка на <b>${esc(j.event?.title || 'другую ночь')}</b>${when ? ` · ${esc(when)}` : ''}.
+    ${j.night === 'early' ? 'Эта ночь ещё не началась.' : 'Эта ночь уже прошла.'} Не пускать.</p>
+    ${state.token ? `<div class="scan-meta-pill">билет ${formatTicketCode(state.token.id)}</div>` : ''}
+  `);
+  foot(`${scanNextBtn()}
+        <button class="btn btn-ghost" id="do-force" type="button">Всё равно впустить</button>`);
+  bindScanNext();
+  $('do-force').onclick = () => {
+    if (confirm(`Проходка на «${j.event?.title || 'другую ночь'}»${when ? ` (${when})` : ''}. Точно впустить по ней сегодня?`)) forceAdmit();
+  };
+  beep('bad');
+  vibrate([70, 70, 70]);
 }
 
 function adminHeaders() {
@@ -353,16 +376,19 @@ function renderOffline() {
   beep('warn');
 }
 
-async function doCheckin() {
-  $('do-checkin').disabled = true;
-  $('do-checkin').textContent = 'Отмечаю…';
+async function doCheckin({ force = false } = {}) {
+  const btn = $('do-checkin') || $('do-force');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Отмечаю…';
+  }
   let j = null;
   let status = 0;
   try {
     const r = await fetch('/api/checkin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-      body: JSON.stringify({ token: `${state.token.id}.${state.token.sig}`, by: state.name }),
+      body: JSON.stringify({ token: `${state.token.id}.${state.token.sig}`, by: state.name, ...(force ? { force: true } : {}) }),
     });
     status = r.status;
     j = await r.json().catch(() => null);
@@ -374,6 +400,7 @@ async function doCheckin() {
   }
   if (j?.ok && j.first === false) return renderRepeat({ holder_name: j.holder_name, checked_in_at: j.checked_in_at, checked_by: j.checked_by });
   if (status === 403) return badKey();
+  if (j?.error === 'wrong_night') return renderWrongNight(j, () => doCheckin({ force: true }));
   if (j?.error === 'revoked') return renderRevoked({ holder_name: '' });
   if (j?.error === 'unpaid') return renderReserved({ holder_name: j.holder_name, order: j.order });
   if (j?.error === 'expired') return renderExpired({ holder_name: j.holder_name, status: j.status });
@@ -521,12 +548,15 @@ async function renderWalkin(prefillName) {
 }
 
 async function submitWalkin(e) {
+  const btn = $('wk-add');
+  // Enter дважды подряд — две продажи и двойные деньги с гостя: пока первая
+  // уходит, вторую не начинаем
+  if (!btn || btn.disabled) return;
   const name = $('wk-name').value.trim();
   if (name.length < 2) {
     $('wk-name').focus();
     return pinHint('Напиши имя и фамилию гостя — проходка именная.');
   }
-  const btn = $('wk-add');
   btn.disabled = true;
   btn.textContent = 'Оформляю…';
   let j = null;
@@ -590,22 +620,27 @@ async function manualLookup() {
   if (j.status === 'reserved') return renderReserved(j);
   if (j.status === 'expired' || j.status === 'cancelled') return renderExpired(j);
   // active: чек-ин по голому id (доверенный режим админа)
-  renderActive(j);
-  $('do-checkin').onclick = async () => {
-    $('do-checkin').disabled = true;
+  const admit = async ({ force = false } = {}) => {
+    const btn = $('do-checkin') || $('do-force');
+    if (btn) btn.disabled = true;
     try {
       const r = await fetch('/api/checkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-        body: JSON.stringify({ id, by: state.name }),
+        body: JSON.stringify({ id, by: state.name, ...(force ? { force: true } : {}) }),
       });
       const jj = await r.json().catch(() => null);
       if (jj?.ok && jj.first) return stageLockOk('Впущен', `${jj.holder_name} · ${fmtTime(jj.checked_in_at)}`);
       if (jj?.ok) return renderRepeat(jj);
+      if (jj?.error === 'wrong_night') return renderWrongNight(jj, () => admit({ force: true }));
+      if (jj && r.status < 500) return pinHint(jj.message || 'Не получилось — проверь номер');
     } catch { /* ignore */ }
     saveOutbox(enqueue(loadOutbox(), { ticketId: id, by: state.name, at: new Date().toISOString() }));
     stageLockOk('Впущен под запись', 'Отметка досинхронизируется.');
   };
+  if (j.night && j.night !== 'ok') return renderWrongNight(j, () => admit({ force: true }));
+  renderActive(j);
+  $('do-checkin').onclick = () => admit();
 }
 
 // ---------- Офлайн-список и очередь ----------
@@ -664,10 +699,11 @@ async function syncOutbox() {
         if (!done) { results.push({ ticketId: it.ticketId, ok: false }); continue; }
         if (j.ok && j.checked_in_at) { results.push({ ticketId: it.ticketId, ok: true }); continue; }
       }
+      // гость уже внутри — отметку доносим без проверки даты ночи
       const r = await fetch('/api/checkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-        body: JSON.stringify({ id: it.ticketId, by: it.by, at: it.at }),
+        body: JSON.stringify({ id: it.ticketId, by: it.by, at: it.at, force: true }),
       });
       const j = await r.json().catch(() => null);
       // ok (first или повтор) и «отозван» считаем доставленным; 5xx — попробуем позже

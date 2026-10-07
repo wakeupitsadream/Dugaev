@@ -52,7 +52,8 @@ export default async function handler(req, res) {
       console.warn('events: БД недоступна, отдаю сид:', err.message);
     }
   }
-  res.setHeader('Cache-Control', 's-maxage=30');
+  // сид — временная подмена: CDN его не запоминает, следующий заход спросит базу
+  res.setHeader('Cache-Control', 'no-store');
   ok(res, { degraded: true, events: EVENTS.map((e) => seedEvent(e)) });
 }
 
@@ -189,13 +190,15 @@ export function renderPage(html, e, origin) {
     `<script type="application/ld+json">${jsonLd(e, m)}</script>`,
     `<script type="application/json" id="ev-data">${JSON.stringify(e).replace(/</g, '\\u003c')}</script>`,
   ].join('\n  ');
+  // замены — функциями: строка-замена понимает «$&», «$'» и прочие шаблоны,
+  // и «$'» в названии ночи из панели размножил бы весь документ
   return html
-    .replace(/<title>[^<]*<\/title>/, `<title>${escAttr(m.title)}</title>`)
-    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, `<meta name="description" content="${escAttr(m.description)}" />`)
-    .replace(/<meta property="og:title" content="[^"]*"\s*\/?>/, `<meta property="og:title" content="${escAttr(m.title)}" />`)
-    .replace(/<meta property="og:description" content="[^"]*"\s*\/?>/, `<meta property="og:description" content="${escAttr(m.description)}" />`)
-    .replace(/<meta property="og:image" content="[^"]*"\s*\/?>/, `<meta property="og:image" content="${escAttr(m.image)}" />`)
-    .replace('</head>', `  ${head}\n</head>`);
+    .replace(/<title>[^<]*<\/title>/, () => `<title>${escAttr(m.title)}</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, () => `<meta name="description" content="${escAttr(m.description)}" />`)
+    .replace(/<meta property="og:title" content="[^"]*"\s*\/?>/, () => `<meta property="og:title" content="${escAttr(m.title)}" />`)
+    .replace(/<meta property="og:description" content="[^"]*"\s*\/?>/, () => `<meta property="og:description" content="${escAttr(m.description)}" />`)
+    .replace(/<meta property="og:image" content="[^"]*"\s*\/?>/, () => `<meta property="og:image" content="${escAttr(m.image)}" />`)
+    .replace('</head>', () => `  ${head}\n</head>`);
 }
 
 async function page(req, res, slug) {
@@ -216,10 +219,14 @@ async function page(req, res, slug) {
     return res.status(307).end('');
   }
   let e = null;
+  // без базы страница всегда из сида — её можно кэшировать
+  let answered = !hasDb();
   if (/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug)) {
     if (hasDb()) {
       try {
-        const rows = await withTimeout(db().query(EVENTS_SQL, [slug]), 2500);
+        // холодный Neon просыпается до пары секунд — ждём с запасом
+        const rows = await withTimeout(db().query(EVENTS_SQL, [slug]), 4500);
+        answered = true;
         const r = (rows.rows || rows)[0];
         if (r) e = mapRow(r);
       } catch (err) {
@@ -233,7 +240,12 @@ async function page(req, res, slug) {
   }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   // CDN держит страницу 2 минуты: правка в панели доезжает быстро, а наплыв
-  // гостей по ссылке из сторис не будит базу на каждый заход
-  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=120, stale-while-revalidate=600');
+  // гостей по ссылке из сторис не будит базу на каждый заход. Запасной ответ
+  // (база не ответила, ночь ещё черновик или не найдена) не кэшируем: иначе
+  // Telegram и VK запомнили бы пустое превью, а гости 10 минут видели бы
+  // «не найдена» или старые данные из сида
+  res.setHeader('Cache-Control', answered && e
+    ? 'public, max-age=0, s-maxage=120, stale-while-revalidate=600'
+    : 'no-store');
   return res.status(200).send(e ? renderPage(html, e, origin) : html);
 }

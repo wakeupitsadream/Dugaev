@@ -54,15 +54,19 @@ SELECT (SELECT price_rub FROM w) AS price_rub,
 
 // Сгорание брони: неподтверждённые заказы, у которых вышел срок, становятся
 // 'expired', их билеты — тоже, квота возвращается в волну. Заказ, где гость
-// нажал «Я перевёл» (claimed_at), не сгорает: решает владелец, а не таймер.
+// нажал «Я перевёл» (claimed_at), по таймеру не сгорает — решает владелец,
+// — но и не держит места дольше самой ночи: после её конца сгорает и он
+// (иначе места и лимиты неоплаченных броней висели бы вечно).
 // Вызывается лениво перед созданием заказа и при показе списка ожидающих —
 // отдельного планировщика не нужно.
 export const EXPIRE_SQL = `
 WITH exp AS (
-  UPDATE orders SET status = 'expired'
-  WHERE status = 'pending' AND claimed_at IS NULL
-    AND expires_at IS NOT NULL AND expires_at < now()
-  RETURNING id, wave_id, qty
+  UPDATE orders o SET status = 'expired'
+  WHERE o.status = 'pending' AND o.expires_at IS NOT NULL
+    AND ((o.claimed_at IS NULL AND o.expires_at < now())
+      OR EXISTS (SELECT 1 FROM events e WHERE e.id = o.event_id
+                   AND COALESCE(e.ends_at, e.starts_at + interval '8 hours') < now()))
+  RETURNING o.id, o.wave_id, o.qty
 ),
 t AS (
   UPDATE tickets SET status = 'expired'
@@ -83,9 +87,14 @@ SELECT id FROM exp`;
 // код объясняет, что делать. Колонка was — 'pending' | 'expired'.
 // Параметры: $1 order_id, $2 кто подтвердил, $3 provider ('transfer' — перевод,
 // 'door' — наличные на входе; null — оставить как есть)
+// Строка заказа блокируется (FOR UPDATE): два одновременных подтверждения
+// (панель + бот, двойной тап) или подтверждение вперемешку со сгоранием и
+// отменой выполняются по очереди — второе видит уже новый статус и ничего не
+// делает, места не списываются дважды.
 export const CONFIRM_SQL = `
 WITH cand AS (
   SELECT id, wave_id, qty, status FROM orders WHERE id = $1 AND status IN ('pending', 'expired')
+  FOR UPDATE
 ),
 w AS (
   UPDATE price_waves p SET sold = p.sold + c.qty
@@ -97,7 +106,7 @@ o AS (
   UPDATE orders SET status = 'paid', paid_at = now(), confirmed_by = $2,
                     provider = COALESCE($3::text, orders.provider)
   FROM cand c
-  WHERE orders.id = c.id AND (c.status = 'pending' OR EXISTS (SELECT 1 FROM w))
+  WHERE orders.id = c.id AND orders.status = c.status AND (c.status = 'pending' OR EXISTS (SELECT 1 FROM w))
   RETURNING orders.id, orders.event_id, orders.qty, orders.amount_rub, orders.buyer_name,
             orders.buyer_phone, orders.buyer_tg, orders.tg_chat_id, orders.pay_code, c.status AS was
 ),
@@ -108,6 +117,29 @@ t AS (
 )
 SELECT o.*, (SELECT json_agg(json_build_object('id', t.id, 'holder_name', t.holder_name)) FROM t) AS tickets
 FROM o`;
+
+// «Я перевёл» — одно уведомление владельцу на бронь за 10 минут: повторные
+// нажатия (и два одновременных) не проходят условие и ничего не шлют.
+// Сгоревшую бронь тоже можно заявить: «Подтвердить» вернёт места, если есть.
+// Параметры: $1 order_id
+export const CLAIM_SQL = `
+UPDATE orders SET claimed_at = now()
+WHERE id = $1 AND status IN ('pending', 'expired')
+  AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone, claimed_at, event_id, status`;
+
+// Сгоревшую бронь с «Я перевёл» владелец закрывает без перевода: места уже
+// вернулись при сгорании, меняется только статус. Параметры: $1 order_id
+export const CLOSE_EXPIRED_SQL = `
+WITH o AS (
+  UPDATE orders SET status = 'cancelled'
+  WHERE id = $1 AND status = 'expired'
+  RETURNING id, tg_chat_id
+),
+t AS (
+  UPDATE tickets SET status = 'cancelled' WHERE order_id IN (SELECT id FROM o) AND status = 'expired'
+)
+SELECT id, tg_chat_id FROM o`;
 
 // Отмена неоплаченной брони владельцем: квота возвращается сразу.
 // Параметры: $1 order_id
@@ -153,12 +185,15 @@ RETURNING id, holder_name`;
 // Ожидающие подтверждения брони — для админки и двери. Сначала те, где гость
 // уже нажал «Я перевёл». Параметры: $1 event_id
 export const PENDING_SQL = `
-SELECT o.id, o.pay_code, o.buyer_name, o.buyer_phone, o.buyer_tg, o.qty, o.amount_rub,
+SELECT o.id, o.status, o.pay_code, o.buyer_name, o.buyer_phone, o.buyer_tg, o.qty, o.amount_rub,
        o.created_at, o.expires_at, o.claimed_at, (o.tg_chat_id IS NOT NULL) AS tg,
        (SELECT json_agg(json_build_object('id', t.id, 'holder_name', t.holder_name) ORDER BY t.id)
           FROM tickets t WHERE t.order_id = o.id) AS tickets
 FROM orders o
-WHERE o.event_id = $1 AND o.status = 'pending'
+WHERE o.event_id = $1 AND (o.status = 'pending'
+   -- сгоревшая бронь, по которой гость нажал «Я перевёл»: деньги могли прийти,
+   -- владелец должен её видеть (подтверждение вернёт места, если они есть)
+   OR (o.status = 'expired' AND o.claimed_at IS NOT NULL AND o.claimed_at > now() - interval '48 hours'))
 ORDER BY o.claimed_at DESC NULLS LAST, o.created_at DESC`;
 
 // Продажи по источникам (метки ?src= со ссылок, промокодов, QR-постеров).
@@ -172,6 +207,19 @@ FROM orders
 WHERE event_id = $1 AND status IN ('paid', 'pending')
 GROUP BY 1
 ORDER BY paid DESC, pending DESC, src`;
+
+// Окно входа по проходке: от 6 часов до старта до 6 часов после конца ночи
+// (без конца — 8 часов после старта). Вне окна — «проходка на другую ночь»:
+// дверь не пускает без явного «всё равно впустить».
+export function nightWindow(startsAt, endsAt) {
+  const s = new Date(startsAt).getTime();
+  const e = endsAt ? new Date(endsAt).getTime() : s + 8 * 3600_000;
+  return { from: s - 6 * 3600_000, to: e + 6 * 3600_000 };
+}
+export function nightCheck(startsAt, endsAt, atMs = Date.now()) {
+  const w = nightWindow(startsAt, endsAt);
+  return atMs < w.from ? 'early' : atMs > w.to ? 'late' : 'ok';
+}
 
 // Чек-ин ровно один раз: строка меняется, только пока checked_in_at IS NULL.
 // Параметры: $1 ticket_id, $2 время (null → now()), $3 кто впустил
@@ -212,14 +260,14 @@ FROM price_waves WHERE event_id = $1 AND public`;
 export const EVENT_UPSERT_SQL = `
 INSERT INTO events (id, brand, title, city, venue, address, starts_at, ends_at,
                     age_rating, status, poster_url, descr, lineup, secret, capacity, program)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11::text,''),$12,COALESCE($13::jsonb,'[]'::jsonb),
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11::text,''),NULLIF($12::text,''),COALESCE($13::jsonb,'[]'::jsonb),
         COALESCE($14::bool,false), NULLIF($15::int, 0), $16::jsonb)
 ON CONFLICT (id) DO UPDATE SET
   brand=EXCLUDED.brand, title=EXCLUDED.title, city=EXCLUDED.city,
   venue=EXCLUDED.venue, address=EXCLUDED.address, starts_at=EXCLUDED.starts_at,
   ends_at=EXCLUDED.ends_at, age_rating=EXCLUDED.age_rating, status=EXCLUDED.status,
   poster_url=CASE WHEN $11::text IS NULL THEN events.poster_url ELSE NULLIF($11::text,'') END,
-  descr=COALESCE(EXCLUDED.descr, events.descr),
+  descr=CASE WHEN $12::text IS NULL THEN events.descr ELSE NULLIF($12::text,'') END,
   lineup=COALESCE($13::jsonb, events.lineup),
   secret=COALESCE($14::bool, events.secret),
   capacity=CASE WHEN $15::int IS NULL THEN events.capacity ELSE NULLIF($15::int, 0) END,

@@ -140,6 +140,8 @@ export default async function handler(req, res) {
       by_wave: (byWave.rows || byWave),
       pending: (pending.rows || pending).map((o) => ({
         id: o.id,
+        // 'expired' — сгоревшая бронь, по которой гость нажал «Я перевёл»
+        status: o.status || 'pending',
         pay_code: o.pay_code,
         buyer_name: o.buyer_name,
         buyer_phone: o.buyer_phone,

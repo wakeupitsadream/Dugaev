@@ -14,15 +14,17 @@ export function fmtDeadline(iso) {
   });
 }
 
-export function botLink(bot, orderId) {
-  return bot && orderId ? `https://t.me/${encodeURIComponent(bot)}?start=${encodeURIComponent(orderId)}` : null;
+// start — подписанная ссылка на бронь от сервера (bot_start / botStart): голый
+// номер заказа бот не принимает, его видят все гости компании
+export function botLink(bot, start) {
+  return bot && start ? `https://t.me/${encodeURIComponent(bot)}?start=${encodeURIComponent(start)}` : null;
 }
 
-// order: { id, payCode, amountRub, qty, expiresAt, claimedAt }, bot: username|null
+// order: { id, payCode, amountRub, qty, expiresAt, claimedAt, botStart }, bot: username|null
 export function payBlockHtml(order, bot, opts = {}) {
   const t = SITE.transfer || {};
   const claimed = Boolean(order.claimedAt);
-  const link = botLink(bot, order.id);
+  const link = botLink(bot, order.botStart);
   const qty = Number(order.qty || 0);
   return `
   <div class="pay-box ${claimed ? 'is-claimed' : ''}" id="pay-box">
@@ -95,7 +97,9 @@ export function bindPayBlock(order, { onClaimed } = {}) {
       $('pay-box')?.classList.add('is-claimed');
       const k = document.querySelector('#pay-box .pay-kicker');
       if (k) k.textContent = 'Ждём подтверждение';
-      st.textContent = 'Спасибо! Как только увидим перевод, проходка станет активной. Обычно это несколько минут.';
+      st.textContent = j.late
+        ? 'Срок брони уже вышел, но заявку мы передали: если места ещё есть, организатор подтвердит перевод, если нет — свяжется с тобой.'
+        : 'Спасибо! Как только увидим перевод, проходка станет активной. Обычно это несколько минут.';
       st.classList.remove('hidden');
       onClaimed?.(j.claimed_at);
       return;
@@ -104,8 +108,8 @@ export function bindPayBlock(order, { onClaimed } = {}) {
     claim.textContent = 'Я перевёл';
     st.textContent = j?.status === 'paid'
       ? 'Оплата уже подтверждена — обнови страницу.'
-      : j?.status === 'expired' || j?.status === 'cancelled'
-        ? 'Бронь уже не активна — забронируй заново.'
+      : j?.status === 'cancelled'
+        ? 'Бронь отменена — забронируй заново или напиши нам, если уже перевёл.'
         : 'Не получилось передать. Напиши нам в Telegram и приложи скрин перевода.';
     st.classList.remove('hidden');
   };

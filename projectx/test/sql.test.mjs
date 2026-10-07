@@ -7,7 +7,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { SCHEMA } from '../db/schema.js';
 import {
   ORDER_SQL, CHECKIN_SQL, NEXT_WAVE_SQL, EXPIRE_SQL, CONFIRM_SQL, CANCEL_SQL,
-  VOID_SQL, RENAME_SQL, PENDING_SQL, SOURCES_SQL,
+  VOID_SQL, RENAME_SQL, PENDING_SQL, SOURCES_SQL, CLAIM_SQL, CLOSE_EXPIRED_SQL,
+  NEXT_WAVE_FOR_SQL, nightCheck,
 } from '../api/_lib/queries.js';
 import { CLEANUP_TEST_SQL, TEST_PHONE } from '../api/seed.js';
 
@@ -345,4 +346,103 @@ test('SOURCES_SQL: продажи по меткам источников, опл
   const site = rows.find((r) => r.src === 'site');
   assert.ok(site.paid >= 1);
   assert.ok(site.pending >= 1); // ord_tr_ren ещё ждёт оплаты
+});
+
+test('«Я перевёл»: одно заявление за 10 минут; сгоревшую бронь тоже можно заявить', async () => {
+  await pg.query(
+    `INSERT INTO events (id, title, city, venue, starts_at, ends_at, age_rating, status)
+     VALUES ('ev-cl', 'CLAIM PARTY', 'orenburg', 'лофт', now() + interval '3 days', now() + interval '3 days 7 hours', 18, 'onsale')`
+  );
+  await pg.query(`INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota) VALUES ('ev-cl', 1, 'Проходка', 800, 3)`);
+  await pg.query(ORDER_SQL, orderParams({
+    qty: 2, eventId: 'ev-cl', oid: 'ord_cl_live', tids: ['cltickt001', 'cltickt002'], names: ['Аня Б', 'Боря В'],
+    ages: ['adult', 'adult'], provider: 'transfer', hold: 60, code: 'PX-CL01',
+  }));
+  const first = (await pg.query(CLAIM_SQL, ['ord_cl_live'])).rows;
+  assert.equal(first.length, 1);
+  assert.equal(first[0].status, 'pending');
+  assert.equal((await pg.query(CLAIM_SQL, ['ord_cl_live'])).rows.length, 0, 'повторное «Я перевёл» сразу — без второго уведомления');
+  // бронь сгорела по сроку, гость перевёл позже и нажал кнопку
+  await pg.query(ORDER_SQL, orderParams({
+    qty: 1, eventId: 'ev-cl', oid: 'ord_cl_late', tids: ['cltickt003'], names: ['Вера Г'],
+    ages: ['adult'], provider: 'transfer', hold: -1, code: 'PX-CL02',
+  }));
+  assert.deepEqual((await pg.query(EXPIRE_SQL)).rows.map((r) => r.id), ['ord_cl_late']);
+  const late = (await pg.query(CLAIM_SQL, ['ord_cl_late'])).rows;
+  assert.equal(late.length, 1);
+  assert.equal(late[0].status, 'expired');
+  // владелец видит её среди ожидающих, со статусом
+  const pend = (await pg.query(PENDING_SQL, ['ev-cl'])).rows;
+  assert.equal(pend.find((r) => r.id === 'ord_cl_late').status, 'expired');
+  // «Не пришло» по сгоревшей — закрываем без возврата мест (они уже вернулись)
+  const soldBefore = (await pg.query(`SELECT sold FROM price_waves WHERE event_id = 'ev-cl'`)).rows[0].sold;
+  assert.equal((await pg.query(CLOSE_EXPIRED_SQL, ['ord_cl_late'])).rows.length, 1);
+  assert.equal((await pg.query(`SELECT status FROM orders WHERE id = 'ord_cl_late'`)).rows[0].status, 'cancelled');
+  assert.equal((await pg.query(`SELECT status FROM tickets WHERE id = 'cltickt003'`)).rows[0].status, 'cancelled');
+  assert.equal((await pg.query(`SELECT sold FROM price_waves WHERE event_id = 'ev-cl'`)).rows[0].sold, soldBefore);
+  assert.equal((await pg.query(CLOSE_EXPIRED_SQL, ['ord_cl_live'])).rows.length, 0, 'живую бронь так не закрыть');
+});
+
+test('CONFIRM сгоревшей брони: места возвращаются, если есть; нет мест — ничего не меняется', async () => {
+  // ev-cl: квота 3, живая бронь держит 2 — свободно 1
+  await pg.query(ORDER_SQL, orderParams({
+    qty: 1, eventId: 'ev-cl', oid: 'ord_cl_one', tids: ['cltickt004'], names: ['Гена Д'],
+    ages: ['adult'], provider: 'transfer', hold: -1, code: 'PX-CL03',
+  }));
+  await pg.query(EXPIRE_SQL);
+  const ok = (await pg.query(CONFIRM_SQL, ['ord_cl_one', 'Максим', 'transfer'])).rows;
+  assert.equal(ok.length, 1);
+  assert.equal(ok[0].was, 'expired');
+  assert.equal((await pg.query(`SELECT status FROM tickets WHERE id = 'cltickt004'`)).rows[0].status, 'active');
+  assert.equal((await pg.query(`SELECT sold FROM price_waves WHERE event_id = 'ev-cl'`)).rows[0].sold, 3);
+  // волна полна: ещё одна сгоревшая бронь не подтверждается и не переполняет квоту
+  await pg.query(`UPDATE price_waves SET quota = 4 WHERE event_id = 'ev-cl'`);
+  await pg.query(ORDER_SQL, orderParams({
+    qty: 1, eventId: 'ev-cl', oid: 'ord_cl_two', tids: ['cltickt005'], names: ['Даша Е'],
+    ages: ['adult'], provider: 'transfer', hold: -1, code: 'PX-CL04',
+  }));
+  await pg.query(EXPIRE_SQL);
+  await pg.query(`UPDATE price_waves SET quota = 3 WHERE event_id = 'ev-cl'`);
+  assert.equal((await pg.query(CONFIRM_SQL, ['ord_cl_two', 'Максим', null])).rows.length, 0);
+  assert.equal((await pg.query(`SELECT status FROM orders WHERE id = 'ord_cl_two'`)).rows[0].status, 'expired');
+  assert.equal((await pg.query(`SELECT sold FROM price_waves WHERE event_id = 'ev-cl'`)).rows[0].sold, 3);
+  // повторное подтверждение уже оплаченной — пусто, места не списываются дважды
+  assert.equal((await pg.query(CONFIRM_SQL, ['ord_cl_one', 'Максим', null])).rows.length, 0);
+  assert.equal((await pg.query(`SELECT sold FROM price_waves WHERE event_id = 'ev-cl'`)).rows[0].sold, 3);
+});
+
+test('EXPIRE: заявленная «Я перевёл» бронь не держит места дольше самой ночи', async () => {
+  // ночь кончилась, а владелец так и не нажал «Пришло»
+  await pg.query(`UPDATE events SET starts_at = now() - interval '10 hours', ends_at = now() - interval '2 hours' WHERE id = 'ev-cl'`);
+  const gone = (await pg.query(EXPIRE_SQL)).rows.map((r) => r.id);
+  assert.deepEqual(gone, ['ord_cl_live']);
+  assert.equal((await pg.query(`SELECT status FROM orders WHERE id = 'ord_cl_live'`)).rows[0].status, 'expired');
+  // ещё 48 часов она видна владельцу: деньги могли прийти
+  assert.ok((await pg.query(PENDING_SQL, ['ev-cl'])).rows.some((r) => r.id === 'ord_cl_live'));
+});
+
+test('NEXT_WAVE_FOR_SQL: волна, где хватит мест на всю компанию, а не первая с местами', async () => {
+  await pg.query(
+    `INSERT INTO events (id, title, city, venue, starts_at, age_rating, status)
+     VALUES ('ev-nw', 'NEXT WAVE', 'orenburg', 'клуб', now() + interval '5 days', 18, 'onsale')`
+  );
+  await pg.query(
+    `INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota, sold, public) VALUES
+     ('ev-nw', 1, 'Первая', 500, 10, 9, true), ('ev-nw', 2, 'Вторая', 700, 10, 0, true), ('ev-nw', 3, 'Скрытая', 1, 50, 0, false)`
+  );
+  assert.equal((await pg.query(NEXT_WAVE_SQL, ['ev-nw'])).rows[0].wave_no, 1);
+  assert.equal((await pg.query(NEXT_WAVE_FOR_SQL, ['ev-nw', 3])).rows[0].wave_no, 2);
+  assert.equal((await pg.query(NEXT_WAVE_FOR_SQL, ['ev-nw', 11])).rows.length, 0, 'скрытая волна гостю не предлагается');
+});
+
+test('nightCheck: проходка на другую ночь — рано или поздно, в окне — ок', () => {
+  const start = Date.parse('2026-10-17T17:00:00Z');
+  const end = Date.parse('2026-10-18T00:00:00Z');
+  assert.equal(nightCheck(start, end, start - 7 * 3600_000), 'early');
+  assert.equal(nightCheck(start, end, start - 5 * 3600_000), 'ok');
+  assert.equal(nightCheck(start, end, end + 5 * 3600_000), 'ok');
+  assert.equal(nightCheck(start, end, end + 7 * 3600_000), 'late');
+  // без конца ночи — 8 часов от старта
+  assert.equal(nightCheck(start, null, start + 13 * 3600_000), 'ok');
+  assert.equal(nightCheck(start, null, start + 15 * 3600_000), 'late');
 });

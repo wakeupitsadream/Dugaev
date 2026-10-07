@@ -9,6 +9,7 @@ import { verifyToken, ticketSecrets } from './_lib/sign.js';
 import { isDoor, staffName } from './_lib/auth.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
+import { nightCheck } from './_lib/queries.js';
 
 export default async function handler(req, res) {
   noStore(res);
@@ -66,7 +67,7 @@ export default async function handler(req, res) {
   try {
     const rows = await withTimeout(db().query(
       `SELECT t.id, t.holder_name, t.age_cat, t.status, t.checked_in_at, t.checked_by, t.note,
-              e.title, e.starts_at, e.age_rating, w.name AS wave_name,
+              e.title, e.starts_at, e.ends_at, e.age_rating, w.name AS wave_name,
               o.id AS order_id, o.status AS order_status, o.pay_code, o.amount_rub, o.qty,
               o.expires_at, o.claimed_at, o.buyer_phone
        FROM tickets t
@@ -110,6 +111,8 @@ export default async function handler(req, res) {
         startsAt: new Date(r.starts_at).toISOString(),
         ageRating: Number(r.age_rating),
       },
+      // 'ok' — проходка на эту ночь; 'early' / 'late' — на будущую или прошлую
+      night: nightCheck(r.starts_at, r.ends_at),
     });
   } catch (err) {
     console.warn('verify: БД недоступна:', err.message);

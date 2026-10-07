@@ -181,6 +181,8 @@ function renderWalkinWaves() {
 }
 
 async function walkin() {
+  // Enter дважды подряд — две продажи: пока первая уходит, кнопка занята
+  if ($('wi-add').disabled) return;
   const name = $('wi-name').value.trim();
   if (name.length < 2) {
     $('f-wi-name').classList.add('is-error');

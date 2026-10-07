@@ -68,8 +68,8 @@ async function init() {
     return;
   }
   store.event = e;
-  store.wave = activeWave(e.waves);
   restoreForm();
+  store.wave = waveFor(e.waves, store.qty);
   renderEvent();
   renderWaves();
   renderBuyPerks();
@@ -80,7 +80,7 @@ async function init() {
   // и статус берём свежие, как только ответит API
   fresh.then((f) => {
     if (!f || f === e || document.body.classList.contains('sheet-open') || store.sending) return;
-    store.event = { ...store.event, status: f.status, waves: f.waves, address: f.address ?? store.event.address };
+    store.event = { ...store.event, status: f.status, waves: mergeWaves(store.event.waves, f.waves), address: f.address ?? store.event.address };
     renderWaves();
   });
   // Счётчик волн живой, но пока человек заполняет форму или ждёт ответа,
@@ -205,7 +205,11 @@ function renderWaves() {
     .join('');
 
   const a = activeWave(e.waves);
-  if (!store.wave || (a && store.wave.waveNo !== a.waveNo && !store.sending)) store.wave = a;
+  if (!store.sending) {
+    // компания больше, чем мест в любой волне, — количество до потолка
+    if (store.qty > qtyCap()) setQty(qtyCap());
+    store.wave = waveFor(e.waves, store.qty);
+  }
   const soldOut = !a;
   for (const btn of [$('buy-open'), $('sticky-buy')]) {
     btn.disabled = soldOut;
@@ -426,12 +430,53 @@ function restoreForm() {
 }
 function forgetForm() { try { sessionStorage.removeItem(formKey()); } catch { /* ок */ } }
 
+// Одна бронь — одна волна (так считает и сервер): компания берёт проходки по
+// цене первой волны, где хватит мест на всех. Больше, чем осталось в самой
+// полной волне, одной бронью не взять — степпер дальше не пускает.
+function publicStates(waves) {
+  return waveStates((waves || []).filter((w) => w.public !== false));
+}
+function waveFor(waves, qty) {
+  return publicStates(waves).find((w) => w.left >= qty) || null;
+}
+function qtyCap() {
+  const most = publicStates(store.event?.waves).reduce((m, w) => Math.max(m, w.left), 0);
+  return Math.max(1, Math.min(10, most));
+}
+
+// Остатки на странице только убывают: ответ из кэша CDN бывает старше того,
+// что сервер только что сказал в отказе «волна закончилась», — иначе
+// страница вернула бы распроданную волну и бронь упиралась бы в отказ по кругу
+function mergeWaves(prev, fresh) {
+  const old = new Map((prev || []).map((w) => [w.waveNo, w]));
+  return (fresh || []).map((w) => {
+    const o = old.get(w.waveNo);
+    return o ? { ...w, sold: Math.min(Number(w.quota || 0), Math.max(Number(w.sold || 0), Number(o.sold || 0))) } : w;
+  });
+}
+
 function setQty(q) {
-  const qty = Math.min(10, Math.max(1, q));
+  const qty = Math.min(qtyCap(), Math.max(1, q));
   if (qty === store.qty) return;
   store.qty = qty;
   while (store.attendees.length < qty) store.attendees.push({ name: '', minor: false });
   store.attendees.length = qty;
+  if (!store.sending) {
+    const before = store.wave;
+    store.wave = waveFor(store.event.waves, qty);
+    // цена всей брони поменялась из-за количества — говорим почему
+    const cheap = activeWave((store.event.waves || []).filter((w) => w.public !== false));
+    if (store.wave && cheap && store.wave.waveNo !== cheap.waveNo) {
+      alertNote(
+        `По ${fmtRub(cheap.priceRub)} ₽ ${plural(cheap.left, 'осталась', 'осталось', 'осталось')} ${cheap.left} — ` +
+          `на ${qty} ${plural(qty, 'гостя', 'гостей', 'гостей')} вся бронь по ${fmtRub(store.wave.priceRub)} ₽. ` +
+          'Можно разделить компанию на две брони.',
+        'info'
+      );
+    } else if (before && store.wave && before.waveNo !== store.wave.waveNo) {
+      $('wave-note')?.classList.add('hidden');
+    }
+  }
   renderAttendees();
   updateTotal();
   persistForm();
@@ -480,7 +525,7 @@ function renderAttendees() {
   const minorAllowed = e.ageRating === 16;
   $('qty-val').textContent = String(store.qty);
   $('qty-minus').disabled = store.qty <= 1;
-  $('qty-plus').disabled = store.qty >= 10;
+  $('qty-plus').disabled = store.qty >= qtyCap();
 
   const box = $('attendees');
   while (box.children.length > store.attendees.length) box.lastElementChild.remove();
@@ -630,7 +675,7 @@ async function submitOrder() {
     }
     return showSuccess(j);
   }
-  if (j.error === 'wave_sold_out') return handleSoldOut(j.next_wave);
+  if (j.error === 'wave_sold_out') return handleSoldOut(j);
   if (j.error === 'validation') {
     if (j.fields?.phone) showFieldErr($('f-phone'), $('err-phone'), j.fields.phone);
     if (j.fields?.consent) $('err-consent').classList.add('is-on');
@@ -656,22 +701,42 @@ async function submitOrder() {
   showFallback();
 }
 
-function handleSoldOut(nextWave) {
+function handleSoldOut(j) {
   const e = store.event;
-  // подтягиваем свежие остатки, чтобы лестница не врала
+  const nextWave = j.next_wave || null;
+  const maxOne = Number(j.max_one || 0);
+  // что сказал сервер — сразу в лестницу: в волне, где отказали, мест на эту
+  // компанию нет; у предложенной — ровно столько, сколько он назвал
+  const tried = store.wave ? store.wave.waveNo : null;
+  e.waves = (e.waves || []).map((w) => {
+    if (w.waveNo === tried) return { ...w, sold: Math.max(Number(w.sold || 0), Number(w.quota) - store.qty + 1) };
+    if (nextWave && w.waveNo === nextWave.waveNo) return { ...w, sold: Number(w.quota) - Number(nextWave.left) };
+    return w;
+  });
+  // и подтягиваем свежие остатки, чтобы лестница не врала
   loadEvents().then(({ events }) => {
     const fresh = events.find((x) => x.id === e.id);
-    if (fresh) { store.event.waves = fresh.waves; renderWaves(); }
+    if (fresh && !store.sending) { store.event.waves = mergeWaves(store.event.waves, fresh.waves); renderWaves(); }
   });
   if (!nextWave) {
+    if (maxOne > 0) {
+      // места есть, но не на всю компанию одной бронью
+      setQty(maxOne);
+      store.wave = waveFor(e.waves, store.qty);
+      renderWaves();
+      return alertNote(
+        `Одной бронью сейчас можно взять до ${maxOne} — количество уменьшено. Остальным гостям оформи вторую бронь.`,
+        'warn'
+      );
+    }
     store.wave = null;
-    updateTotal();
+    renderWaves();
     return alertNote('Только что забрали последние проходки. Следи за анонсами — бывают возвраты.', 'error', { href: '/#afisha', label: 'Другие ночи на афише' });
   }
-  store.wave = { waveNo: nextWave.waveNo, name: nextWave.name, priceRub: nextWave.priceRub };
-  updateTotal();
+  store.wave = waveFor(e.waves, store.qty) || { waveNo: nextWave.waveNo, name: nextWave.name, priceRub: nextWave.priceRub, left: nextWave.left };
+  renderWaves();
   alertNote(
-    `Пока ты заполнял форму, волна закончилась — цена теперь ${nextWave.priceRub} ₽. ` +
+    `Пока ты заполнял форму, волна закончилась — цена теперь ${fmtRub(nextWave.priceRub)} ₽. ` +
     `Осталось ${nextWave.left} ${plural(nextWave.left, 'проходка', 'проходки', 'проходок')}. Сумма обновлена.`
   );
 }
@@ -710,7 +775,7 @@ function showSuccess(j) {
     $('success-note').textContent =
       `Места держим за тобой ${j.hold_minutes >= 120 ? `${Math.round(j.hold_minutes / 60)} ${plural(Math.round(j.hold_minutes / 60), 'час', 'часа', 'часов')}` : `${j.hold_minutes} минут`}. ` +
       'Переведи сумму по реквизитам ниже и нажми «Я перевёл» — бронь перестанет сгорать по таймеру, а мы получим сигнал проверить перевод.';
-    const order = { id: j.order_id, payCode: j.pay_code, amountRub: j.amount_rub, qty: (j.tickets || []).length, expiresAt: j.expires_at, claimedAt: null };
+    const order = { id: j.order_id, payCode: j.pay_code, amountRub: j.amount_rub, qty: (j.tickets || []).length, expiresAt: j.expires_at, claimedAt: null, botStart: j.bot_start || null };
     payHost.innerHTML = payBlockHtml(order, j.bot);
     bindPayBlock(order);
     steps.innerHTML =
@@ -732,12 +797,16 @@ function showSuccess(j) {
       `<li><b>На дверях.</b> Паспорт с собой, двери в ${esc(fmtTime(store.event.startsAt))}. Друзьям — перешли их именные проходки.</li>`;
   }
   // Дубликат ссылок на случай, если лист закроют: единственный экземпляр
-  // «моих проходок» на сайте не должен исчезать вместе со шторкой.
+  // «моих проходок» на сайте не должен исчезать вместе со шторкой. Вторая
+  // бронь на той же странице добавляется к первой, а не затирает её.
   try {
-    localStorage.setItem(
-      `px_tickets_${store.event.id}`,
-      JSON.stringify({ at: Date.now(), tickets: j.tickets || [] })
-    );
+    const key = `px_tickets_${store.event.id}`;
+    const prev = JSON.parse(localStorage.getItem(key) || 'null');
+    const seen = new Set();
+    const tickets = [...(j.tickets || []), ...(Array.isArray(prev?.tickets) ? prev.tickets : [])]
+      .filter((t) => t && t.url && !seen.has(t.url) && seen.add(t.url))
+      .slice(0, 30);
+    localStorage.setItem(key, JSON.stringify({ at: Date.now(), tickets }));
   } catch { /* приватный режим — не беда, экран успеха всё равно показан */ }
   renderSavedTickets();
 

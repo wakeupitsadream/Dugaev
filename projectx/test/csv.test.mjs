@@ -10,8 +10,18 @@ test('ordersCsv: BOM, «;», кавычки, дата в поясе площад
   assert.ok(csv.startsWith('﻿'));
   const lines = csv.trim().split('\r\n');
   assert.equal(lines[0], ORDER_COLUMNS.join(';'));
-  assert.equal(lines[1], '26.09.2026 23:05;PX-7F3K;2000;2;"Иван; ""Петров""";+79161234567;перевод;Максим;promo-lev;ord_abc');
-  assert.equal(lines[2], '27.09.2026 02:40;;1500;1;Касса Гость;;на входе;дверь · Хостес;door;ord_def');
+  assert.equal(lines[1], `26.09.2026 23:05;PX-7F3K;2000;2;0;"Иван; ""Петров""";'+79161234567;перевод;Максим;promo-lev;ord_abc`);
+  assert.equal(lines[2], '27.09.2026 02:40;;1500;1;0;Касса Гость;;на входе;дверь · Хостес;door;ord_def');
+});
+
+test('ordersCsv: формулы в именах и метках не выполняются, возвраты видны', () => {
+  const csv = ordersCsv([
+    { paid_at: '2026-09-26T18:05:00.000Z', pay_code: 'PX-1111', amount_rub: 3000, qty: 3, refunded: 1, buyer_name: '=HYPERLINK("http://x","клик")', buyer_phone: '+79160000000', provider: 'transfer', confirmed_by: '@admin', src: '-cmd', id: 'ord_x' },
+  ]);
+  const row = csv.trim().split('\r\n')[1];
+  assert.ok(row.startsWith('26.09.2026 23:05;PX-1111;3000;3;1;'));
+  assert.ok(row.includes(`"'=HYPERLINK(""http://x"",""клик"")"`));
+  assert.ok(row.includes(";'@admin;'-cmd;"));
 });
 
 test('ordersCsv: пустой список — только шапка; имя файла без мусора', () => {

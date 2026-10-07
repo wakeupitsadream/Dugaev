@@ -70,6 +70,15 @@ test('прошедшая дата в продажу не ставится, но 
   const past = { date: '2026-08-01' };
   assert.equal(parseEventForm(form(past), { nowMs: NOW }).ok, false);
   assert.equal(parseEventForm(form({ ...past, status: 'past' }), { nowMs: NOW }).ok, true);
+  // прошедшую ночь (фото, отчёт) правят и без цен: волны нужны только продаже
+  assert.equal(parseEventForm(form({ ...past, status: 'past', waves: [] }), { nowMs: NOW }).ok, true);
+});
+
+test('описание: пустое поле стирает его, отсутствие поля — не трогает', () => {
+  assert.equal(parseEventForm(form({ descr: '' }), { nowMs: NOW }).event.descr, '');
+  assert.equal(parseEventForm(form({ descr: '  ' }), { nowMs: NOW }).event.descr, '');
+  assert.equal(parseEventForm(form({}), { nowMs: NOW }).event.descr, null);
+  assert.equal(parseEventForm(form({ descr: ' текст ' }), { nowMs: NOW }).event.descr, 'текст');
 });
 
 test('цена и квота вне диапазона — отказ', () => {
@@ -144,6 +153,9 @@ test('редактирование без постера/описания не �
   assert.equal(r.title, 'ПРАВКА');
   assert.equal(r.poster_url, '/assets/poster.jpg');
   assert.equal(r.descr, 'было');
+  // пустое описание из формы — стереть
+  await upsertEvent({ id: 'px-sql-2', posterUrl: null, descr: '', title: 'ПРАВКА' });
+  assert.equal((await pg.query(`SELECT descr FROM events WHERE id = 'px-sql-2'`)).rows[0].descr, null);
 });
 
 test('волна: создаётся, обновляется, квота не падает ниже проданного', async () => {

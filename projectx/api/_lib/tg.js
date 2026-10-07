@@ -28,7 +28,7 @@ export async function tgCall(method, payload, timeoutMs = 4000) {
     if (j && j.ok) return { ok: true, result: j.result };
     const error = (j && j.description) || `HTTP ${r.status}`;
     console.warn(`tg ${method}: ${error}`);
-    return { ok: false, error, code: (j && j.error_code) || r.status };
+    return { ok: false, error, code: (j && j.error_code) || r.status, retryAfter: Number(j?.parameters?.retry_after || 0) };
   } catch (e) {
     console.warn(`tg ${method} failed: ${e.message}`);
     return { ok: false, error: e.message, code: 0 };

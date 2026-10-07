@@ -11,11 +11,12 @@
 // POST { action: 'claim', order_id } — гость нажал «Я перевёл»: заказ
 // помечается, владельцу уходит уведомление с кнопкой подтверждения.
 import { createHash } from 'node:crypto';
-import { normalizePhone } from '../assets/ticket-format.js';
+import { normalizePhone, formatRuPhoneDigits } from '../assets/ticket-format.js';
 import { db, hasDb } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { notifyOwner, tgBotUsername } from './_lib/tg.js';
-import { isOrderId, TEST_PHONE } from './_lib/booking.js';
+import { isOrderId, TEST_PHONE, orderStart } from './_lib/booking.js';
+import { CLAIM_SQL } from './_lib/queries.js';
 import { isAdmin } from './_lib/auth.js';
 import { placeOrder, ownerNotice, ownerNoticeMarkup } from './_lib/order-core.js';
 
@@ -73,41 +74,39 @@ export default async function handler(req, res) {
     expires_at: order.expiresAt,
     hold_minutes: order.hold,
     bot: tgBotUsername(),
+    // ссылка в бот подписана: голый номер заказа видят все гости компании
+    bot_start: order.transfer ? orderStart(order.id) : null,
     payment: { provider: order.provider, status: order.transfer ? 'pending' : 'paid' },
     tickets: order.tickets,
   });
 }
 
 // Гость нажал «Я перевёл». Заказ перестаёт сгорать по таймеру (решает
-// владелец), владельцу — уведомление с кнопками подтверждения.
+// владелец), владельцу — уведомление с кнопками подтверждения. Сгоревшую
+// бронь тоже можно заявить — как в боте: перевод мог прийти позже срока,
+// «Подтвердить» у владельца вернёт места, если они остались.
 async function claim(req, res, b) {
   const oid = String(b.order_id || '');
   if (!isOrderId(oid)) return fail(res, 400, 'validation', 'Некорректный номер брони');
   if (!hasDb()) return fail(res, 503, 'db_unavailable', 'Сервис недоступен');
   try {
-    // повторное нажатие в ближайшие минуты владельца не дёргает: одна бронь —
-    // одно уведомление, иначе кнопкой можно заспамить его чат
-    const cur = (await db().query(
-      `SELECT status, claimed_at, (claimed_at IS NOT NULL AND claimed_at > now() - interval '10 minutes') AS recent
-       FROM orders WHERE id = $1`, [oid]
-    ));
-    const c = (cur.rows || cur)[0];
-    if (!c || c.status !== 'pending') {
-      // уже подтверждена, сгорела или отменена — страница проходки покажет актуальный статус
+    // одна бронь — одно уведомление за 10 минут (условие внутри CLAIM_SQL),
+    // иначе кнопкой можно заспамить чат владельца
+    const o = rowsOf(await db().query(CLAIM_SQL, [oid]))[0];
+    if (!o) {
+      const c = rowsOf(await db().query(`SELECT status, claimed_at FROM orders WHERE id = $1`, [oid]))[0];
+      if (c && ['pending', 'expired'].includes(c.status) && c.claimed_at) {
+        return ok(res, { claimed_at: new Date(c.claimed_at).toISOString(), repeated: true });
+      }
+      // уже подтверждена или отменена — страница проходки покажет актуальный статус
       return fail(res, 409, 'not_pending', 'Бронь уже обработана', { status: c ? c.status : 'not_found' });
     }
-    if (c.recent) return ok(res, { claimed_at: new Date(c.claimed_at).toISOString(), repeated: true });
-    const rows = await db().query(
-      `UPDATE orders SET claimed_at = now()
-       WHERE id = $1 AND status = 'pending'
-       RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone, claimed_at, event_id`,
-      [oid]
-    );
-    const o = (rows.rows || rows)[0];
-    if (!o) return fail(res, 409, 'not_pending', 'Бронь уже обработана', { status: 'not_found' });
+    const late = o.status === 'expired';
     await notifyOwner(
       `💸 Гость сообщил о переводе\n${o.pay_code} · ${o.amount_rub} ₽ · ${o.qty} шт.\n` +
-        `${o.buyer_name}, ${o.buyer_phone}\n\nПроверь поступление в банке и подтверди:`,
+        `${o.buyer_name}, ${fmtPhone(o.buyer_phone)}\n` +
+        (late ? '⚠️ Бронь уже сгорела: «Подтвердить» вернёт места, если они ещё есть.\n' : '') +
+        '\nПроверь поступление в банке и подтверди:',
       {
         inline_keyboard: [[
           { text: `✅ Подтвердить ${o.pay_code}`, callback_data: `pay:${o.id}` },
@@ -115,9 +114,12 @@ async function claim(req, res, b) {
         ]],
       }
     );
-    return ok(res, { claimed_at: new Date(o.claimed_at).toISOString(), pay_code: o.pay_code });
+    return ok(res, { claimed_at: new Date(o.claimed_at).toISOString(), pay_code: o.pay_code, late });
   } catch (err) {
     console.warn('claim failed:', err.message);
     return fail(res, 503, 'db_unavailable', 'Сервис недоступен');
   }
 }
+
+const rowsOf = (r) => (r && r.rows) || r || [];
+const fmtPhone = (p) => (/^\+7\d{10}$/.test(String(p)) ? `+7 ${formatRuPhoneDigits(String(p).slice(2))}` : String(p || ''));

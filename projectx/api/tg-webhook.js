@@ -21,10 +21,10 @@ import { isAdmin } from './_lib/auth.js';
 import { notifyOwner, tgApi, tgCall, tgBotUsername } from './_lib/tg.js';
 import { extractPost, extractorAvailable } from './_lib/extract.js';
 import { normalizeAnnouncement, previewText } from './_lib/post-normalize.js';
-import { isOrderId, transferText, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer } from './_lib/booking.js';
+import { parseOrderStart, transferText, transferLines, ticketLinks, siteOrigin, paidMessage, subOffer } from './_lib/booking.js';
 import { placeOrder, nextWaveOf, nextWaveFor, seatsLeft, ownerNotice, ownerNoticeMarkup, liveUntilMs } from './_lib/order-core.js';
-import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL } from './_lib/queries.js';
-import { normalizePhone, fmtTime } from '../assets/ticket-format.js';
+import { CONFIRM_SQL, CANCEL_SQL, EXPIRE_SQL, CLAIM_SQL, CLOSE_EXPIRED_SQL } from './_lib/queries.js';
+import { normalizePhone, fmtTime, formatRuPhoneDigits } from '../assets/ticket-format.js';
 import { ladderText, fmtRub } from '../assets/waves.js';
 import { SITE } from '../assets/data/config.js';
 import {
@@ -111,7 +111,7 @@ export default async function handler(req, res) {
     if (sql) await ensureSchema(sql); // таблицы бота могли появиться после «Инициализировать БД»
     const r = await handleUpdate(update, {
       sql,
-      extract: extractPost,
+      extract: (text, known, nowIso) => extractPost(text, known, nowIso, { timeoutMs: 12_000, retries: 0 }),
       extractAvailable: extractorAvailable(),
       notify: notifyOwner,
       tg: tgApi,
@@ -129,7 +129,7 @@ export default async function handler(req, res) {
     console.error(`tg-webhook failed: ${kind} chat=${chat} "${head}" (${Date.now() - t0} ms):`, e);
     // гость не должен получать тишину в ответ: коротко скажем, что сломалось
     if (chat && kind !== 'post') {
-      await tgApi('sendMessage', { chat_id: chat, text: 'Что-то сломалось — попробуй ещё раз через минуту. Если повторится, напиши нам в директ.' }, 2000);
+      await tgApi('sendMessage', { chat_id: chat, text: `Что-то сломалось — попробуй ещё раз через минуту. Если повторится, бронь работает и на сайте: ${SITE.siteUrl}` }, 2000);
     }
   }
   ok(res);
@@ -292,6 +292,8 @@ export async function handleUpdate(update, deps) {
   if (!wantChannel || String(post.chat?.id ?? '') !== wantChannel) return { done: 'ignored_channel' };
 
   const text = String(post.text || post.caption || '').trim();
+  // альбом приходит отдельными постами на каждое фото; подпись — у одного
+  if (post.media_group_id && !text) return { done: 'album_part' };
   const photoId = Array.isArray(post.photo) && post.photo.length
     ? post.photo[post.photo.length - 1].file_id
     : null;
@@ -321,7 +323,8 @@ export async function handleUpdate(update, deps) {
     } catch { /* не критично */ }
   }
 
-  const extracted = await deps.extract(text, known, new Date(deps.nowMs).toISOString().slice(0, 10));
+  // «сегодня» — по часам площадки (UTC+5): ночной пост с «завтра» иначе съезжал на день
+  const extracted = await deps.extract(text, known, new Date(deps.nowMs + 5 * 3600_000).toISOString().slice(0, 10));
 
   if (extracted.kind === 'unavailable' || extracted.kind === 'error') {
     await deps.notify(
@@ -391,7 +394,7 @@ export async function handleUpdate(update, deps) {
   if (deps.autoPublish) {
     await deps.notify(
       `${previewText(norm, null)}\n\n✅ Опубликовано автоматически (AUTO_PUBLISH=1).`,
-      { inline_keyboard: [[{ text: 'Скрыть с сайта', callback_data: `skip:${slug}` }]] }
+      { inline_keyboard: [[{ text: 'Скрыть с сайта', callback_data: `hide:${slug}` }]] }
     );
   } else {
     await deps.notify(previewText(norm, null), {
@@ -421,14 +424,25 @@ async function handleMessage(msg, deps) {
     return { done: 'no_db' };
   }
 
-  // владелец отвечает гостю: reply на пересланное сообщение с меткой #g<chat>
+  // владелец отвечает гостю: reply на уведомление «пишет гость» или на
+  // пересланное сообщение гостя. Кому — по таблице tg_relays (id сообщения
+  // в чате владельца → чат гостя), а не по метке в тексте: имя гостя в
+  // уведомлении гость выбирает сам и мог вписать туда чужую метку
   const ownerChat = String(process.env.TELEGRAM_CHAT_ID || '');
-  if (ownerChat && String(chatId) === ownerChat && msg.reply_to_message && text && !text.startsWith('/')) {
-    const m = /#g(\d{3,20})\b/.exec(String(msg.reply_to_message.text || msg.reply_to_message.caption || ''));
-    if (m) {
-      const r = await callOf(deps)('sendMessage', { chat_id: Number(m[1]), text: `💬 Организатор: ${text}` });
+  if (ownerChat && String(chatId) === ownerChat && msg.reply_to_message && !text.startsWith('/')) {
+    const guest = await relayTarget(deps.sql, msg.reply_to_message);
+    if (guest) {
+      const call = callOf(deps);
+      let r;
+      if (text && !msg.photo && !msg.document) {
+        r = await call('sendMessage', { chat_id: guest, text: `💬 Организатор: ${text}` });
+      } else {
+        // фото, скрин, документ, голосовое — копией (подпись сохраняется)
+        await call('sendMessage', { chat_id: guest, text: '💬 Организатор:' });
+        r = await call('copyMessage', { chat_id: guest, from_chat_id: chatId, message_id: msg.message_id });
+      }
       await send(r.ok ? 'Отправлено гостю.' : `Не доставлено: ${r.error}`);
-      return { done: r.ok ? 'owner_reply' : 'owner_reply_failed' };
+      return { done: r.ok ? 'owner_reply' : 'owner_reply_failed', guest };
     }
   }
 
@@ -443,11 +457,11 @@ async function handleMessage(msg, deps) {
     await clearSession(deps.sql, chatId);
     const r = await subscribe(deps.sql, chatId, /start/i.test(text) ? 'site' : 'bot');
     await send(
-      r.created
-        ? '🔔 Готово — напишем сюда, как только откроем продажи следующей ночи. Ранняя волна всегда дешевле.\n\nНе присылать анонсы — /stop'
-        : '🔔 Ты уже в списке — напишем, как откроем продажи. Не присылать анонсы — /stop'
+      r.already
+        ? '🔔 Ты уже в списке — напишем, как откроем продажи. Не присылать анонсы — /stop'
+        : '🔔 Готово — напишем сюда, как только откроем продажи следующей ночи. Ранняя волна всегда дешевле.\n\nНе присылать анонсы — /stop'
     );
-    return { done: 'subscribed', created: r.created };
+    return { done: 'subscribed', created: r.created, reactivated: r.reactivated };
   }
   if (/^\/stop(?:@\w+)?$/i.test(text)) {
     await clearSession(deps.sql, chatId);
@@ -460,8 +474,15 @@ async function handleMessage(msg, deps) {
   if (start) {
     const payload = start[1] || '';
     await clearSession(deps.sql, chatId);
-    if (isOrderId(payload)) {
-      const o = await loadOrder(deps.sql, payload);
+    // ссылка на бронь подписана: голый номер заказа есть в проходке каждого
+    // гостя компании, и по нему чужой чат забирал бы все QR заказа
+    const signedOrder = parseOrderStart(payload);
+    if (!signedOrder && /^ord_[0-9a-z]{10}(?:_|$)/i.test(payload)) {
+      await send('Эта ссылка на бронь устарела. Открой страницу брони на сайте и нажми «Получить проходку в Telegram» ещё раз.');
+      return { done: 'start_unsigned' };
+    }
+    if (signedOrder) {
+      const o = await loadOrder(deps.sql, signedOrder);
       if (!o) {
         await send('Бронь по этой ссылке не нашли. Вернись на страницу брони и нажми «Получить проходку в Telegram» ещё раз.');
         return { done: 'start_unknown' };
@@ -494,37 +515,105 @@ async function handleMessage(msg, deps) {
   }
 
   // любая команда сбрасывает мастер: после /tickets следующий текст — не имена
-  if (text.startsWith('/')) await clearSession(deps.sql, chatId);
+  if (text.startsWith('/')) {
+    const was = await getSession(deps.sql, chatId);
+    await clearSession(deps.sql, chatId);
+    // на шаге телефона внизу висит кнопка «Отправить мой номер» — убираем
+    if (was && was.state === 'phone') await send('Оформление брони прервано.', { remove_keyboard: true });
+  }
 
   // Ответы мастера: всё, что не команда, пока идёт оформление
   const session = text.startsWith('/') ? null : await getSession(deps.sql, chatId);
   if (session) return wizardInput(chatId, deps, session, msg);
 
-  if (/^\/tickets|проходк|билет/i.test(text)) return sendTickets(chatId, deps);
+  // номер прислали кнопкой, а бронь не оформляется (мастер сброшен или устарел)
+  if (msg.contact) {
+    await send('Номер получили, но бронь сейчас не оформляется. Забронировать — /buy', { remove_keyboard: true });
+    return { done: 'contact_stray' };
+  }
 
-  // свободный текст, скрин перевода или вопрос от гостя с бронью — организатору,
-  // а не афиша в ответ; владелец отвечает reply'ем на пересланное сообщение
-  if (!text.startsWith('/') && ownerChat && (text || msg.photo || msg.document)) {
+  // только команда или короткая фраза: «оплатил, когда придёт билет?» — это
+  // вопрос организатору, а не просьба показать список проходок
+  if (/^(?:\/tickets(?:@\w+)?|мои проходки|мои билеты|проходки|билеты|мои брони)$/i.test(text)) return sendTickets(chatId, deps);
+
+  // свободный текст, скрин перевода или вопрос — организатору, а не афиша в
+  // ответ; владелец отвечает reply'ем на уведомление или пересланное сообщение
+  if (!text.startsWith('/') && ownerChat && String(chatId) !== ownerChat && (text || msg.photo || msg.document)) {
     const linked = rowsOf(await deps.sql.query(
       `SELECT o.pay_code, o.buyer_name, o.buyer_phone FROM tg_links l JOIN orders o ON o.id = l.order_id
        WHERE l.chat_id = $1 ORDER BY o.created_at DESC LIMIT 1`, [chatId]
     ))[0];
-    if (linked) {
-      await deps.notify(
-        `✉️ Пишет гость · ${linked.pay_code || 'без кода'} · ${linked.buyer_name} · ${linked.buyer_phone} · #g${chatId}\n` +
-          'Ответить ему — reply на это сообщение.' + (msg.message_id ? '' : `\n\n${text.slice(0, 1000)}`)
+    // без брони пересылаем только похожее на вопрос: «привет» и «ок» — нет
+    const question = /\?/.test(text) || text.length >= 15 || Boolean(msg.photo || msg.document);
+    if (linked || question) {
+      // не больше 5 сообщений за 10 минут: чат владельца — рабочий инструмент
+      if ((await relaysRecent(deps.sql, chatId)) >= 5) {
+        await send('Сообщения дошли — дождись ответа организатора 🙏');
+        return { done: 'relay_throttled' };
+      }
+      const who = linked
+        ? `${linked.pay_code || 'без кода'} · ${noTag(linked.buyer_name)} · ${fmtPhone(linked.buyer_phone)}`
+        : `без брони · ${noTag([msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || 'гость')}${msg.from?.username ? ` · @${msg.from.username}` : ''}`;
+      const notice = await deps.notify(
+        `✉️ ${linked ? 'Пишет гость' : 'Вопрос в боте'} · ${who} · #g${chatId}\n` +
+          'Ответить — reply на это сообщение или на пересланное ниже.' + (msg.message_id ? '' : `\n\n${text.slice(0, 1000)}`)
       );
+      await saveRelay(deps.sql, notice, chatId);
       if (msg.message_id) {
         const fw = await callOf(deps)('forwardMessage', { chat_id: ownerChat, from_chat_id: chatId, message_id: msg.message_id });
-        if (!fw.ok && text) await deps.notify(text.slice(0, 1000));
+        if (fw.ok) await saveRelay(deps.sql, fw.result, chatId);
+        else if (text) await saveRelay(deps.sql, await deps.notify(text.slice(0, 1000)), chatId);
       }
-      await send('Передали организатору — ответ придёт сюда.');
-      return { done: 'relayed' };
+      await send('Передали организатору — ответ придёт сюда.', linked ? undefined : {
+        inline_keyboard: [[{ text: '🎟 Забронировать', callback_data: 'menu:buy' }, { text: '🌐 Сайт', url: `${originOf(deps)}/?src=tgbot` }]],
+      });
+      return { done: 'relayed', linked: Boolean(linked) };
     }
   }
 
   const welcome = await sendWelcome(chatId, deps, { intro: false });
   return { done: 'unknown', welcome };
+}
+
+// ---------- переписка гостя с организатором ----------
+// Метку #g в имени гостя убираем: по ней раньше искали, кому ответить
+const noTag = (s) => String(s || '').replace(/#/g, '');
+const fmtPhone = (p) => (/^\+7\d{10}$/.test(String(p)) ? `+7 ${formatRuPhoneDigits(String(p).slice(2))}` : String(p || ''));
+
+async function saveRelay(sql, message, guestChat) {
+  const id = message && message.message_id;
+  if (!id) return;
+  try {
+    await sql.query(
+      `INSERT INTO tg_relays (owner_msg_id, guest_chat) VALUES ($1, $2) ON CONFLICT (owner_msg_id) DO UPDATE SET guest_chat = EXCLUDED.guest_chat`,
+      [id, guestChat]
+    );
+  } catch (e) {
+    console.warn('tg_relays:', e.message);
+  }
+}
+
+async function relaysRecent(sql, guestChat) {
+  try {
+    return Number(rowsOf(await sql.query(
+      `SELECT count(*)::int AS n FROM tg_relays WHERE guest_chat = $1 AND created_at > now() - interval '10 minutes'`, [guestChat]
+    ))[0]?.n || 0) / 2; // на сообщение — две строки: уведомление и пересылка
+  } catch {
+    return 0;
+  }
+}
+
+// Кому ушёл бы ответ владельца: по таблице; для уведомлений до неё — по
+// последней метке #g (системная метка стоит в конце строки, после имени)
+async function relayTarget(sql, replied) {
+  try {
+    const row = rowsOf(await sql.query(`SELECT guest_chat FROM tg_relays WHERE owner_msg_id = $1`, [replied.message_id]))[0];
+    if (row) return Number(row.guest_chat);
+  } catch { /* таблицы ещё нет */ }
+  // в пересланном сообщении текст писал гость — его «метке» не верим
+  if (replied.forward_origin || replied.forward_from || replied.forward_sender_name || replied.forward_date) return null;
+  const tags = [...String(replied.text || replied.caption || '').matchAll(/#g(\d{3,20})\b/g)];
+  return tags.length ? Number(tags[tags.length - 1][1]) : null;
 }
 
 // Все проходки этого чата (последние 5 заказов), каждая — по своему статусу
@@ -679,20 +768,22 @@ async function startWizard(chatId, deps, eventId, { force = false } = {}) {
   if (!ev || ev.status !== 'onsale' || liveUntilMs(ev) <= deps.nowMs) ev = await nearestEvent(deps.sql, deps.nowMs);
   if (!ev) {
     await clearSession(deps.sql, chatId);
-    await send('Сейчас продаж нет — следующую ночь объявим на сайте и в соцсетях.');
+    await send('Сейчас продаж нет — следующую ночь объявим здесь, на сайте и в соцсетях.', { inline_keyboard: [[SUB_BUTTON]] });
     return { done: 'wizard_closed' };
   }
   // уже есть неоплаченная бронь: напоминаем о ней, а не плодим вторую
   if (!force) {
     const pend = rowsOf(await deps.sql.query(
-      `SELECT o.pay_code, o.qty, o.expires_at FROM tg_links l JOIN orders o ON o.id = l.order_id
+      `SELECT o.pay_code, o.qty, o.expires_at, o.claimed_at FROM tg_links l JOIN orders o ON o.id = l.order_id
        WHERE l.chat_id = $1 AND o.status = 'pending' ORDER BY o.created_at DESC LIMIT 1`, [chatId]
     ))[0];
     if (pend) {
       await clearSession(deps.sql, chatId);
+      const what = `бронь ${pend.pay_code} на ${pend.qty} ${plural(Number(pend.qty), 'проходку', 'проходки', 'проходок')}`;
       await send(
-        `У тебя уже есть бронь ${pend.pay_code} на ${pend.qty} ${plural(Number(pend.qty), 'проходку', 'проходки', 'проходок')} — держим до ${fmtWhen(pend.expires_at)}. ` +
-          'Оплати её или оформи ещё одну.',
+        pend.claimed_at
+          ? `У тебя уже есть ${what} — перевод проверяем, QR придут сюда. Нужно ещё — оформи вторую.`
+          : `У тебя уже есть ${what} — держим до ${fmtWhen(pend.expires_at)}. Оплати её или оформи ещё одну.`,
         { inline_keyboard: [[{ text: '🎫 Показать бронь', callback_data: 'menu:tickets' }, { text: '➕ Ещё одну', callback_data: `more:${ev.id}` }]] }
       );
       return { done: 'wizard_pending_exists', order: pend.pay_code };
@@ -701,12 +792,14 @@ async function startWizard(chatId, deps, eventId, { force = false } = {}) {
   const wave = await nextWaveOf(deps.sql, ev.id);
   if (!wave) {
     await clearSession(deps.sql, chatId);
-    await send('Всё продано 😔 Если места освободятся — расскажем на сайте и в соцсетях.');
+    await send('Всё продано 😔 Подпишись — напишем, если места освободятся и когда объявим следующую ночь.', { inline_keyboard: [[SUB_BUTTON]] });
     return { done: 'wizard_sold_out' };
   }
   await setSession(deps.sql, chatId, 'qty', {
     eventId: ev.id, title: ev.title, startsAt: new Date(ev.starts_at).toISOString(),
     waveNo: wave.waveNo, priceRub: wave.priceRub,
+    // номер оформления: кнопка «Забронировать» из старой сводки его не знает
+    run: Math.random().toString(36).slice(2, 8),
   });
   const scarce = wave.left <= 10
     ? `, по этой цене ${plural(wave.left, 'осталась', 'остались', 'осталось')} ${wave.left}`
@@ -847,12 +940,12 @@ async function sendSummary(chatId, deps, d, repricedFrom = null) {
   await sender(deps, chatId)(
     `${head}<b>Проверь бронь</b>\n${escHtml(d.title)} · ${escHtml(fmtWhen(d.startsAt))}\n` +
       `${d.qty} × ${fmtRub(d.priceRub)} ₽ = <b>${fmtRub(amount)} ₽</b>\n` +
-      `${d.qty === 1 ? 'Гость' : 'Гости'}: ${d.names.map(escHtml).join(', ')}\nТелефон: ${escHtml(d.phone)}\n\n` +
+      `${d.qty === 1 ? 'Гость' : 'Гости'}: ${d.names.map(escHtml).join(', ')}\nТелефон: ${escHtml(fmtPhone(d.phone))}\n\n` +
       `Жмёшь «Забронировать» — значит, всем гостям есть 18 (на входе паспорт), ты принимаешь ` +
       `<a href="${origin}/offer">условия покупки</a> и <a href="${origin}/rules">правила ночи</a> и даёшь согласие на <a href="${origin}/privacy#consent">обработку данных</a>.`,
     {
       inline_keyboard: [
-        [{ text: `✅ Забронировать за ${fmtRub(amount)} ₽`, callback_data: 'book:go' }],
+        [{ text: `✅ Забронировать за ${fmtRub(amount)} ₽`, callback_data: d.run ? `book:go-${d.run}` : 'book:go' }],
         [{ text: '✖ Отмена', callback_data: 'book:no' }],
       ],
     },
@@ -862,13 +955,24 @@ async function sendSummary(chatId, deps, d, repricedFrom = null) {
 
 // Шаг 5: бронь. Сессия атомарно переводится confirm → booking, чтобы
 // двойной тап по кнопке не создал две брони.
-async function wizardBook(chatId, deps, cb) {
+async function wizardBook(chatId, deps, cb, run = null) {
   const send = sender(deps, chatId);
+  // кнопка из старой сводки (гость начал оформление заново) не бронирует
+  // новую: количество и цена в ней другие
   const row = rowsOf(await deps.sql.query(
     `UPDATE tg_sessions SET state = 'booking', updated_at = now()
-     WHERE chat_id = $1 AND state = 'confirm' RETURNING data`, [chatId]
+     WHERE chat_id = $1 AND state = 'confirm' AND ($2::text IS NULL OR data->>'run' IS NULL OR data->>'run' = $2)
+     RETURNING data`, [chatId, run]
   ))[0];
-  if (!row) return { done: 'wizard_stale' };
+  if (!row) {
+    const cur = await getSession(deps.sql, chatId);
+    if (cur && cur.state === 'confirm' && run) {
+      await dropButtons(cb, deps);
+      await sendSummary(chatId, deps, cur.data);
+      return { done: 'wizard_old_button' };
+    }
+    return { done: 'wizard_stale' };
+  }
   const d = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
   await dropButtons(cb, deps);
 
@@ -971,7 +1075,7 @@ async function wizardBook(chatId, deps, cb) {
 // ---------- кнопки ----------
 async function handleCallback(cb, deps) {
   const answer = (text) => deps.tg('answerCallbackQuery', { callback_query_id: cb.id, ...(text ? { text } : {}) });
-  const m = /^(pub|skip|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
+  const m = /^(pub|skip|hide|cancel|pay|nopay|drop|del|bc|own|sub|claim|buy|more|qty|book|menu):([\w-]{1,64})$/.exec(String(cb.data || ''));
   if (!m || !deps.sql) {
     await answer('Кнопка устарела — /start');
     return { done: 'callback_bad' };
@@ -1000,9 +1104,9 @@ async function handleCallback(cb, deps) {
       return { done: 'unsubscribed' };
     }
     const r = await subscribe(deps.sql, guestChat, 'button');
-    await answer(r.created ? 'Готово — напишем о следующей ночи первым' : 'Ты уже подписан');
-    if (r.created) await sender(deps, guestChat)('🔔 Подписка на анонсы включена. Не присылать — /stop');
-    return { done: 'subscribed', created: r.created };
+    await answer(r.already ? 'Ты уже подписан' : 'Готово — напишем о следующей ночи первым');
+    if (!r.already) await sender(deps, guestChat)('🔔 Подписка на анонсы включена. Не присылать — /stop');
+    return { done: 'subscribed', created: r.created, reactivated: r.reactivated };
   }
   if (action === 'qty') {
     const s = await getSession(deps.sql, guestChat);
@@ -1023,8 +1127,11 @@ async function handleCallback(cb, deps) {
       if (had) await sender(deps, guestChat)('Ок, ничего не бронируем. Передумаешь — /buy.');
       return { done: 'wizard_cancelled' };
     }
-    const r = await wizardBook(guestChat, deps, cb);
-    await answer(r.done === 'wizard_stale' ? 'Начни заново: /buy' : r.done === 'booked' ? 'Бронь оформлена' : undefined);
+    const run = /^go-([a-z0-9]{1,12})$/.exec(arg)?.[1] || null;
+    const r = await wizardBook(guestChat, deps, cb, run);
+    await answer(r.done === 'wizard_stale' ? 'Начни заново: /buy'
+      : r.done === 'wizard_old_button' ? 'Это кнопка старой брони — проверь новую сводку'
+        : r.done === 'booked' ? 'Бронь оформлена' : undefined);
     return r;
   }
 
@@ -1038,34 +1145,23 @@ async function handleCallback(cb, deps) {
       await answer('Недоступно');
       return { done: 'claim_denied' };
     }
-    // повторное нажатие в ближайшие минуты не дёргает владельца ещё раз
-    // сгоревшую бронь тоже можно заявить: «Подтвердить» у владельца вернёт места, если они есть
-    const cur = rowsOf(await deps.sql.query(
-      `SELECT status, (claimed_at IS NOT NULL AND claimed_at > now() - interval '10 minutes') AS recent
-       FROM orders WHERE id = $1`, [arg]
-    ))[0];
-    if (!cur || !['pending', 'expired'].includes(cur.status)) {
-      await answer('Бронь уже обработана');
-      return { done: 'claim_noop' };
-    }
-    if (cur.recent) {
-      await answer('Уже передали — как увидим перевод, QR придут сюда');
-      return { done: 'claim_repeat' };
-    }
-    const o = rowsOf(await deps.sql.query(
-      `UPDATE orders SET claimed_at = now()
-       WHERE id = $1 AND status IN ('pending', 'expired')
-       RETURNING id, pay_code, amount_rub, qty, buyer_name, buyer_phone, status`,
-      [arg]
-    ))[0];
+    // одно уведомление владельцу на бронь за 10 минут — условие внутри
+    // CLAIM_SQL, поэтому двойной тап (и два запроса разом) его не обходят.
+    // Сгоревшую бронь тоже можно заявить: «Подтвердить» вернёт места, если есть
+    const o = rowsOf(await deps.sql.query(CLAIM_SQL, [arg]))[0];
     if (!o) {
+      const cur = rowsOf(await deps.sql.query(`SELECT status, claimed_at FROM orders WHERE id = $1`, [arg]))[0];
+      if (cur && ['pending', 'expired'].includes(cur.status) && cur.claimed_at) {
+        await answer('Уже передали — как увидим перевод, QR придут сюда');
+        return { done: 'claim_repeat' };
+      }
       await answer('Бронь уже обработана');
       return { done: 'claim_noop' };
     }
     await deps.notify(
       `💸 ${o.pay_code} · ${fmtRub(o.amount_rub)} ₽ · ${o.qty} шт. — нажал «Я перевёл» в ${fmtTime(new Date(deps.nowMs).toISOString())} (бот)` +
         (o.status === 'expired' ? '\n⚠️ Бронь уже сгорела: «Подтвердить» вернёт места, если они ещё есть' : '') +
-        `\n${o.buyer_name} · ${o.buyer_phone}\nВ банке ищи: ${fmtRub(o.amount_rub)} ₽ с комментарием ${o.pay_code}`,
+        `\n${o.buyer_name} · ${fmtPhone(o.buyer_phone)}\nВ банке ищи: ${fmtRub(o.amount_rub)} ₽ с комментарием ${o.pay_code}`,
       {
         inline_keyboard: [[
           { text: `✅ Подтвердить ${o.pay_code}`, callback_data: `pay:${o.id}` },
@@ -1104,7 +1200,25 @@ async function handleCallback(cb, deps) {
   if (action === 'pay') {
     const o = rowsOf(await deps.sql.query(CONFIRM_SQL, [slug, 'Telegram', 'transfer']))[0];
     if (!o) {
-      await answer('Бронь уже обработана');
+      const st = rowsOf(await deps.sql.query(`SELECT status, pay_code, tg_chat_id FROM orders WHERE id = $1`, [slug]))[0];
+      if (st && st.status === 'expired') {
+        // бронь сгорела, а её места уже купили: подтвердить нечего — владелец
+        // решает сам (поднять квоту и подтвердить по коду, касса или возврат)
+        await answer('Мест не осталось — подробности в чате');
+        await sender(deps, ownerChat)(
+          `⚠️ ${st.pay_code}: бронь сгорела, а её места уже разобрали — подтвердить нельзя.\n` +
+            'Если перевод пришёл: подними квоту волны в панели и подтверди по коду, оформи гостя через кассу или верни перевод.'
+        );
+        if (st.tg_chat_id) {
+          await deps.tg('sendMessage', {
+            chat_id: st.tg_chat_id,
+            text: 'Бронь сгорела раньше, чем мы увидели перевод, и места в этой волне уже разобрали. Организатор напишет тебе здесь: оформим проходку или вернём деньги.',
+          });
+        }
+        return { done: 'pay_no_seats', order: slug };
+      }
+      if (st && st.status === 'paid') await dropButtons(cb, deps);
+      await answer(st?.status === 'paid' ? 'Уже подтверждено' : st?.status === 'cancelled' ? 'Бронь отменена' : 'Бронь уже обработана');
       return { done: 'pay_noop', order: slug };
     }
     await dropButtons(cb, deps);
@@ -1151,34 +1265,55 @@ async function handleCallback(cb, deps) {
   // drop: владелец снимает неоплаченную бронь прямо из уведомления
   if (action === 'drop') {
     const o = rowsOf(await deps.sql.query(CANCEL_SQL, [slug]))[0];
+    // сгоревшая бронь с «Я перевёл»: места уже вернулись, закрываем без перевода
+    const late = o ? null : rowsOf(await deps.sql.query(CLOSE_EXPIRED_SQL, [slug]))[0];
     await dropButtons(cb, deps);
-    if (o?.tg_chat_id) {
+    const chat = (o || late)?.tg_chat_id;
+    if (chat) {
       await deps.tg('sendMessage', {
-        chat_id: o.tg_chat_id,
-        text: 'Бронь отменена организатором, места вернулись в продажу. Если это ошибка — напиши сюда.',
+        chat_id: chat,
+        text: late
+          ? 'Перевод по сгоревшей брони не нашли — бронь закрыта. Если деньги ушли, пришли сюда скрин перевода.'
+          : 'Бронь отменена организатором, места вернулись в продажу. Если это ошибка — напиши сюда.',
       });
     }
     if (o) await stamp(`✖ Бронь отменена в ${at}, места возвращены`);
-    await answer(o ? 'Бронь отменена' : 'Отменить можно только неоплаченную бронь');
-    return { done: o ? 'dropped' : 'drop_noop', order: slug };
+    if (late) await stamp(`✖ Сгоревшая бронь закрыта в ${at}`);
+    await answer(o || late ? 'Бронь отменена' : 'Отменить можно только неоплаченную бронь');
+    return { done: o ? 'dropped' : late ? 'dropped_expired' : 'drop_noop', order: slug };
   }
 
   if (['pub', 'del', 'bc', 'own'].includes(action)) {
     const r = await ownerCallback(action, slug, cb, deps, answer);
     if (r) return r;
   }
+  if (action === 'hide') {
+    // автопубликация ошиблась: ночь — обратно в черновик (поправить и
+    // опубликовать в панели). С бронями не трогаем: их держатели остались бы
+    // без страницы ночи — такое снимают в панели
+    const r = rowsOf(await deps.sql.query(
+      `UPDATE events e SET status = 'draft' WHERE e.id = $1 AND e.status = 'onsale'
+         AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.event_id = e.id) RETURNING id`, [slug]
+    ))[0];
+    await dropButtons(cb, deps);
+    await answer(r ? 'Снято с сайта — ночь снова черновик' : 'Уже есть брони или ночь не в продаже — снимай в панели');
+    return { done: r ? 'hidden' : 'hide_noop', slug };
+  }
   if (action === 'skip') {
+    // только черновик: карточка могла пролежать в чате, пока ночь
+    // опубликовали из панели — старая кнопка не должна снимать живую ночь
+    const ev = rowsOf(await deps.sql.query(`SELECT status FROM events WHERE id = $1`, [slug]))[0];
+    await dropButtons(cb, deps);
+    if (!ev || ev.status !== 'draft') {
+      await answer(ev ? 'Ночь уже не черновик — снимать с продажи в панели' : 'Черновика уже нет');
+      return { done: 'skip_noop', slug };
+    }
     await deps.sql.query(`DELETE FROM price_waves WHERE event_id = $1 AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.event_id = $1)`, [slug]);
-    const rows = await deps.sql.query(
-      `DELETE FROM events e WHERE e.id = $1 AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.event_id = $1) RETURNING id`,
+    await deps.sql.query(
+      `DELETE FROM events e WHERE e.id = $1 AND e.status = 'draft' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.event_id = $1)`,
       [slug]
     );
-    const removed = (rows.rows || rows).length > 0;
-    if (!removed) {
-      // уже есть продажи — не удаляем, а снимаем с витрины
-      await deps.sql.query(`UPDATE events SET status = 'cancelled' WHERE id = $1`, [slug]);
-    }
-    await answer('Убрано с сайта');
+    await answer('Черновик удалён');
     return { done: 'skipped', slug };
   }
   // cancel: снять с продажи (продажи закрыты, купившим — возврат вручную)

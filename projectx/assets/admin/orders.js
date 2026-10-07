@@ -37,6 +37,8 @@ function sorted(list) {
 }
 
 function leftText(o) {
+  // сгоревшая бронь, по которой гость нажал «Я перевёл»: деньги могли прийти позже срока
+  if (o.status === 'expired') return `<span class="tag tag-warn">сгорела</span> «Я перевёл» в ${esc(fmtTime(o.claimed_at))} — перевод пришёл? Подтверди: места вернутся, если остались`;
   if (o.claimed_at) return `<span class="tag tag-warn">нажал «Я перевёл»</span> в ${esc(fmtTime(o.claimed_at))} — проверь банк`;
   if (!o.expires_at) return '';
   const left = Math.round((Date.parse(o.expires_at) - Date.now()) / 60000);
@@ -66,7 +68,7 @@ function render() {
   }
   // список не перестраивается под пальцем: состав и статусы те же —
   // обновляем только таймеры, иначе новый «Я перевёл» сдвигал бы строки
-  const sig = list.map((o) => `${o.id}:${o.claimed_at ? 'c' : 'p'}`).join('|');
+  const sig = list.map((o) => `${o.id}:${o.status || ''}:${o.claimed_at ? 'c' : 'p'}`).join('|');
   if (host.dataset.sig === sig) {
     for (const o of list) {
       const el = host.querySelector(`.pend[data-id="${CSS.escape(o.id)}"] .pend-left`);
@@ -78,7 +80,7 @@ function render() {
   host.innerHTML = list.map((o) => {
     const names = (o.tickets || []).map((t) => t.holder_name).join(', ');
     const tg = o.buyer_tg ? `<a href="https://t.me/${encodeURIComponent(o.buyer_tg)}" target="_blank" rel="noopener">@${esc(o.buyer_tg)}</a>` : '';
-    return `<div class="pend${o.claimed_at ? ' is-claimed' : ''}" data-id="${esc(o.id)}" data-code="${esc(o.pay_code || o.id)}" data-sum="${o.amount_rub}" data-who="${esc(o.buyer_name)}">
+    return `<div class="pend${o.claimed_at ? ' is-claimed' : ''}" data-id="${esc(o.id)}" data-status="${esc(o.status || 'pending')}" data-code="${esc(o.pay_code || o.id)}" data-sum="${o.amount_rub}" data-who="${esc(o.buyer_name)}">
       <div class="pend-code">${esc(o.pay_code || '—')}</div>
       <div class="pend-main">
         <div class="pend-who">${esc(o.buyer_name)} · <a href="tel:${esc(o.buyer_phone)}">${esc(fmtPhone(o.buyer_phone))}</a>${tg ? ` · ${tg}` : ''}${o.tg ? ' · <span class="tag">в боте</span>' : ''}</div>
@@ -105,7 +107,9 @@ async function act(kind, row, btn) {
     })
     : await confirmDlg({
       title: `Отменить бронь ${code}?`,
-      text: 'Места вернутся в продажу, гостю в боте придёт сообщение об отмене.',
+      text: row.dataset.status === 'expired'
+        ? 'Перевод не пришёл — бронь закроется (места уже вернулись в продажу), гостю в боте придёт сообщение.'
+        : 'Места вернутся в продажу, гостю в боте придёт сообщение об отмене.',
       ok: 'Отменить бронь', cancel: 'Не отменять', danger: true,
     });
   if (!ok) return;
@@ -122,6 +126,8 @@ async function act(kind, row, btn) {
 }
 
 async function confirmByCode() {
+  // Enter дважды — второй запрос ответил бы «уже обработана» поверх успеха
+  if ($('pc-confirm').disabled) return;
   const input = $('pc-code');
   const code = input.value.trim();
   if (!code) {

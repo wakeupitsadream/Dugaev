@@ -142,6 +142,16 @@ export const SCHEMA = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // Переписка гостя с организатором через бота: id сообщения в чате
+  // владельца → чат гостя. Ответ владельца (reply) уходит по этой таблице,
+  // а не по метке в тексте — её гость мог подделать в своём имени. Она же
+  // считает сообщения гостя для защиты чата владельца от спама.
+  `CREATE TABLE IF NOT EXISTS tg_relays (
+    owner_msg_id bigint PRIMARY KEY,
+    guest_chat   bigint NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS tg_relays_guest ON tg_relays (guest_chat, created_at)`,
   // Рассылка анонса: идёт порциями (лимиты Telegram и время функции),
   // курсор — последний обработанный chat_id; lock_until не даёт двум
   // вызовам слать одно и то же одновременно.

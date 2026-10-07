@@ -115,11 +115,11 @@ export function coerceExtracted(raw) {
 }
 
 // ---------- Polza AI (OpenAI-совместимый) ----------
-async function extractViaPolza(text, knownEvents, nowIso) {
+async function extractViaPolza(text, knownEvents, nowIso, timeoutMs = 20_000) {
   const base = (process.env.POLZA_BASE_URL || POLZA_DEFAULT_BASE).replace(/\/$/, '');
   const model = process.env.POLZA_MODEL || POLZA_DEFAULT_MODEL;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const r = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -211,11 +211,11 @@ const TOOL = {
   },
 };
 
-async function extractViaAnthropic(text, knownEvents, nowIso) {
+async function extractViaAnthropic(text, knownEvents, nowIso, timeoutMs = 20_000, retries = 1) {
   // SDK тяжёлый, а нужен только владельцу при разборе постов: грузим лениво,
   // чтобы холодный старт вебхука не платил за него на каждом сообщении гостя
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic({ timeout: 20_000, maxRetries: 1 });
+  const client = new Anthropic({ timeout: timeoutMs, maxRetries: retries });
   try {
     const response = await client.messages.create({
       model: ANTHROPIC_MODEL,
@@ -234,10 +234,12 @@ async function extractViaAnthropic(text, knownEvents, nowIso) {
   }
 }
 
-// text — текст/подпись поста; knownEvents — [{id,title,startsAt}] для матчинга
-export async function extractPost(text, knownEvents, nowIso) {
+// text — текст/подпись поста; knownEvents — [{id,title,startsAt}] для матчинга.
+// Из вебхука бота — короче и без повтора: функция живёт 30 секунд, а после
+// разбора ещё качается афиша; не успели — черновик соберут правила
+export async function extractPost(text, knownEvents, nowIso, { timeoutMs = 20_000, retries = 1 } = {}) {
   const provider = pickProvider();
-  if (provider === 'polza') return extractViaPolza(text, knownEvents, nowIso);
-  if (provider === 'anthropic') return extractViaAnthropic(text, knownEvents, nowIso);
+  if (provider === 'polza') return extractViaPolza(text, knownEvents, nowIso, timeoutMs);
+  if (provider === 'anthropic') return extractViaAnthropic(text, knownEvents, nowIso, timeoutMs, retries);
   return { kind: 'unavailable' };
 }

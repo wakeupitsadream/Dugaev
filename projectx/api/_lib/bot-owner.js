@@ -17,6 +17,7 @@ import {
   loadEvent, nearestEvent, eventWaves,
 } from './bot-kit.js';
 import { fmtRub } from '../../assets/waves.js';
+import { EXPIRE_SQL } from './queries.js';
 
 export const OWNER_COMMANDS = [
   { command: 'stats', description: 'Сводка по ближайшей ночи' },
@@ -62,6 +63,9 @@ export async function ownerMessage(msg, deps) {
   if ((forwarded && text.length >= 20) || (fileId && text.length >= 20) || datey) {
     return draftFromPost(deps, chatId, text, fileId);
   }
+  // пост-альбом приходит пачкой: подпись — у одной картинки, остальные без
+  // неё. Их не цепляем афишей к черновику и не отвечаем на каждую подсказкой
+  if (fileId && !text && msg.media_group_id) return { done: 'album_part' };
   if (fileId && !text) return attachPoster(deps, chatId, fileId);
   return null;
 }
@@ -222,10 +226,14 @@ export async function ownerStats(deps, chatId) {
 
 // Брони на подтверждение: каждая — сообщением с кнопками «Пришло / Отменить»
 export async function ownerPending(deps, chatId) {
+  // просроченные — сначала сжечь: иначе в списке висят брони, которые уже не держат места
+  try { await deps.sql.query(EXPIRE_SQL); } catch { /* не критично */ }
   const rows = rowsOf(await deps.sql.query(
-    `SELECT o.id, o.pay_code, o.amount_rub, o.qty, o.buyer_name, o.buyer_phone, o.claimed_at, o.expires_at, e.title
+    `SELECT o.id, o.status, o.pay_code, o.amount_rub, o.qty, o.buyer_name, o.buyer_phone, o.claimed_at, o.expires_at, e.title
      FROM orders o JOIN events e ON e.id = o.event_id
      WHERE o.status = 'pending'
+        -- сгоревшая, но гость нажал «Я перевёл»: деньги могли прийти позже срока
+        OR (o.status = 'expired' AND o.claimed_at IS NOT NULL AND o.claimed_at > now() - interval '48 hours')
      ORDER BY o.claimed_at DESC NULLS LAST, o.created_at DESC LIMIT 8`
   ));
   const send = sender(deps, chatId);
@@ -234,9 +242,11 @@ export async function ownerPending(deps, chatId) {
     return { done: 'owner_pending_none' };
   }
   for (const o of rows) {
-    const when = o.claimed_at
-      ? `нажал «Я перевёл» в ${fmtTimeOnly(o.claimed_at)}`
-      : o.expires_at ? `перевода пока нет · бронь до ${fmtTimeOnly(o.expires_at)}` : 'перевода пока нет';
+    const when = o.status === 'expired'
+      ? `⚠️ бронь сгорела, но гость нажал «Я перевёл» в ${fmtTimeOnly(o.claimed_at)} — «Пришло» вернёт места, если они есть`
+      : o.claimed_at
+        ? `нажал «Я перевёл» в ${fmtTimeOnly(o.claimed_at)}`
+        : o.expires_at ? `перевода пока нет · бронь до ${fmtTimeOnly(o.expires_at)}` : 'перевода пока нет';
     await send(
       `${o.claimed_at ? '💸' : '🕒'} ${o.pay_code} · ${fmtRub(o.amount_rub)} ₽ · ${o.qty} шт.\n${o.buyer_name} · ${fmtPhone(o.buyer_phone)}\n${when}\n${o.title}`,
       { inline_keyboard: [[
@@ -288,7 +298,7 @@ export async function ownerCallback(action, arg, cb, deps, answer) {
   }
 
   if (action === 'del') {
-    const r = await deleteEvent(sql, arg);
+    const r = await deleteEvent(sql, arg, { onlyDraft: true });
     await answer(r.ok ? 'Удалено' : r.message);
     if (r.ok) {
       await stamp('🗑 Черновик удалён');

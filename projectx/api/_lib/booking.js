@@ -7,7 +7,8 @@
 //                               кнопкой в Telegram;
 //   'demo'                    — как раньше: проходка выдаётся сразу (демо и тесты).
 import { SITE } from '../../assets/data/config.js';
-import { makeToken, primarySecret } from './sign.js';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { makeToken, primarySecret, ticketSecrets } from './sign.js';
 import { tgApi } from './tg.js';
 import { fmtRub } from '../../assets/waves.js';
 import { fmtWhen } from '../../assets/ticket-format.js';
@@ -32,6 +33,22 @@ export function normalizePayCode(raw) {
 }
 
 export const isOrderId = (s) => /^ord_[0-9a-z]{10}$/.test(String(s || ''));
+
+// Ссылка в бот для брони: «ord_xxxxxxxxxx_<подпись>». Голый номер заказа
+// есть в проходке каждого гостя компании, и по нему чужой чат забирал бы все
+// QR заказа; подпись знает только покупатель (экран брони, его проходка).
+const startSig = (id, secret) => createHmac('sha256', secret).update(`tg-start:${id}`).digest('hex').slice(0, 12);
+export const orderStart = (id) => `${id}_${startSig(id, primarySecret())}`;
+export function parseOrderStart(payload) {
+  const m = /^(ord_[0-9a-z]{10})_([0-9a-f]{12})$/.exec(String(payload || ''));
+  if (!m) return null;
+  const got = Buffer.from(m[2]);
+  for (const secret of ticketSecrets()) {
+    const want = Buffer.from(startSig(m[1], secret));
+    if (want.length === got.length && timingSafeEqual(want, got)) return m[1];
+  }
+  return null;
+}
 
 // Маркер тестовых заказов самотеста панели: такие заказы чистит /api/seed
 // (cleanupTest), поэтому с сайта без админ-ключа этот номер не принимается

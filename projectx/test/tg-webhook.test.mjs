@@ -146,7 +146,8 @@ test('отмена: событие снимается с продажи', async 
   assert.equal(ev.status, 'cancelled');
 });
 
-test('AUTO_PUBLISH=1 публикует сразу', async () => {
+test('AUTO_PUBLISH=1 публикует сразу; «Скрыть с сайта» возвращает ночь в черновик', async () => {
+  notifications.length = 0;
   const r = await handleUpdate(
     { update_id: 105, channel_post: { chat: { id: -1001 }, text: 'Автопилот-анонс' } },
     deps(
@@ -157,10 +158,16 @@ test('AUTO_PUBLISH=1 публикует сразу', async () => {
   assert.equal(r.done, 'draft_created');
   const ev = (await pg.query(`SELECT status FROM events WHERE id = $1`, [r.slug])).rows[0];
   assert.equal(ev.status, 'onsale');
+  const hide = notifications.at(-1).markup.inline_keyboard[0][0].callback_data;
+  assert.equal(hide, `hide:${r.slug}`);
+  const h = await handleUpdate({ callback_query: { id: 'cbh', data: hide, from: { id: 1 }, message: { chat: { id: 1 } } } }, deps(null));
+  assert.equal(h.done, 'hidden');
+  assert.equal((await pg.query(`SELECT status FROM events WHERE id = $1`, [r.slug])).rows[0].status, 'draft');
 });
 
 // ---------- v6: бот гостя — бронь, «я перевёл», подтверждение владельцем ----------
-import { ORDER_SQL } from '../api/_lib/queries.js';
+import { ORDER_SQL, EXPIRE_SQL } from '../api/_lib/queries.js';
+import { orderStart } from '../api/_lib/booking.js';
 
 const sent = [];
 function guestDeps(over = {}) {
@@ -181,9 +188,19 @@ test('гость: /start с номером брони привязывает ч�
     2, 'ev-bot', 1, 'ord_botorder01', 'Гость Бота', '+79990001122', null, null,
     ['bottickt01', 'bottickt02'], ['Гость Бота', 'Друг Гостя'], ['adult', 'adult'], 'transfer', 180, 'PX-BOT1', false,
   ]);
+  // голый номер заказа есть в проходке каждого гостя компании — по нему
+  // чат не привязывается; поддельная подпись — тоже
+  sent.length = 0;
+  const bare = await handleUpdate({ message: { chat: { id: 556, type: 'private' }, text: '/start ord_botorder01' } }, guestDeps());
+  assert.equal(bare.done, 'start_unsigned');
+  assert.match(sent.at(-1).payload.text, /устарела/);
+  const forged = await handleUpdate({ message: { chat: { id: 556, type: 'private' }, text: '/start ord_botorder01_0123456789ab' } }, guestDeps());
+  assert.equal(forged.done, 'start_unsigned');
+  assert.equal((await pg.query(`SELECT 1 FROM tg_links WHERE chat_id = 556`)).rows.length, 0);
+
   sent.length = 0;
   const r = await handleUpdate(
-    { message: { chat: { id: 555, type: 'private' }, text: '/start ord_botorder01' } },
+    { message: { chat: { id: 555, type: 'private' }, text: `/start ${orderStart('ord_botorder01')}` } },
     guestDeps()
   );
   assert.equal(r.done, 'linked');
@@ -367,15 +384,22 @@ test('бот: мастер брони — количество → телефо�
   assert.equal(summary.parse_mode, 'HTML');
   assert.match(summary.text, /2 × 1\u00A0000 ₽ = <b>2\u00A0000 ₽<\/b>/);
   assert.match(summary.text, /Иван Петров, Мария &lt;Иванова&gt;/);
-  assert.match(summary.text, /\+79161234567/);
+  assert.match(summary.text, /\+7 916 123-45-67/);
   assert.match(summary.text, /есть 18/);
   assert.match(summary.text, /href="https:\/\/px\.test\/rules"/);
-  assert.equal(summary.reply_markup.inline_keyboard[0][0].callback_data, 'book:go');
+  // кнопка помечена оформлением: сводка от прошлого мастера бронь по новым данным не создаст
+  const go = summary.reply_markup.inline_keyboard[0][0].callback_data;
+  assert.match(go, /^book:go-[a-z0-9]{1,12}$/);
   assert.equal(summary.reply_markup.inline_keyboard[1][0].callback_data, 'book:no');
+  sent.length = 0;
+  r = await handleUpdate({ callback_query: { id: 'b0', data: 'book:go-zzzzzz', from: { id: 700 }, message: { chat: { id: 700 }, message_id: 1 } } }, guestDeps());
+  assert.equal(r.done, 'wizard_old_button');
+  assert.equal((await pg.query(`SELECT count(*)::int AS n FROM orders WHERE tg_chat_id = 700`)).rows[0].n, 0);
+  assert.equal(sent.filter((s) => s.method === 'sendMessage').at(-1).payload.reply_markup.inline_keyboard[0][0].callback_data, go, 'сводку прислали заново');
 
   sent.length = 0;
   r = await handleUpdate(
-    { callback_query: { id: 'b1', data: 'book:go', from: { id: 700, username: 'ivan' }, message: { chat: { id: 700 }, message_id: 2 } } },
+    { callback_query: { id: 'b1', data: go, from: { id: 700, username: 'ivan' }, message: { chat: { id: 700 }, message_id: 2 } } },
     guestDeps()
   );
   assert.equal(r.done, 'booked');
@@ -439,25 +463,26 @@ test('бот: цена считается под всю компанию сра�
   r = await handleUpdate({ message: { chat, text: 'Олег Смирнов и Анна Смирнова' } }, guestDeps());
   assert.equal(r.done, 'wizard_confirm');
   assert.match(sent.at(-1).payload.text, /2 × 1\u00A0200 ₽/);
+  const go = sent.at(-1).payload.reply_markup.inline_keyboard[0][0].callback_data;
 
   // пока гость думал, вторую волну разобрали — вся компания по третьей цене
   await pg.query(`UPDATE price_waves SET sold = quota WHERE event_id = 'ev-bot2' AND wave_no = 2`);
   sent.length = 0;
-  r = await handleUpdate({ callback_query: { id: 'b2', data: 'book:go', from: { id: 701 } } }, guestDeps());
+  r = await handleUpdate({ callback_query: { id: 'b2', data: go, from: { id: 701 } } }, guestDeps());
   assert.equal(r.done, 'wizard_repriced');
   assert.equal(r.priceRub, 1500);
   const again = sent.filter((s) => s.method === 'sendMessage').at(-1).payload;
   assert.match(again.text, /по 1\u00A0200 ₽ разобрали/);
   assert.match(again.text, /2 × 1\u00A0500 ₽ = <b>3\u00A0000 ₽<\/b>/);
-  assert.equal(again.reply_markup.inline_keyboard[0][0].callback_data, 'book:go');
+  assert.equal(again.reply_markup.inline_keyboard[0][0].callback_data, go, 'то же оформление — та же метка');
 
-  r = await handleUpdate({ callback_query: { id: 'b3', data: 'book:go', from: { id: 701 } } }, guestDeps());
+  r = await handleUpdate({ callback_query: { id: 'b3', data: go, from: { id: 701 } } }, guestDeps());
   assert.equal(r.done, 'booked');
   const o = (await pg.query(`SELECT o.amount_rub, w.wave_no FROM orders o JOIN price_waves w ON w.id = o.wave_id WHERE o.id = $1`, [r.order])).rows[0];
   assert.equal(o.amount_rub, 3000);
   assert.equal(o.wave_no, 3);
   // повторный тап по той же кнопке — сессии уже нет, второй брони тоже
-  const dup = await handleUpdate({ callback_query: { id: 'b4', data: 'book:go', from: { id: 701 } } }, guestDeps());
+  const dup = await handleUpdate({ callback_query: { id: 'b4', data: go, from: { id: 701 } } }, guestDeps());
   assert.equal(dup.done, 'wizard_stale');
   assert.equal((await pg.query(`SELECT count(*)::int AS n FROM orders WHERE tg_chat_id = 701`)).rows[0].n, 1);
   // повторная бронь при живой — напоминание о ней, а не второй мастер
@@ -800,6 +825,55 @@ test('рассылка: анонс уходит подписчикам с кно
   const stop = await handleUpdate({ update_id: 9010, message: { message_id: 65, chat: { id: 801, type: 'private' }, text: '/stop' } }, ownerDeps());
   assert.equal(stop.done, 'unsubscribed');
   assert.equal(stop.was, true);
+  // вернулся — «снова подписан», повторное /notify — «уже в списке»
+  sent.length = 0;
+  const back = await handleUpdate({ update_id: 9200, message: { message_id: 66, chat: { id: 801, type: 'private' }, text: '/notify' } }, ownerDeps());
+  assert.deepEqual([back.created, back.reactivated], [false, true]);
+  const twice = await handleUpdate({ update_id: 9201, message: { message_id: 67, chat: { id: 801, type: 'private' }, text: '/notify' } }, ownerDeps());
+  assert.deepEqual([twice.created, twice.reactivated], [false, false]);
+  assert.match(sent.at(-1).payload.text, /уже в списке/);
+  const btn = await handleUpdate({ update_id: 9202, callback_query: { id: 's9', data: 'sub:on', from: { id: 801 } } }, ownerDeps());
+  assert.equal(btn.done, 'subscribed');
+  assert.match(sent.find((x) => x.method === 'answerCallbackQuery' && x.payload.callback_query_id === 's9').payload.text, /уже подписан/);
+});
+
+test('рассылка: прогресс сохраняется после каждой пачки — оборванный запуск не шлёт повторно; порция ограничена временем', async () => {
+  const { runBroadcast } = await import('../api/_lib/broadcast.js');
+  await pg.query(`INSERT INTO events (id, title, city, venue, starts_at, age_rating, status) VALUES ('px-bc-test', 'BC NIGHT', 'orenburg', 'клуб', '2030-11-20T22:00:00+05:00', 18, 'onsale')`);
+  await pg.query(`INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota) VALUES ('px-bc-test', 1, 'Проходка', 900, 100)`);
+  await pg.query(`INSERT INTO tg_subs (chat_id, active, source) SELECT g, true, 'test' FROM generate_series(9101, 9105) g ON CONFLICT DO NOTHING`);
+  const active = (await pg.query(`SELECT chat_id FROM tg_subs WHERE active ORDER BY chat_id`)).rows.map((r) => Number(r.chat_id));
+  assert.ok(active.length >= 5);
+  const got = new Map();
+  let crashAt = null;
+  const call = async (method, payload) => {
+    if (payload.chat_id === crashAt) throw new Error('функцию оборвали по таймауту');
+    got.set(payload.chat_id, (got.get(payload.chat_id) || 0) + 1);
+    return { ok: true, result: { message_id: 1 } };
+  };
+  const bdeps = { sql: pg, call, tg: async () => null, origin: 'https://px.test' };
+  const quiet = async () => {};
+  // первая пачка ушла, на второй функцию оборвали
+  crashAt = active[1];
+  await assert.rejects(runBroadcast(bdeps, 'px-bc-test', { batch: 1, sleep: quiet }));
+  const row = (await pg.query(`SELECT cursor, sent FROM broadcasts WHERE id = 'ann-px-bc-test'`)).rows[0];
+  assert.equal(Number(row.cursor), active[0]);
+  assert.equal(Number(row.sent), 1);
+  // пока замок не истёк — «уже идёт», второй поток не шлёт
+  const busy = await runBroadcast(bdeps, 'px-bc-test', { batch: 1, sleep: quiet });
+  assert.equal(busy.busy, true);
+  await pg.query(`UPDATE broadcasts SET lock_until = now() - interval '1 second' WHERE id = 'ann-px-bc-test'`);
+  // дальше порциями по времени: каждая — одна пачка, пока не разошлём всем
+  crashAt = null;
+  let tick = 0;
+  let r = null;
+  for (let n = 0; n < 20 && !(r && r.done); n++) {
+    r = await runBroadcast(bdeps, 'px-bc-test', { batch: 2, sleep: quiet, budgetMs: 0, now: () => tick++ });
+    assert.equal(r.ok, true);
+  }
+  assert.equal(r.done, true);
+  assert.equal(r.sent, active.length);
+  for (const chat of active) assert.equal(got.get(chat), 1, `чату ${chat} анонс ушёл не один раз`);
 });
 
 test('владелец: /stats и /pending, удаление черновика, афиша без подписи — к последнему черновику', async () => {
@@ -822,6 +896,20 @@ test('владелец: /stats и /pending, удаление черновика,
   assert.equal((await pg.query(`SELECT 1 FROM events WHERE id = $1`, [slug])).rows.length, 0);
 });
 
+test('владелец: «Удалить» на карточке уже опубликованной ночи её не снимает; альбом — без подсказок на каждую картинку', async () => {
+  const pub = (await pg.query(`SELECT id FROM events WHERE status = 'onsale' AND id = 'px-bc-test'`)).rows[0].id;
+  sent.length = 0;
+  let r = await handleUpdate({ update_id: 9016, callback_query: { id: 'd2', data: `del:${pub}`, from: { id: 1 }, message: { chat: { id: 1 }, message_id: 75, caption: 'карточка', photo: [{}] } } }, ownerDeps());
+  assert.equal(r.done, 'delete_blocked');
+  assert.equal((await pg.query(`SELECT status FROM events WHERE id = $1`, [pub])).rows[0].status, 'onsale');
+  assert.match(sent.find((x) => x.method === 'answerCallbackQuery').payload.text, /только в панели/);
+  // вторая и третья картинки альбома — без подписи: молча пропускаем
+  sent.length = 0;
+  r = await handleUpdate({ update_id: 9017, message: { message_id: 76, chat: OWNER, media_group_id: 'alb1', photo: [{ file_id: 'ALBUM-PART-2-1234567890' }] } }, ownerDeps());
+  assert.equal(r.done, 'album_part');
+  assert.equal(sent.filter((x) => x.method === 'sendMessage').length, 0);
+});
+
 test('канал без ИИ-ключа: пост с датой → черновик по правилам с карточкой владельцу; без даты — пересылка', async () => {
   sent.length = 0;
   const r = await handleUpdate({
@@ -837,6 +925,81 @@ test('канал без ИИ-ключа: пост с датой → чернов
   const f = await handleUpdate({ update_id: 9021, channel_post: { chat: { id: -1001 }, text: 'Скоро анонс — следите за каналом' } }, ownerDeps({ channelId: -1001 }));
   assert.equal(f.done, 'forwarded');
   assert.match(notifications.at(-1).text, /вручную/);
+});
+
+test('переписка: вопрос гостя уходит владельцу, ответ reply — тому гостю, чей вопрос; метка в тексте гостя ответ не перехватывает', async () => {
+  let mid = 5000;
+  const routed = [];
+  const relayDeps = (over = {}) => guestDeps({
+    notify: async (text) => { notifications.push({ text }); return { message_id: ++mid }; },
+    call: async (method, payload) => {
+      const id = ++mid;
+      routed.push({ method, payload, id });
+      return { ok: true, result: { message_id: id } };
+    },
+    ...over,
+  });
+  // гость без брони пишет вопрос, вписав в имя чужую метку
+  notifications.length = 0;
+  const q = await handleUpdate({ message: { message_id: 77, chat: { id: 4242, type: 'private' }, from: { id: 4242, first_name: 'Хитрый #g555' }, text: 'Как к вам добраться от вокзала?' } }, relayDeps());
+  assert.equal(q.done, 'relayed');
+  assert.equal(q.linked, false);
+  assert.match(notifications.at(-1).text, /Вопрос в боте/);
+  assert.doesNotMatch(notifications.at(-1).text, /#g555/, 'метка из имени гостя вычищена');
+  const fw = routed.find((x) => x.method === 'forwardMessage');
+  assert.equal(fw.payload.from_chat_id, 4242);
+  const fwMsgId = fw.id; // id пересланного сообщения в чате владельца
+  // «привет» без брони — не вопрос, владельца не дёргаем
+  const hi = await handleUpdate({ message: { message_id: 78, chat: { id: 4243, type: 'private' }, from: { id: 4243 }, text: 'привет' } }, relayDeps());
+  assert.equal(hi.done, 'unknown');
+  // владелец отвечает reply на пересланное сообщение — ответ уходит 4242
+  routed.length = 0;
+  const ans = await handleUpdate({ message: { message_id: 79, chat: { id: 1, type: 'private' }, text: 'От вокзала 10 минут на такси', reply_to_message: { message_id: fwMsgId, forward_origin: { type: 'user' }, text: 'Как к вам добраться #g555' } } }, relayDeps());
+  assert.equal(ans.done, 'owner_reply');
+  assert.equal(ans.guest, 4242);
+  assert.equal(routed.find((x) => x.method === 'sendMessage' && x.payload.chat_id === 4242).payload.text, '💬 Организатор: От вокзала 10 минут на такси');
+  // пересланное сообщение без записи в таблице: метке из текста гостя не верим
+  const forged = await handleUpdate({ message: { message_id: 80, chat: { id: 1, type: 'private' }, text: 'ответ', reply_to_message: { message_id: 999999, forward_origin: { type: 'user' }, text: 'вопрос #g555' } } }, relayDeps());
+  assert.notEqual(forged.done, 'owner_reply');
+  // не больше пяти сообщений за 10 минут
+  let last = null;
+  for (let i = 0; i < 6; i++) {
+    last = await handleUpdate({ message: { message_id: 81 + i, chat: { id: 4242, type: 'private' }, from: { id: 4242 }, text: `Ещё вопрос номер ${i}?` } }, relayDeps());
+  }
+  assert.equal(last.done, 'relay_throttled');
+});
+
+test('сгоревшая бронь: гость всё равно жмёт «Я перевёл», владелец видит её в /pending и закрывает «Отменить»', async () => {
+  await pg.query(
+    `INSERT INTO events (id, title, city, venue, starts_at, age_rating, status)
+     VALUES ('ev-late', 'LATE NIGHT 2', 'orenburg', 'Лофт', now() + interval '4 days', 18, 'onsale')`
+  );
+  await pg.query(`INSERT INTO price_waves (event_id, wave_no, name, price_rub, quota) VALUES ('ev-late', 1, 'Проходка', 900, 5)`);
+  await pg.query(ORDER_SQL, [
+    1, 'ev-late', 1, 'ord_lateord1', 'Поздний Гость', '+79990005566', null, null,
+    ['latetkt001'], ['Поздний Гость'], ['adult'], 'transfer', -1, 'PX-LAT1', false,
+  ]);
+  await pg.query(`INSERT INTO tg_links (chat_id, order_id) VALUES (560, 'ord_lateord1')`);
+  await pg.query(`UPDATE orders SET tg_chat_id = 560 WHERE id = 'ord_lateord1'`);
+  await pg.query(EXPIRE_SQL);
+  notifications.length = 0;
+  sent.length = 0;
+  const c = await handleUpdate({ callback_query: { id: 'lc1', data: 'claim:ord_lateord1', from: { id: 560 } } }, guestDeps());
+  assert.equal(c.done, 'claimed');
+  assert.match(notifications.at(-1).text, /уже сгорела/);
+  // /pending владельца: сгоревшая бронь с «Я перевёл» — в списке, с пометкой
+  sent.length = 0;
+  const p = await handleUpdate({ message: { chat: { id: 1, type: 'private' }, text: '/pending' } }, guestDeps());
+  assert.equal(p.done, 'owner_pending');
+  const card = sent.filter((x) => x.method === 'sendMessage').find((x) => /PX-LAT1/.test(x.payload.text));
+  assert.ok(card, 'сгоревшей брони нет в /pending');
+  assert.match(card.payload.text, /сгорела/);
+  // «Отменить бронь» по сгоревшей — закрывает её и пишет гостю
+  sent.length = 0;
+  const d = await handleUpdate({ callback_query: { id: 'lc2', data: 'drop:ord_lateord1', from: { id: 1 }, message: { chat: { id: 1 }, message_id: 90, text: 'карточка' } } }, guestDeps());
+  assert.equal(d.done, 'dropped_expired');
+  assert.equal((await pg.query(`SELECT status FROM orders WHERE id = 'ord_lateord1'`)).rows[0].status, 'cancelled');
+  assert.match(sent.find((x) => x.method === 'sendMessage' && x.payload.chat_id === 560).payload.text, /не нашли/);
 });
 
 test('оплата подтверждена кнопкой: время дверей из ночи и предложение подписаться на анонсы', async () => {

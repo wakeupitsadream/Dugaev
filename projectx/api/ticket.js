@@ -6,6 +6,7 @@ import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { addressIsPublic } from '../assets/secret-place.js';
 import { tgBotUsername } from './_lib/tg.js';
+import { orderStart } from './_lib/booking.js';
 
 export default async function handler(req, res) {
   noStore(res);
@@ -23,7 +24,7 @@ export default async function handler(req, res) {
     const rows = await withTimeout(db().query(
       `SELECT t.id, t.holder_name, t.age_cat, t.status, t.checked_in_at, t.note,
               o.id AS order_id, o.status AS order_status, o.pay_code, o.amount_rub, o.qty,
-              o.expires_at, o.claimed_at, o.tg_chat_id,
+              o.expires_at, o.claimed_at, o.tg_chat_id, o.buyer_name,
               w.name AS wave_name,
               e.id AS event_id, e.title, e.city, e.venue, e.address, e.secret,
               e.starts_at, e.age_rating
@@ -38,7 +39,12 @@ export default async function handler(req, res) {
     if (!r) return fail(res, 404, 'not_found', 'Билет не найден');
     // SECRET PLACE: адрес — привилегия купившего. Неоплаченная бронь секретной
     // ночи адреса ещё не видит; открытая ночь показывает его всем.
-    const paid = r.status !== 'reserved';
+    // адрес — только у живой оплаченной проходки: сгоревшая, отменённая или
+    // возвращённая его не открывает
+    const paid = r.status === 'active';
+    // ссылку в бот на весь заказ видит только покупатель (его проходка —
+    // та, что на его имя); остальным гостям компании — без неё
+    const buyer = String(r.holder_name || '').trim().toLowerCase() === String(r.buyer_name || '').trim().toLowerCase();
     const showAddress = !r.secret || paid || addressIsPublic({ startsAt: r.starts_at, status: 'onsale' });
     return ok(res, {
       bot: tgBotUsername(),
@@ -59,6 +65,7 @@ export default async function handler(req, res) {
           expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
           claimedAt: r.claimed_at ? new Date(r.claimed_at).toISOString() : null,
           tgLinked: Boolean(r.tg_chat_id),
+          botStart: buyer && r.order_status === 'pending' ? orderStart(r.order_id) : null,
         },
         event: {
           id: r.event_id,

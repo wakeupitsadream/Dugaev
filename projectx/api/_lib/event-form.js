@@ -72,7 +72,9 @@ export function parseEventForm(body, ctx = {}) {
   if (!ageRating) errors.push({ field: 'ageRating', message: 'Возраст: 16+ или 18+' });
 
   const venue = String(b.venue || '').trim().slice(0, 80) || 'площадка придёт в билете';
-  const descr = String(b.descr || '').trim().slice(0, 1500) || null; // абзац с программой ночи не влезал в 400
+  // абзац с программой ночи не влезал в 400. Не прислано (старый клиент) —
+  // null: в базе остаётся как было; прислано пустым — описание стирается
+  const descr = b.descr === undefined || b.descr === null ? null : String(b.descr).trim().slice(0, 1500);
 
   // ---- афиша, вместимость, лайн-ап, программа (необязательные) ----
   // undefined — поле не прислано (старый клиент): в БД остаётся как было
@@ -104,8 +106,9 @@ export function parseEventForm(body, ctx = {}) {
 
   // ---- волны ----
   const rawWaves = Array.isArray(b.waves) ? b.waves.slice(0, 8) : [];
-  // черновик можно сохранить без цен (пост без цен из бота), в продажу — нет
-  if (!rawWaves.length && status !== 'draft') errors.push({ field: 'waves', message: 'Нужна хотя бы одна волна цен' });
+  // без цен можно сохранить черновик (пост без цен из бота) и архивную ночь
+  // (у прошлых ночей из сида волн нет), в продажу — нельзя
+  if (!rawWaves.length && status === 'onsale') errors.push({ field: 'waves', message: 'Нужна хотя бы одна волна цен' });
   const soldByNo = new Map((existing?.waves || []).map((w) => [Number(w.waveNo), Number(w.sold) || 0]));
   const waves = [];
   rawWaves.forEach((w, i) => {

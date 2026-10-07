@@ -11,14 +11,18 @@
 import { rowsOf, callOf, posterUrl, originOf, fmtDay, fmtTimeOnly, escHtml, loadEvent, eventWaves } from './bot-kit.js';
 import { fmtRub } from '../../assets/waves.js';
 
+// → { created } новый подписчик, { reactivated } вернулся после /stop,
+// { already } уже был в списке — гостю отвечаем по-разному
 export async function subscribe(sql, chatId, source = 'bot') {
   const r = rowsOf(await sql.query(
-    `INSERT INTO tg_subs (chat_id, active, source) VALUES ($1, true, $2)
+    `WITH prev AS (SELECT active FROM tg_subs WHERE chat_id = $1)
+     INSERT INTO tg_subs (chat_id, active, source) VALUES ($1, true, $2)
      ON CONFLICT (chat_id) DO UPDATE SET active = true, updated_at = now()
-     RETURNING (xmax = 0) AS created`,
+     RETURNING (SELECT active FROM prev) AS was_active`,
     [chatId, String(source).slice(0, 32)]
-  ))[0];
-  return { created: Boolean(r && r.created) };
+  ))[0] || {};
+  const was = r.was_active;
+  return { created: was === null || was === undefined, reactivated: was === false, already: was === true };
 }
 
 export async function unsubscribe(sql, chatId) {
@@ -72,7 +76,10 @@ export function announcement(ev, waves, origin) {
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Одна порция рассылки. → { ok, sent, failed, total, done, busy?, message? }
-export async function runBroadcast(deps, eventId, { limit = 200, batch = 20, sleep = sleepMs } = {}) {
+// Порция ограничена и числом получателей, и временем: функция живёт 30 секунд,
+// а прогресс сохраняется после каждой пачки — оборванный запуск не пришлёт
+// людям анонс второй раз, следующий продолжит с того же места.
+export async function runBroadcast(deps, eventId, { limit = 200, batch = 20, sleep = sleepMs, budgetMs = 12_000, now = Date.now } = {}) {
   const sql = deps.sql;
   const id = `ann-${eventId}`;
   const ev = await loadEvent(sql, eventId);
@@ -109,7 +116,6 @@ export async function runBroadcast(deps, eventId, { limit = 200, batch = 20, sle
   let sent = Number(lock.sent);
   let failed = Number(lock.failed);
   let cursor = Number(lock.cursor);
-  const dead = [];
 
   const sendOne = async (chatId) => {
     const payload = photo
@@ -117,7 +123,9 @@ export async function runBroadcast(deps, eventId, { limit = 200, batch = 20, sle
       : { chat_id: chatId, text: caption, parse_mode: 'HTML', reply_markup: markup, disable_web_page_preview: true };
     let r = await call(photo ? 'sendPhoto' : 'sendMessage', payload);
     if (!r.ok && r.code === 429) {
-      await sleep(1500);
+      // Telegram говорит, сколько ждать; дольше двух секунд не стоим —
+      // не дошедшее посчитается в «не дошло»
+      await sleep(Math.min(2000, Math.max(1000, Number(r.retryAfter || 1.5) * 1000)));
       r = await call(photo ? 'sendPhoto' : 'sendMessage', payload);
     }
     if (!r.ok && photo && r.code === 400 && /photo|file|image|wrong/i.test(String(r.error || ''))) {
@@ -128,9 +136,13 @@ export async function runBroadcast(deps, eventId, { limit = 200, batch = 20, sle
     return r;
   };
 
+  const started = now();
+  let cut = false;
   for (let i = 0; i < subs.length; i += batch) {
+    if (i > 0 && now() - started > budgetMs) { cut = true; break; }
     const t0 = Date.now();
     const part = subs.slice(i, i + batch);
+    const dead = [];
     // первое сообщение — отдельно: его file_id афиши переиспользуем, чтобы
     // Telegram не качал картинку с сайта для каждого подписчика
     let results;
@@ -151,19 +163,23 @@ export async function runBroadcast(deps, eventId, { limit = 200, batch = 20, sle
       }
     });
     cursor = part[part.length - 1];
+    if (dead.length) {
+      await sql.query(`UPDATE tg_subs SET active = false, updated_at = now() WHERE chat_id = ANY($1::bigint[])`, [dead]);
+    }
+    await sql.query(
+      `UPDATE broadcasts SET cursor = $2, sent = $3, failed = $4, photo_id = COALESCE($5, photo_id),
+              lock_until = now() + interval '90 seconds', updated_at = now()
+       WHERE id = $1`,
+      [id, cursor, sent, failed, photo && !/^https?:/.test(photo) ? photo : null]
+    );
     const spent = Date.now() - t0;
     if (i + batch < subs.length && spent < 1100) await sleep(1100 - spent);
   }
 
-  if (dead.length) {
-    await sql.query(`UPDATE tg_subs SET active = false, updated_at = now() WHERE chat_id = ANY($1::bigint[])`, [dead]);
-  }
-  const done = subs.length < limit;
+  const done = !cut && subs.length < limit;
   await sql.query(
-    `UPDATE broadcasts SET cursor = $2, sent = $3, failed = $4, done = $5, lock_until = NULL,
-            photo_id = COALESCE($6, photo_id), updated_at = now()
-     WHERE id = $1`,
-    [id, cursor, sent, failed, done, photo && !/^https?:/.test(photo) ? photo : null]
+    `UPDATE broadcasts SET done = $2, lock_until = NULL, updated_at = now() WHERE id = $1`,
+    [id, done]
   );
   const total = Number(lock.total);
   return { ok: true, sent, failed, total: Math.max(total, sent + failed), done };

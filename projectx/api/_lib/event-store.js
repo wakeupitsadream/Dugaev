@@ -64,8 +64,15 @@ export async function publishCheck(sql, id, nowMs = Date.now()) {
   return { ok: true, event: ev };
 }
 
-// Удалить можно только мероприятие без единой брони (черновик, ошибка разбора)
-export async function deleteEvent(sql, id) {
+// Удалить можно только мероприятие без единой брони (черновик, ошибка разбора).
+// onlyDraft — для кнопки в боте: карточка черновика живёт в чате и после
+// публикации, и случайный тап не должен снимать ночь с сайта
+export async function deleteEvent(sql, id, { onlyDraft = false } = {}) {
+  if (onlyDraft) {
+    const ev = rowsOf(await sql.query(`SELECT status FROM events WHERE id = $1`, [id]))[0];
+    if (!ev) return { ok: false, message: 'Мероприятие не найдено' };
+    if (ev.status !== 'draft') return { ok: false, message: 'Ночь уже опубликована — снять её можно только в панели' };
+  }
   const has = rowsOf(await sql.query(`SELECT 1 FROM orders WHERE event_id = $1 LIMIT 1`, [id])).length > 0;
   if (has) return { ok: false, message: 'По мероприятию есть брони — удалить нельзя, переведи в «прошло»' };
   await sql.query(`DELETE FROM broadcasts WHERE event_id = $1`, [id]).catch(() => {});

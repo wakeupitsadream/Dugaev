@@ -119,7 +119,7 @@ const payBox = await page.textContent('#pay-box');
 const payCode = await page.textContent('#pay-code');
 step('экран брони: код, сумма, инструкция и кнопки копирования', /^PX-[0-9A-Z]{4}$/.test(payCode.trim()) && /1\u00A0000 ₽/.test(payBox) && /По номеру телефона/.test(payBox) && Boolean(await page.$('#pay-copy-phone')) && Boolean(await page.$('#pay-copy-sum')), payCode.trim());
 step('реквизиты из конфига: телефон, банк, получатель', payBox.includes(SITE.transfer.phone) && payBox.includes(SITE.transfer.bank) && payBox.includes(SITE.transfer.recipient), SITE.transfer.recipient);
-step('кнопка «Получить проходку в Telegram» с именем бота', (await page.getAttribute('#pay-tg', 'href') || '').includes('t.me/projectx56_bot'));
+step('кнопка «Получить проходку в Telegram»: бот и подписанная ссылка на бронь', /t\.me\/projectx56_bot\?start=ord_[0-9a-z]{10}_[0-9a-f]{12}$/.test(await page.getAttribute('#pay-tg', 'href') || ''), await page.getAttribute('#pay-tg', 'href'));
 await page.click('#pay-claim');
 await page.waitForFunction(() => /Спасибо/.test(document.getElementById('pay-status')?.textContent || ''), null, { timeout: 10000 });
 step('«Я перевёл» принят', true);
@@ -157,11 +157,16 @@ await door.click('#staff-btn');
 await door.fill('#pin-key', DOOR);
 await door.fill('#pin-name', 'Хостес');
 await door.click('#pin-save');
-await door.waitForSelector('#do-checkin', { timeout: 10000 });
-step('дверь по ключу двери видит зелёный экран', /Проходит/.test(await door.textContent('#stage')));
-await door.click('#do-checkin');
+// ночь через 10 дней: сканер не даёт зелёный экран по чужой дате
+await door.waitForSelector('#do-force', { timeout: 10000 });
+const wrong = await door.textContent('#stage');
+step('дверь: проходка на другую ночь — красный экран с названием и датой', /Не та ночь/.test(wrong) && /SMOKE NIGHT/.test(wrong) && /ещё не началась/.test(wrong) && !(await door.$('#do-checkin')));
+let asked = '';
+door.once('dialog', (d) => { asked = d.message(); d.accept(); });
+await door.click('#do-force');
 await door.waitForFunction(() => document.querySelector('#stage')?.textContent.includes('Впущен'), null, { timeout: 10000 });
-step('чек-ин прошёл', true);
+step('дверь: «Всё равно впустить» — только после подтверждения', /Точно впустить/.test(asked), asked.slice(0, 60));
+
 
 // ---- дверь: гость без проходки прямо со сканера ----
 await door.goto(`${B}/scan`, { waitUntil: 'load' });
@@ -229,6 +234,29 @@ step('/night: приписка об открытом адресе подгруж
 // ---- 404 ----
 const nf = await page.goto(`${B}/takoy-stranicy-net`);
 step('404 — своя страница', nf?.status() === 404 && /Такой страницы/.test(await page.textContent('body')));
+
+// ---- дверь: ночь, которая идёт прямо сейчас: зелёный экран и обычный вход
+const nowLocal = new Date(Date.now() - 3600_000);
+const ymd = nowLocal.toLocaleDateString('sv-SE', { timeZone: 'Asia/Yekaterinburg' });
+const hh = Number(nowLocal.toLocaleTimeString('ru-RU', { timeZone: 'Asia/Yekaterinburg', hour: '2-digit', hour12: false }).slice(0, 2));
+const pad = (n) => String(n).padStart(2, '0');
+const tonight = await api('/api/event-upsert', { method: 'POST', headers: admin, body: JSON.stringify({
+  title: 'SMOKE TONIGHT', date: ymd, timeStart: `${pad(hh)}:00`, timeEnd: `${pad((hh + 6) % 24)}:00`, ageRating: 18,
+  venue: 'Лофт', address: 'Советская, 10', city: 'orenburg', status: 'onsale',
+  waves: [{ waveNo: 1, name: 'Проходка', priceRub: 900, quota: 20 }],
+}) });
+const tonightId = tonight.j?.event_id;
+const tOrder = await api('/api/order', { method: 'POST', headers: { 'x-forwarded-for': '10.9.9.9' }, body: JSON.stringify({
+  event_id: tonightId, wave_no: 1, consent: true, buyer: { name: 'Гость Сегодня', phone: '+79160009988' }, attendees: [{ name: 'Гость Сегодня' }],
+}) });
+await api('/api/walkin', { method: 'POST', headers: admin, body: JSON.stringify({ action: 'confirm', pay_code: tOrder.j?.pay_code, provider: 'transfer' }) });
+const tToken = (tOrder.j?.tickets?.[0]?.url || '').split('/t/')[1] || '';
+await door.goto(`${B}/s/${tToken}`, { waitUntil: 'load' });
+await door.waitForSelector('#do-checkin', { timeout: 10000 });
+step('дверь по ключу двери: проходка на эту ночь — зелёный экран', /Проходит/.test(await door.textContent('#stage')), tonightId || JSON.stringify(tonight.j).slice(0, 80));
+await door.click('#do-checkin');
+await door.waitForFunction(() => document.querySelector('#stage')?.textContent.includes('Впущен'), null, { timeout: 10000 });
+step('чек-ин прошёл', true);
 
 step('нет ошибок JS', errors.length === 0, errors.join(' | ').slice(0, 200));
 await browser.close();

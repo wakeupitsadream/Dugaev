@@ -15,7 +15,7 @@ import { roleOf, staffName } from './_lib/auth.js';
 import { notifyOwner } from './_lib/tg.js';
 import { normalizePayCode, isOrderId, deliverTickets, tellGuest, siteOrigin } from './_lib/booking.js';
 import {
-  ORDER_SQL, CHECKIN_SQL, NEXT_WAVE_SQL, CONFIRM_SQL, CANCEL_SQL, VOID_SQL, RENAME_SQL,
+  ORDER_SQL, CHECKIN_SQL, NEXT_WAVE_SQL, CONFIRM_SQL, CANCEL_SQL, VOID_SQL, RENAME_SQL, CLOSE_EXPIRED_SQL,
 } from './_lib/queries.js';
 
 const rowsOf = (r) => r.rows || r;
@@ -191,9 +191,15 @@ async function cancel(req, res, b, by) {
   const oid = String(b.order_id || '');
   if (!isOrderId(oid)) return fail(res, 400, 'validation', 'Некорректный номер брони');
   const o = rowsOf(await q(db(), CANCEL_SQL, [oid]))[0];
-  if (!o) return fail(res, 409, 'not_pending', 'Отменить можно только неоплаченную бронь');
+  if (!o) {
+    // сгоревшая бронь с «Я перевёл»: перевода нет — закрываем, места уже свободны
+    const x = rowsOf(await q(db(), CLOSE_EXPIRED_SQL, [oid]))[0];
+    if (!x) return fail(res, 409, 'not_pending', 'Отменить можно только неоплаченную бронь');
+    await tellGuest(x.tg_chat_id, 'Перевод по сгоревшей брони не нашли, бронь закрыта. Если деньги списались — напиши сюда, разберёмся.');
+    return ok(res, { order_id: oid, cancelled: true, was: 'expired' });
+  }
   await notifyOwner(`✖ Бронь ${oid} отменена (${by}) — места возвращены в продажу`);
-  await tellGuest(o.tg_chat_id, 'Бронь отменена, места вернулись в продажу. Если это ошибка — напиши нам в директ.');
+  await tellGuest(o.tg_chat_id, 'Бронь отменена, места вернулись в продажу. Если это ошибка — напиши сюда.');
   ok(res, { order_id: oid, cancelled: true });
 }
 

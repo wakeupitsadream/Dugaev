@@ -63,15 +63,25 @@ test('renderPage: мета-теги заменены, canonical, JSON-LD и да
 });
 
 test('GET /api/events?page=…: ночи нет в базе — страница из сида, неизвестный id — обычная страница', async () => {
+  // база не ответила (таблиц нет) — страница из сида, но в CDN её не кладём:
+  // иначе превью и гости 10 минут видели бы запасные данные
   const r = res();
   await events({ method: 'GET', query: { page: 'px-260926' }, headers: {} }, r);
   assert.equal(r.code, 200);
   assert.match(r.headers['Content-Type'], /text\/html/);
-  assert.match(r.headers['Cache-Control'], /s-maxage=120/);
+  assert.equal(r.headers['Cache-Control'], 'no-store');
   assert.match(r.sent, /<title>PROJECT X — БЕСПЛАТНЫЙ БАР · 26 сентября/);
+  // база ответила, ночи в ней нет — та же страница из сида, её можно кэшировать
+  const { db, ensureSchema } = await import('../api/_lib/db.js');
+  await ensureSchema(db());
+  const c = res();
+  await events({ method: 'GET', query: { page: 'px-260926' }, headers: {} }, c);
+  assert.match(c.headers['Cache-Control'], /s-maxage=120/);
+  assert.match(c.sent, /<title>PROJECT X — БЕСПЛАТНЫЙ БАР · 26 сентября/);
   const u = res();
   await events({ method: 'GET', query: { page: 'нет-такой' }, headers: {} }, u);
   assert.equal(u.code, 200);
+  assert.equal(u.headers['Cache-Control'], 'no-store', '«не найдена» не кэшируем — ночь могут вот-вот опубликовать');
   assert.ok(!/id="ev-data"/.test(u.sent));
 });
 

@@ -6,7 +6,9 @@ import { isDoor } from './_lib/auth.js';
 import { db, hasDb, withTimeout } from './_lib/db.js';
 import { ok, fail, noStore, onlyMethod } from './_lib/respond.js';
 import { normalizeManualId } from '../assets/ticket-format.js';
-import { CHECKIN_SQL } from './_lib/queries.js';
+import { CHECKIN_SQL, nightCheck } from './_lib/queries.js';
+
+const rowsOf = (r) => (r && r.rows) || r || [];
 
 export default async function handler(req, res) {
   noStore(res);
@@ -42,6 +44,20 @@ export default async function handler(req, res) {
 
   try {
     const sql = db();
+    // проходка на другую ночь (прошлую или будущую) — не отмечаем без явного
+    // «всё равно впустить» (force): зелёный экран по чужой дате — дыра на входе
+    if (b.force !== true) {
+      const ev = rowsOf(await withTimeout(sql.query(
+        `SELECT e.title, e.starts_at, e.ends_at FROM tickets t JOIN events e ON e.id = t.event_id WHERE t.id = $1`, [id]
+      ), 5000))[0];
+      const night = ev ? nightCheck(ev.starts_at, ev.ends_at, at ? Date.parse(at) : Date.now()) : 'ok';
+      if (night !== 'ok') {
+        await logScan(sql, id, 'wrong_night', by);
+        return fail(res, 409, 'wrong_night', `Проходка на другую ночь: «${ev.title}»`, {
+          night, event: { title: ev.title, startsAt: new Date(ev.starts_at).toISOString() },
+        });
+      }
+    }
     const rows = await withTimeout(sql.query(CHECKIN_SQL, [id, at, by]), 5000);
     const r = (rows.rows || rows)[0];
 

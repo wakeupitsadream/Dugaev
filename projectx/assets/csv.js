@@ -4,7 +4,11 @@
 const PROVIDER = { transfer: 'перевод', door: 'на входе', stub: 'демо', card: 'карта' };
 
 function cell(v) {
-  const s = v === null || v === undefined ? '' : String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  // Excel выполняет ячейку, начатую с = + - @, как формулу: имя гостя или
+  // метка ссылки «=HYPERLINK(…)» стали бы ссылкой, а «+7 …» — числом.
+  // Апостроф впереди превращает её в текст и в таблице не виден.
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -18,7 +22,7 @@ function fmtDate(iso, tz = 'Asia/Yekaterinburg') {
   return `${p.day}.${p.month}.${p.year} ${p.hour}:${p.minute}`;
 }
 
-export const ORDER_COLUMNS = ['Дата оплаты', 'Код брони', 'Сумма, ₽', 'Проходок', 'Гость', 'Телефон', 'Способ', 'Подтвердил', 'Источник', 'Заказ'];
+export const ORDER_COLUMNS = ['Дата оплаты', 'Код брони', 'Сумма, ₽', 'Проходок', 'Возвращено проходок', 'Гость', 'Телефон', 'Способ', 'Подтвердил', 'Источник', 'Заказ'];
 
 // orders: [{ paid_at, pay_code, amount_rub, qty, buyer_name, buyer_phone, provider, confirmed_by, src, id }]
 export function ordersCsv(orders, { tz } = {}) {
@@ -29,6 +33,8 @@ export function ordersCsv(orders, { tz } = {}) {
       o.pay_code || '',
       Number(o.amount_rub || 0),
       Number(o.qty || 0),
+      // чек на возвращённые проходки не выбивают (или аннулируют в «Мой налог»)
+      Number(o.refunded || 0),
       o.buyer_name || '',
       o.buyer_phone && o.buyer_phone !== 'касса' ? o.buyer_phone : '',
       PROVIDER[o.provider] || o.provider || '',

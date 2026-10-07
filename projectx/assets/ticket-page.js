@@ -54,22 +54,31 @@ async function init() {
   if (!data) {
     try { data = JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch { data = null; }
   }
+  pollAgain = () => pollStatus(parsed, token, cacheKey);
   render(parsed, data);
   bindActions(parsed, data);
   // Бронь ждёт подтверждения: опрашиваем статус, чтобы проходка «ожила»
-  // сама, без перезагрузки — гость держит экран открытым у входа.
-  if (data?.status === 'reserved') pollStatus(parsed, token, cacheKey);
+  // сама, без перезагрузки — гость держит экран открытым у входа. Сгоревшая
+  // бронь с «Я перевёл» тоже может ожить: владелец подтвердит, если места есть.
+  if (waiting(data)) pollStatus(parsed, token, cacheKey);
 }
 
+let pollAgain = () => {};
+const waiting = (t) => t?.status === 'reserved' || (t?.status === 'expired' && Boolean(t.order?.claimedAt));
+let polling = false;
+
 function pollStatus(parsed, token, cacheKey) {
+  if (polling) return;
+  polling = true;
   let stopped = false;
   const tick = async () => {
     if (stopped || document.hidden) return schedule();
     try {
       const r = await fetch(`/api/ticket?token=${encodeURIComponent(token)}`);
       const j = await r.json().catch(() => null);
-      if (j?.ok && j.ticket && j.ticket.status !== 'reserved') {
+      if (j?.ok && j.ticket && !waiting(j.ticket)) {
         stopped = true;
+        polling = false;
         const data = { ...j.ticket, bot: j.bot || null };
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch { /* ignore */ }
         render(parsed, data);
@@ -115,10 +124,27 @@ function render(parsed, t) {
       pay.hidden = false;
       bindPayBlock(t.order, { onClaimed: (at) => { t.order.claimedAt = at; } });
     } else if (dead) {
-      pay.innerHTML =
-        `<div class="pay-box"><div class="pay-kicker">${t.status === 'cancelled' ? 'Бронь отменена' : 'Бронь сгорела'}</div>` +
-        `<p class="pay-note">Оплата не была подтверждена вовремя, места вернулись в продажу. Если ты переводил деньги — напиши нам в директ со скрином.</p>` +
-        `<a class="btn btn-acid btn-block" href="/e/${esc(t.event.id)}">Забронировать заново</a></div>`;
+      const again = `<a class="btn btn-ghost btn-block" href="/e/${esc(t.event.id)}">Забронировать заново</a>`;
+      const help = SITE.telegramUrl
+        ? ` <a href="${esc(SITE.telegramUrl)}" target="_blank" rel="noopener">Напиши боту PROJECT X</a> и приложи скрин перевода — разберёмся.`
+        : '';
+      if (t.status === 'cancelled') {
+        pay.innerHTML =
+          `<div class="pay-box"><div class="pay-kicker">Бронь отменена</div>` +
+          `<p class="pay-note">Перевод по этой брони не нашли, места вернулись в продажу.${help || ' Если ты переводил деньги — напиши нам со скрином перевода.'}</p>${again}</div>`;
+      } else if (t.order?.claimedAt) {
+        pay.innerHTML =
+          `<div class="pay-box is-claimed"><div class="pay-kicker">Ждём подтверждение</div>` +
+          `<p class="pay-note">Срок брони вышел, но ты сообщил о переводе — организатор проверит. Если места остались, проходка оживёт прямо здесь; если нет — с тобой свяжутся.</p>${again}</div>`;
+      } else {
+        // перевод мог прийти позже срока: «Я перевёл» работает и здесь
+        pay.innerHTML =
+          `<div class="pay-box" id="pay-box"><div class="pay-kicker">Бронь сгорела</div>` +
+          `<p class="pay-note">Срок брони вышел, места вернулись в продажу. Уже перевёл деньги? Нажми «Я перевёл» — организатор проверит: если места остались, проходка оживёт здесь же.</p>` +
+          `<button class="btn btn-acid btn-block" id="pay-claim" type="button">Я перевёл</button>` +
+          `<div class="pay-status hidden" id="pay-status"></div>${again}</div>`;
+        bindPayBlock(t.order, { onClaimed: (at) => { t.order.claimedAt = at; pollAgain(); } });
+      }
       pay.hidden = false;
     } else {
       pay.hidden = true;

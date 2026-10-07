@@ -49,6 +49,9 @@ export async function show(params) {
   ed.analysis = null;
   if (ed.localPoster) URL.revokeObjectURL(ed.localPoster);
   ed.localPoster = null;
+  // афиша прошлой ночи ещё грузится — её ответ не должен попасть в эту форму
+  ed.uploadSeq++;
+  ed.uploading = 0;
 
   if (params.mode === 'edit' || params.mode === 'copy') {
     let ev = nightById(params.id);
@@ -293,7 +296,9 @@ async function uploadPoster(file) {
   const seq = ++ed.uploadSeq;
   if (ed.localPoster) URL.revokeObjectURL(ed.localPoster);
   ed.localPoster = URL.createObjectURL(file);
-  ed.uploading++;
+  // счётчик — по последней загрузке: ответ устаревшей не должен ни ставить
+  // афишу, ни навсегда оставлять «афиша ещё загружается»
+  ed.uploading = 1;
   $('ed-poster-note').textContent = 'Загружаю афишу…';
   renderPoster();
   renderPreview();
@@ -307,8 +312,8 @@ async function uploadPoster(file) {
   const r = data
     ? await api('/api/poster', { method: 'POST', body: { data }, timeout: 45000 })
     : { ok: false, message: 'не получилось открыть картинку — попробуй JPG или PNG' };
-  ed.uploading--;
-  if (seq !== ed.uploadSeq) return; // пока грузили, выбрали другую
+  if (seq !== ed.uploadSeq) return; // пока грузили, выбрали другую или открыли другую ночь
+  ed.uploading = 0;
   if (!r.ok) {
     URL.revokeObjectURL(ed.localPoster);
     ed.localPoster = null;
@@ -326,6 +331,7 @@ async function uploadPoster(file) {
 
 function removePoster() {
   ed.uploadSeq++;
+  ed.uploading = 0;
   if (ed.localPoster) URL.revokeObjectURL(ed.localPoster);
   ed.localPoster = null;
   ed.f.posterUrl = '';
@@ -663,8 +669,11 @@ async function save(status, btn) {
     return false;
   }
   const id = r.j.event_id;
-  await reloadEvents();
-  const ev = nightById(id);
+  // список не перечитался (сеть мигнула) — форму оставляем как отправили:
+  // старые данные из кэша выглядели бы как пропавшая правка, а повторное
+  // сохранение затёрло бы её на сервере
+  const fresh = await reloadEvents();
+  const ev = fresh.ok ? nightById(id) : null;
   ed.mode = 'edit';
   ed.id = id;
   ed.status = ev ? ev.status : status;

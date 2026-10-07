@@ -116,12 +116,19 @@ export async function placeOrder(sql, input, { nowMs = Date.now() } = {}) {
   }
 
   if (priceRub === null || created !== qty) {
-    // волна распродана (или мест меньше, чем просят) — предлагаем следующую цену
-    const nextWave = await nextWaveOf(sql, eventId);
+    // волна распродана (или мест меньше, чем просят) — предлагаем первую
+    // волну, где хватит мест на всю компанию: «следующая» без учёта
+    // количества возвращала ту же волну, и бронь упиралась в 409 по кругу
+    const nextWave = await nextWaveFor(sql, eventId, qty);
+    const maxOne = nextWave ? qty : (await seatsLeft(sql, eventId)).maxOne;
     return {
       ok: false, status: 409, error: 'wave_sold_out',
-      message: nextWave ? 'Эта волна закончилась — есть следующая' : 'Все проходки проданы',
-      extra: { next_wave: nextWave },
+      message: nextWave
+        ? 'Эта волна закончилась — есть следующая'
+        : maxOne > 0
+          ? `Одной бронью сейчас можно взять до ${maxOne} — уменьши количество или раздели компанию на две брони`
+          : 'Все проходки проданы',
+      extra: { next_wave: nextWave, max_one: maxOne },
     };
   }
 

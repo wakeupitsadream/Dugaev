@@ -4,6 +4,7 @@
 import { SITE } from './data/config.js';
 import { initChrome, observeReveal } from './chrome.js';
 import { esc } from './events-load.js';
+import { consentNeeded, consentState, showConsent } from './consent.js';
 
 initChrome();
 observeReveal();
@@ -48,8 +49,20 @@ document.querySelectorAll('[data-legal-updated]').forEach((el) => {
 });
 document.querySelectorAll('[data-retention]').forEach((el) => { el.textContent = String(L.retentionMonths || 12); });
 
-// Метрика: честный статус
-const on = Boolean(Number(SITE.metrikaId));
+// Метрика: честный статус и выбор гостя — поменять можно здесь же
+const on = consentNeeded();
 document.querySelectorAll('[data-metrika-status]').forEach((el) => {
-  el.textContent = on ? 'сейчас включена' : 'сейчас выключена';
+  el.textContent = on ? 'включается только с твоего согласия' : 'сейчас выключена';
 });
+const ctl = document.querySelector('[data-consent-ctl]');
+if (ctl && on) {
+  const now = ctl.querySelector('[data-consent-now]');
+  const paint = () => {
+    const st = consentState();
+    now.textContent = st === 'yes' ? 'статистика разрешена' : st === 'no' ? 'статистика запрещена' : 'не выбрано';
+  };
+  paint();
+  ctl.hidden = false;
+  ctl.querySelector('[data-consent-change]').addEventListener('click', showConsent);
+  document.addEventListener('px:consent', paint);
+}

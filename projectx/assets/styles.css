@@ -379,6 +379,26 @@ body::after {
 .sticky-cta .btn { width: 100%; box-shadow: 0 8px 34px rgba(229, 26, 32, 0.22); }
 @media (max-width: 760px) { .sticky-cta { display: block; } }
 
+/* ---------- Согласие на cookie Метрики ---------- */
+.consent {
+  position: fixed; z-index: 75; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+  max-width: 440px; margin-inline: auto;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  opacity: 0; transform: translateY(16px);
+  transition: opacity 260ms var(--ease-out), transform 300ms var(--ease-out);
+}
+.consent.is-in { opacity: 1; transform: none; }
+.consent p { font-size: 0.86rem; line-height: 1.45; color: var(--muted); margin: 0 0 12px; }
+.consent p a { color: var(--text); }
+.consent-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.consent-acts .btn { min-height: 44px; padding: 10px 14px; }
+/* на телефоне — над липкой кнопкой брони, не поверх неё */
+@media (max-width: 760px) { body:has(.sticky-cta.is-on) .consent { bottom: calc(82px + env(safe-area-inset-bottom)); } }
+@media (min-width: 761px) { .consent { left: 24px; right: auto; bottom: 24px; margin: 0; } }
+@media (prefers-reduced-motion: reduce) { .consent { transform: none; transition: opacity 200ms ease; } }
+.consent-ctl .btn { min-height: 40px; padding: 8px 16px; margin: 6px 0; vertical-align: middle; }
+
 /* ============================================================
    Страница ивента + чекаут-шторка
    ============================================================ */

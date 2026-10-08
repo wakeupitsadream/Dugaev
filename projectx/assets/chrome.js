@@ -1,6 +1,7 @@
 // Общая обвязка витрины: шапка, меню на телефоне, появление блоков по скроллу.
 // Одна и та же для главной и страниц второго уровня.
 import { initMetrika } from './metrika.js';
+import { initConsent } from './consent.js';
 import { SITE } from './data/config.js';
 
 const $ = (id) => document.getElementById(id);
@@ -10,7 +11,8 @@ export function closeMenu() { closeMenuFn(); }
 
 export function initChrome() {
   rememberSource();
-  initMetrika();
+  // Метрика — только с согласия гостя (152-ФЗ): плашка спросит один раз
+  initConsent({ onAccept: initMetrika });
   initHeader();
   initMenu();
   markCurrentNav();
